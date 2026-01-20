@@ -13,15 +13,41 @@ serve(async (req) => {
 
   try {
     // ============================================
-    // WEBHOOK SIGNATURE VALIDATION (optional)
+    // WEBHOOK SIGNATURE VALIDATION (mandatory if configured)
     // ============================================
     const webhookSecret = Deno.env.get('WEBHOOK_SECRET');
     if (webhookSecret) {
       const signature = req.headers.get('x-webhook-signature') || req.headers.get('x-signature');
       if (!signature) {
-        console.warn('Webhook received without signature, but WEBHOOK_SECRET is configured');
+        console.error('Webhook rejected: missing signature');
+        return new Response(JSON.stringify({ error: 'Missing signature' }), {
+          status: 403,
+          headers: corsHeaders,
+        });
       }
-      // Add signature validation here if provider supports it
+      
+      // HMAC-SHA256 signature validation
+      const encoder = new TextEncoder();
+      const bodyBytes = await req.clone().arrayBuffer();
+      const key = await crypto.subtle.importKey(
+        'raw',
+        encoder.encode(webhookSecret),
+        { name: 'HMAC', hash: 'SHA-256' },
+        false,
+        ['sign']
+      );
+      const signatureBytes = await crypto.subtle.sign('HMAC', key, bodyBytes);
+      const expectedSignature = Array.from(new Uint8Array(signatureBytes))
+        .map(b => b.toString(16).padStart(2, '0'))
+        .join('');
+      
+      if (signature !== expectedSignature) {
+        console.error('Webhook rejected: invalid signature');
+        return new Response(JSON.stringify({ error: 'Invalid signature' }), {
+          status: 403,
+          headers: corsHeaders,
+        });
+      }
     }
 
     // ============================================
@@ -207,7 +233,7 @@ serve(async (req) => {
           provider: 'messaging',
           updated_at: new Date().toISOString(),
         }, {
-          onConflict: 'account_id',
+          onConflict: 'workspace_id,account_id',
         });
 
       if (upsertError) {

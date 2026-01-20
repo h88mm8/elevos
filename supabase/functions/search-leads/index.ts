@@ -33,10 +33,13 @@ serve(async (req) => {
     supabaseClient = supabase;
 
     const token = authHeader.replace('Bearer ', '');
-    const { data: claimsData, error: claimsError } = await supabase.auth.getUser(token);
-    if (claimsError || !claimsData.user) {
+    const { data: claimsData, error: claimsError } = await supabase.auth.getClaims(token);
+    if (claimsError || !claimsData?.claims) {
+      console.error('Auth error:', claimsError);
       return new Response(JSON.stringify({ error: 'Unauthorized' }), { status: 401, headers: corsHeaders });
     }
+
+    const userId = claimsData.claims.sub;
 
     const body = await req.json();
     workspaceId = body.workspaceId;
@@ -54,7 +57,7 @@ serve(async (req) => {
       .from('workspace_members')
       .select('id')
       .eq('workspace_id', workspaceId)
-      .eq('user_id', claimsData.user.id)
+      .eq('user_id', userId)
       .maybeSingle();
 
     if (!member) {

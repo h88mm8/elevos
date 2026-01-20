@@ -22,21 +22,26 @@ import {
   ExternalLink,
   Send,
   Download,
-  RefreshCw
+  RefreshCw,
+  Coins,
+  MapPin
 } from 'lucide-react';
 import { Lead } from '@/types';
+import { useNavigate } from 'react-router-dom';
 
 export default function Leads() {
-  const { currentWorkspace, session } = useAuth();
+  const { currentWorkspace } = useAuth();
   const { leads, isLoading, refetchLeads } = useLeads();
   const { credits, refetchCredits } = useCredits();
   const { toast } = useToast();
+  const navigate = useNavigate();
 
   // Search form state
   const [jobTitle, setJobTitle] = useState('');
   const [company, setCompany] = useState('');
   const [country, setCountry] = useState('');
-  const [fetchCount, setFetchCount] = useState(10);
+  const [location, setLocation] = useState('');
+  const [fetchCount, setFetchCount] = useState(50);
   const [onlyWithEmail, setOnlyWithEmail] = useState(true);
   const [searching, setSearching] = useState(false);
   const [pollingRunId, setPollingRunId] = useState<string | null>(null);
@@ -55,8 +60,9 @@ export default function Leads() {
           workspaceId: currentWorkspace.id,
           filters: {
             job_title: jobTitle || undefined,
-            company: company || undefined,
+            company_domain: company || undefined,
             country: country || undefined,
+            location: location || undefined,
           },
           fetch_count: fetchCount,
           onlyWithEmail,
@@ -64,6 +70,17 @@ export default function Leads() {
       });
 
       if (error) throw error;
+
+      // Check for 402 insufficient credits
+      if (data.error?.includes('Insufficient') || data.error?.includes('créditos')) {
+        toast({
+          title: 'Créditos insuficientes',
+          description: 'Você não tem créditos de leads suficientes para esta busca.',
+          variant: 'destructive',
+        });
+        setSearching(false);
+        return;
+      }
 
       if (data.success && data.runId) {
         setPollingRunId(data.runId);
@@ -73,14 +90,23 @@ export default function Leads() {
         });
         pollForResults(data.runId);
       } else {
-        throw new Error(data.message || 'Erro ao iniciar busca');
+        throw new Error(data.message || data.error || 'Erro ao iniciar busca');
       }
     } catch (error: any) {
-      toast({
-        title: 'Erro na busca',
-        description: error.message || 'Não foi possível buscar leads',
-        variant: 'destructive',
-      });
+      // Handle 402 from edge function
+      if (error.message?.includes('402') || error.message?.includes('créditos')) {
+        toast({
+          title: 'Créditos insuficientes',
+          description: 'Você não tem créditos de leads suficientes para esta busca.',
+          variant: 'destructive',
+        });
+      } else {
+        toast({
+          title: 'Erro na busca',
+          description: error.message || 'Não foi possível buscar leads',
+          variant: 'destructive',
+        });
+      }
       setSearching(false);
     }
   }
@@ -158,6 +184,16 @@ export default function Leads() {
 
       if (error) throw error;
 
+      // Check for 402 insufficient credits
+      if (data.error?.includes('Insufficient') || data.error?.includes('créditos')) {
+        toast({
+          title: 'Créditos insuficientes',
+          description: 'Você não tem créditos de telefone suficientes.',
+          variant: 'destructive',
+        });
+        return;
+      }
+
       if (data.success) {
         refetchLeads();
         refetchCredits();
@@ -167,11 +203,19 @@ export default function Leads() {
         });
       }
     } catch (error: any) {
-      toast({
-        title: 'Erro ao enriquecer',
-        description: error.message,
-        variant: 'destructive',
-      });
+      if (error.message?.includes('402') || error.message?.includes('créditos')) {
+        toast({
+          title: 'Créditos insuficientes',
+          description: 'Você não tem créditos de telefone suficientes.',
+          variant: 'destructive',
+        });
+      } else {
+        toast({
+          title: 'Erro ao enriquecer',
+          description: error.message,
+          variant: 'destructive',
+        });
+      }
     } finally {
       setEnrichingLeads(prev => {
         const next = new Set(prev);
@@ -222,9 +266,16 @@ export default function Leads() {
     URL.revokeObjectURL(url);
   }
 
+  function handleCreateCampaign() {
+    // Navigate to campaigns with selected leads
+    const selectedIds = Array.from(selectedLeads);
+    navigate('/campaigns', { state: { selectedLeadIds: selectedIds } });
+  }
+
   return (
     <AppLayout>
       <div className="space-y-6">
+        {/* Header with credits */}
         <div className="flex items-center justify-between">
           <div>
             <h1 className="text-3xl font-bold">Leads</h1>
@@ -232,13 +283,40 @@ export default function Leads() {
               Busque e gerencie seus leads
             </p>
           </div>
-          <div className="flex items-center gap-2 text-sm text-muted-foreground">
-            <Users className="h-4 w-4" />
-            <span>{credits?.leads_credits || 0} créditos</span>
-            <Phone className="h-4 w-4 ml-2" />
-            <span>{credits?.phone_credits || 0} créditos</span>
+          <div className="flex gap-3">
+            <Card className="px-4 py-2">
+              <div className="flex items-center gap-2">
+                <Users className="h-4 w-4 text-primary" />
+                <div className="text-sm">
+                  <span className="font-semibold">{credits?.leads_credits || 0}</span>
+                  <span className="text-muted-foreground ml-1">Leads</span>
+                </div>
+              </div>
+            </Card>
+            <Card className="px-4 py-2">
+              <div className="flex items-center gap-2">
+                <Phone className="h-4 w-4 text-primary" />
+                <div className="text-sm">
+                  <span className="font-semibold">{credits?.phone_credits || 0}</span>
+                  <span className="text-muted-foreground ml-1">Phone</span>
+                </div>
+              </div>
+            </Card>
           </div>
         </div>
+
+        {/* Active Search Banner */}
+        {searching && (
+          <div className="bg-primary/10 border border-primary/20 rounded-lg p-4 flex items-center gap-3">
+            <Loader2 className="h-5 w-5 animate-spin text-primary" />
+            <div>
+              <p className="font-medium">Buscando leads...</p>
+              <p className="text-sm text-muted-foreground">
+                Isso pode levar alguns segundos. Não feche esta página.
+              </p>
+            </div>
+          </div>
+        )}
 
         {/* Search Form */}
         <Card>
@@ -249,7 +327,7 @@ export default function Leads() {
             </CardDescription>
           </CardHeader>
           <CardContent>
-            <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+            <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-5">
               <div className="space-y-2">
                 <Label htmlFor="jobTitle">Cargo</Label>
                 <Input
@@ -257,24 +335,37 @@ export default function Leads() {
                   placeholder="Ex: CEO, CTO, Diretor"
                   value={jobTitle}
                   onChange={(e) => setJobTitle(e.target.value)}
+                  disabled={searching}
                 />
               </div>
               <div className="space-y-2">
-                <Label htmlFor="company">Empresa</Label>
+                <Label htmlFor="company">Empresa / Domínio</Label>
                 <Input
                   id="company"
-                  placeholder="Nome da empresa"
+                  placeholder="Ex: empresa.com"
                   value={company}
                   onChange={(e) => setCompany(e.target.value)}
+                  disabled={searching}
                 />
               </div>
               <div className="space-y-2">
                 <Label htmlFor="country">País</Label>
                 <Input
                   id="country"
-                  placeholder="Ex: Brasil"
+                  placeholder="Ex: Brazil"
                   value={country}
                   onChange={(e) => setCountry(e.target.value)}
+                  disabled={searching}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="location">Localização</Label>
+                <Input
+                  id="location"
+                  placeholder="Ex: São Paulo"
+                  value={location}
+                  onChange={(e) => setLocation(e.target.value)}
+                  disabled={searching}
                 />
               </div>
               <div className="space-y-2">
@@ -285,7 +376,8 @@ export default function Leads() {
                   min={1}
                   max={100}
                   value={fetchCount}
-                  onChange={(e) => setFetchCount(parseInt(e.target.value) || 10)}
+                  onChange={(e) => setFetchCount(parseInt(e.target.value) || 50)}
+                  disabled={searching}
                 />
               </div>
             </div>
@@ -295,8 +387,11 @@ export default function Leads() {
                   id="onlyWithEmail"
                   checked={onlyWithEmail}
                   onCheckedChange={setOnlyWithEmail}
+                  disabled={searching}
                 />
-                <Label htmlFor="onlyWithEmail">Apenas com email válido</Label>
+                <Label htmlFor="onlyWithEmail" className="cursor-pointer">
+                  Apenas com email válido
+                </Label>
               </div>
               <Button onClick={handleSearch} disabled={searching}>
                 {searching ? (
@@ -319,11 +414,9 @@ export default function Leads() {
         <Card>
           <CardHeader>
             <div className="flex items-center justify-between">
-              <div>
+              <div className="flex items-center gap-3">
                 <CardTitle>Seus Leads</CardTitle>
-                <CardDescription>
-                  {leads.length} leads encontrados
-                </CardDescription>
+                <Badge variant="secondary">{leads.length} leads</Badge>
               </div>
               <div className="flex gap-2">
                 {selectedLeads.size > 0 && (
@@ -332,7 +425,7 @@ export default function Leads() {
                       <Download className="mr-2 h-4 w-4" />
                       Exportar ({selectedLeads.size})
                     </Button>
-                    <Button size="sm">
+                    <Button size="sm" onClick={handleCreateCampaign}>
                       <Send className="mr-2 h-4 w-4" />
                       Criar Campanha
                     </Button>
@@ -363,7 +456,7 @@ export default function Leads() {
                   <TableRow>
                     <TableHead className="w-12">
                       <Checkbox
-                        checked={selectedLeads.size === leads.length}
+                        checked={selectedLeads.size === leads.length && leads.length > 0}
                         onCheckedChange={toggleSelectAll}
                       />
                     </TableHead>
@@ -372,6 +465,7 @@ export default function Leads() {
                     <TableHead>Telefone</TableHead>
                     <TableHead>Empresa</TableHead>
                     <TableHead>Cargo</TableHead>
+                    <TableHead>LinkedIn</TableHead>
                     <TableHead className="w-24">Ações</TableHead>
                   </TableRow>
                 </TableHeader>
@@ -387,16 +481,43 @@ export default function Leads() {
                       <TableCell className="font-medium">
                         {lead.full_name || '-'}
                       </TableCell>
-                      <TableCell>{lead.email || '-'}</TableCell>
+                      <TableCell>
+                        {lead.email ? (
+                          <span className="text-sm">{lead.email}</span>
+                        ) : (
+                          <span className="text-muted-foreground">-</span>
+                        )}
+                      </TableCell>
                       <TableCell>
                         {lead.phone ? (
                           <Badge variant="secondary">{lead.phone}</Badge>
                         ) : (
+                          <span className="text-muted-foreground">-</span>
+                        )}
+                      </TableCell>
+                      <TableCell>{lead.company || '-'}</TableCell>
+                      <TableCell>{lead.job_title || '-'}</TableCell>
+                      <TableCell>
+                        {lead.linkedin_url ? (
+                          <a
+                            href={lead.linkedin_url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-primary hover:underline inline-flex items-center gap-1"
+                          >
+                            <ExternalLink className="h-4 w-4" />
+                          </a>
+                        ) : (
+                          <span className="text-muted-foreground">-</span>
+                        )}
+                      </TableCell>
+                      <TableCell>
+                        {!lead.phone && lead.email && (
                           <Button
                             variant="ghost"
                             size="sm"
                             onClick={() => handleEnrichLead(lead)}
-                            disabled={enrichingLeads.has(lead.id) || !lead.email}
+                            disabled={enrichingLeads.has(lead.id)}
                           >
                             {enrichingLeads.has(lead.id) ? (
                               <Loader2 className="h-4 w-4 animate-spin" />
@@ -407,20 +528,6 @@ export default function Leads() {
                               </>
                             )}
                           </Button>
-                        )}
-                      </TableCell>
-                      <TableCell>{lead.company || '-'}</TableCell>
-                      <TableCell>{lead.job_title || '-'}</TableCell>
-                      <TableCell>
-                        {lead.linkedin_url && (
-                          <a
-                            href={lead.linkedin_url}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="text-primary hover:underline"
-                          >
-                            <ExternalLink className="h-4 w-4" />
-                          </a>
                         )}
                       </TableCell>
                     </TableRow>

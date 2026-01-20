@@ -16,9 +16,33 @@ interface WebhookEvent {
     sender_id?: string;
     timestamp?: string;
     attachments?: unknown[];
-    // Account status events
     status?: string;
   };
+}
+
+// Simple HMAC-SHA256 signature validation
+async function validateSignature(body: string, signature: string, secret: string): Promise<boolean> {
+  try {
+    const encoder = new TextEncoder();
+    const key = await crypto.subtle.importKey(
+      'raw',
+      encoder.encode(secret),
+      { name: 'HMAC', hash: 'SHA-256' },
+      false,
+      ['sign']
+    );
+    const signatureBuffer = await crypto.subtle.sign('HMAC', key, encoder.encode(body));
+    const expectedSignature = Array.from(new Uint8Array(signatureBuffer))
+      .map(b => b.toString(16).padStart(2, '0'))
+      .join('');
+    
+    // Compare signatures (case-insensitive)
+    return signature.toLowerCase() === expectedSignature.toLowerCase() ||
+           signature.toLowerCase() === `sha256=${expectedSignature.toLowerCase()}`;
+  } catch (error) {
+    console.error('Signature validation error:', error);
+    return false;
+  }
 }
 
 serve(async (req) => {
@@ -35,20 +59,49 @@ serve(async (req) => {
   }
 
   try {
+    // Read body as text for signature validation
+    const bodyText = await req.text();
+    
+    // ============================================
+    // SIGNATURE VALIDATION: Validate webhook origin
+    // ============================================
+    const WEBHOOK_SECRET = Deno.env.get('WEBHOOK_SECRET');
+    const signature = req.headers.get('x-webhook-signature') || 
+                      req.headers.get('x-signature') ||
+                      req.headers.get('x-hub-signature-256');
+
+    if (WEBHOOK_SECRET) {
+      // Secret is configured - require valid signature
+      if (!signature) {
+        console.warn('Webhook rejected: Missing signature header');
+        return new Response(JSON.stringify({ 
+          error: 'Forbidden: Missing webhook signature' 
+        }), { status: 403, headers: corsHeaders });
+      }
+
+      const isValid = await validateSignature(bodyText, signature, WEBHOOK_SECRET);
+      if (!isValid) {
+        console.warn('Webhook rejected: Invalid signature');
+        return new Response(JSON.stringify({ 
+          error: 'Forbidden: Invalid webhook signature' 
+        }), { status: 403, headers: corsHeaders });
+      }
+      
+      console.log('Webhook signature validated successfully');
+    } else {
+      // No secret configured - log warning but allow (insecure mode)
+      console.warn('⚠️ INSECURE MODE: WEBHOOK_SECRET not configured. Webhook signature validation disabled.');
+    }
+
+    // Parse body
+    const body = JSON.parse(bodyText);
+    console.log('Webhook received:', JSON.stringify(body).slice(0, 500));
+
     // Use service role for webhook operations (no user auth)
     const supabase = createClient(
       Deno.env.get('SUPABASE_URL')!,
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
     );
-
-    // Optional: Validate webhook signature
-    const signature = req.headers.get('x-webhook-signature');
-    // TODO: Implement signature validation if provider supports it
-    // const expectedSignature = computeHmac(body, secret);
-    // if (signature !== expectedSignature) { return 401 }
-
-    const body = await req.json();
-    console.log('Webhook received:', JSON.stringify(body).slice(0, 500));
 
     // Handle different event formats
     const events: WebhookEvent[] = Array.isArray(body) ? body : [body];
@@ -79,7 +132,7 @@ serve(async (req) => {
               continue;
             }
 
-            // Insert message
+            // Insert message (audit log - UI continues reading from provider API)
             const { error: insertError } = await supabase
               .from('messages')
               .insert({

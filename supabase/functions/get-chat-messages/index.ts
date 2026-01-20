@@ -50,38 +50,38 @@ serve(async (req) => {
     }
 
     // ============================================
-    // CALL UNIPILE API: Get chat messages
+    // CALL MESSAGING PROVIDER API: Get chat messages
     // ============================================
-    const UNIPILE_DSN = Deno.env.get('UNIPILE_DSN');
-    const UNIPILE_API_KEY = Deno.env.get('UNIPILE_API_KEY');
+    const PROVIDER_DSN = Deno.env.get('UNIPILE_DSN');
+    const PROVIDER_API_KEY = Deno.env.get('UNIPILE_API_KEY');
 
-    if (!UNIPILE_DSN || !UNIPILE_API_KEY) {
-      console.log('Unipile not configured, returning empty messages');
+    if (!PROVIDER_DSN || !PROVIDER_API_KEY) {
+      console.log('Messaging provider not configured, returning empty messages');
       return new Response(JSON.stringify({
         success: true,
         messages: [],
-        message: 'Unipile integration not configured',
+        message: 'Messaging service not configured',
       }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
     }
 
-    let url = `https://${UNIPILE_DSN}/api/v1/chats/${chatId}/messages?limit=${limit}`;
+    let url = `https://${PROVIDER_DSN}/api/v1/chats/${chatId}/messages?limit=${limit}`;
     if (before) {
       url += `&before=${before}`;
     }
 
-    const unipileResponse = await fetch(url, {
+    const providerResponse = await fetch(url, {
       method: 'GET',
       headers: {
-        'X-API-KEY': UNIPILE_API_KEY,
+        'X-API-KEY': PROVIDER_API_KEY,
         'accept': 'application/json',
       },
     });
 
-    if (!unipileResponse.ok) {
-      const errorText = await unipileResponse.text();
-      console.error('Unipile API error:', unipileResponse.status, errorText);
+    if (!providerResponse.ok) {
+      const errorText = await providerResponse.text();
+      console.error('Provider API error:', providerResponse.status, errorText);
       
-      if (unipileResponse.status === 404) {
+      if (providerResponse.status === 404) {
         return new Response(JSON.stringify({
           success: false,
           error: 'Chat not found',
@@ -89,16 +89,16 @@ serve(async (req) => {
         }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
       }
       
-      throw new Error(`Unipile API error: ${unipileResponse.status}`);
+      throw new Error(`Provider API error: ${providerResponse.status}`);
     }
 
-    const unipileData = await unipileResponse.json();
-    console.log(`Retrieved ${unipileData.items?.length || 0} messages from chat ${chatId}`);
+    const providerData = await providerResponse.json();
+    console.log(`Retrieved ${providerData.items?.length || 0} messages from chat ${chatId}`);
 
     return new Response(JSON.stringify({
       success: true,
-      messages: unipileData.items || [],
-      cursor: unipileData.cursor,
+      messages: providerData.items || [],
+      cursor: providerData.cursor,
     }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
 
   } catch (err) {

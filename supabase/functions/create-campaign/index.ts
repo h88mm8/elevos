@@ -47,7 +47,7 @@ serve(async (req) => {
     }
 
     // ============================================
-    // MEMBERSHIP CHECK: Verify user belongs to workspace
+    // MEMBERSHIP CHECK: Explicit verification via workspace_members table
     // ============================================
     const { data: member } = await supabase
       .from('workspace_members')
@@ -79,59 +79,82 @@ serve(async (req) => {
     console.log(`Creating campaign with ${validLeads.length} valid leads (${leads.length} total provided)`);
 
     // ============================================
-    // BATCH UPSERT LEADS: Create or update leads in database
+    // BATCH UPSERT LEADS: Single batch operation using unique index (workspace_id, email)
+    // Separate leads with email (can upsert) from those without (simple insert)
     // ============================================
-    const leadsToUpsert = validLeads.map((lead: LeadInput) => ({
-      id: lead.id, // Keep existing ID if provided
-      workspace_id: workspaceId,
-      email: lead.email || null,
-      phone: lead.phone || null,
-      linkedin_url: lead.linkedin_url || null,
-      full_name: lead.full_name || null,
-      company: lead.company || null,
-      job_title: lead.job_title || null,
-      country: lead.country || null,
-    }));
+    const leadsWithEmail = validLeads.filter((lead: LeadInput) => lead.email);
+    const leadsWithoutEmail = validLeads.filter((lead: LeadInput) => !lead.email && !lead.id);
+    const leadsWithExistingIds = validLeads.filter((lead: LeadInput) => lead.id);
 
-    // Get or create lead IDs
-    let leadIds: string[] = [];
-    
-    // First, get IDs for leads that already have them
-    const existingIds = validLeads
-      .filter((lead: LeadInput) => lead.id)
-      .map((lead: LeadInput) => lead.id as string);
-    
-    // For leads without IDs, we need to insert/upsert them
-    const leadsWithoutIds = leadsToUpsert.filter(lead => !lead.id);
-    
-    if (leadsWithoutIds.length > 0) {
+    let allLeadIds: string[] = [];
+
+    // 1. Collect existing IDs from leads that already have them
+    const existingIds = leadsWithExistingIds.map((lead: LeadInput) => lead.id as string);
+    allLeadIds = [...existingIds];
+
+    // 2. BATCH UPSERT: Leads with email using unique constraint
+    if (leadsWithEmail.length > 0) {
+      const leadsToUpsert = leadsWithEmail.map((lead: LeadInput) => ({
+        workspace_id: workspaceId,
+        email: lead.email,
+        phone: lead.phone || null,
+        linkedin_url: lead.linkedin_url || null,
+        full_name: lead.full_name || null,
+        company: lead.company || null,
+        job_title: lead.job_title || null,
+        country: lead.country || null,
+      }));
+
+      const { data: upsertedLeads, error: upsertError } = await supabase
+        .from('leads')
+        .upsert(leadsToUpsert, {
+          onConflict: 'workspace_id,email',
+          ignoreDuplicates: false,
+        })
+        .select('id');
+
+      if (upsertError) {
+        console.error('Error upserting leads with email:', upsertError);
+        return new Response(JSON.stringify({ error: 'Failed to upsert leads', details: upsertError.message }), { status: 500, headers: corsHeaders });
+      }
+
+      if (upsertedLeads) {
+        allLeadIds = [...allLeadIds, ...upsertedLeads.map(l => l.id)];
+      }
+    }
+
+    // 3. SIMPLE INSERT: Leads without email (no unique constraint)
+    if (leadsWithoutEmail.length > 0) {
+      const leadsToInsert = leadsWithoutEmail.map((lead: LeadInput) => ({
+        workspace_id: workspaceId,
+        email: null,
+        phone: lead.phone || null,
+        linkedin_url: lead.linkedin_url || null,
+        full_name: lead.full_name || null,
+        company: lead.company || null,
+        job_title: lead.job_title || null,
+        country: lead.country || null,
+      }));
+
       const { data: insertedLeads, error: insertError } = await supabase
         .from('leads')
-        .insert(leadsWithoutIds.map(lead => {
-          const { id, ...rest } = lead;
-          return rest;
-        }))
+        .insert(leadsToInsert)
         .select('id');
 
       if (insertError) {
-        console.error('Error inserting leads:', insertError);
-        // Continue with existing IDs only
+        console.error('Error inserting leads without email:', insertError);
+        // Continue - we might still have leads from upsert
       } else if (insertedLeads) {
-        leadIds = [...existingIds, ...insertedLeads.map(l => l.id)];
+        allLeadIds = [...allLeadIds, ...insertedLeads.map(l => l.id)];
       }
-    } else {
-      leadIds = existingIds;
     }
 
-    if (leadIds.length === 0) {
-      // Try to use the IDs from existing leads if available
-      leadIds = validLeads
-        .filter((lead: LeadInput) => lead.id)
-        .map((lead: LeadInput) => lead.id as string);
+    if (allLeadIds.length === 0) {
+      return new Response(JSON.stringify({ error: 'Failed to process any leads' }), { status: 500, headers: corsHeaders });
     }
 
     // ============================================
-    // CREATE CAMPAIGN
+    // CREATE CAMPAIGN: Using correct schema fields (message, subject, account_id)
     // ============================================
     const { data: campaign, error: campaignError } = await supabase
       .from('campaigns')
@@ -139,12 +162,12 @@ serve(async (req) => {
         workspace_id: workspaceId,
         name,
         type,
-        message,
-        subject: type === 'email' ? subject : null,
-        account_id: accountId || null,
+        message,  // Correct field name (not message_template)
+        subject: type === 'email' ? subject : null,  // Include subject
+        account_id: accountId || null,  // Include account_id
         schedule: schedule ? new Date(schedule).toISOString() : null,
         status: schedule ? 'scheduled' : 'draft',
-        leads_count: leadIds.length,
+        leads_count: allLeadIds.length,
       })
       .select()
       .single();
@@ -155,31 +178,29 @@ serve(async (req) => {
     }
 
     // ============================================
-    // CREATE CAMPAIGN_LEADS: Link leads to campaign in batch
+    // BATCH INSERT CAMPAIGN_LEADS: Link all leads to campaign in single operation
     // ============================================
-    if (leadIds.length > 0) {
-      const campaignLeads = leadIds.map(leadId => ({
-        campaign_id: campaign.id,
-        lead_id: leadId,
-        status: 'pending',
-      }));
+    const campaignLeads = allLeadIds.map(leadId => ({
+      campaign_id: campaign.id,
+      lead_id: leadId,
+      status: 'pending',
+    }));
 
-      const { error: linkError } = await supabase
-        .from('campaign_leads')
-        .insert(campaignLeads);
+    const { error: linkError } = await supabase
+      .from('campaign_leads')
+      .insert(campaignLeads);
 
-      if (linkError) {
-        console.error('Error linking leads to campaign:', linkError);
-        // Campaign was created, so we don't fail completely
-      }
+    if (linkError) {
+      console.error('Error linking leads to campaign:', linkError);
+      // Campaign was created, so we don't fail completely but log the issue
     }
 
-    console.log('Campaign created:', { id: campaign.id, leadsCount: leadIds.length });
+    console.log('Campaign created:', { id: campaign.id, leadsCount: allLeadIds.length });
 
     return new Response(JSON.stringify({
       success: true,
       campaign,
-      linkedLeadsCount: leadIds.length,
+      linkedLeadsCount: allLeadIds.length,
     }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
 
   } catch (err) {

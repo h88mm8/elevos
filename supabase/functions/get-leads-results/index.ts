@@ -1,5 +1,5 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
-import { createClient, SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -7,12 +7,12 @@ const corsHeaders = {
 };
 
 interface LeadRecord {
-  full_name: string;
+  full_name: string | null;
   email: string | null;
-  company: string;
-  job_title: string;
-  country: string;
-  linkedin_url: string;
+  company: string | null;
+  job_title: string | null;
+  country: string | null;
+  linkedin_url: string | null;
   workspace_id: string;
 }
 
@@ -62,6 +62,7 @@ serve(async (req) => {
     // ============================================
     // CALL APIFY: Get run status and results
     // NOTE: Credits already debited in search-leads
+    // NO MOCK FALLBACK - return real errors
     // ============================================
     const APIFY_API_TOKEN = Deno.env.get('APIFY_API_TOKEN');
     if (!APIFY_API_TOKEN) {
@@ -73,13 +74,13 @@ serve(async (req) => {
       `https://api.apify.com/v2/actor-runs/${runId}?token=${APIFY_API_TOKEN}`
     );
 
+    // NO MOCK FALLBACK - return real 404 error
     if (!runResponse.ok) {
-      // If run not found, might be a demo/test run - return mock data
-      if (runResponse.status === 404 || runId === 'mock-run-id') {
-        console.log('Run not found or mock run, returning demo data');
-        return getMockResponse(supabase, workspaceId, onlyWithEmail);
-      }
-      throw new Error(`Failed to get run status: ${runResponse.status}`);
+      console.error('Apify run not found:', runId, runResponse.status);
+      return new Response(
+        JSON.stringify({ error: `Apify run not found: ${runId}`, status: runResponse.status }),
+        { status: 404, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
     }
 
     const runData = await runResponse.json();
@@ -108,7 +109,10 @@ serve(async (req) => {
     // If succeeded, get dataset items
     const datasetId = runData.data?.defaultDatasetId;
     if (!datasetId) {
-      throw new Error('No dataset found for this run');
+      return new Response(
+        JSON.stringify({ error: 'No dataset found for this run' }),
+        { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
     }
 
     const datasetResponse = await fetch(
@@ -116,64 +120,80 @@ serve(async (req) => {
     );
 
     if (!datasetResponse.ok) {
-      throw new Error(`Failed to get dataset: ${datasetResponse.status}`);
+      return new Response(
+        JSON.stringify({ error: `Failed to get dataset: ${datasetResponse.status}` }),
+        { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
     }
 
     const datasetItems = await datasetResponse.json();
     console.log(`Retrieved ${datasetItems.length} items from Apify dataset`);
 
     // Transform Apify data to our lead format
-    let leads = datasetItems.map((item: Record<string, unknown>) => ({
-      full_name: (item.fullName || item.name || null) as string | null,
+    let leads: LeadRecord[] = datasetItems.map((item: Record<string, unknown>) => ({
+      full_name: (item.fullName || item.name || item.full_name || null) as string | null,
       email: (item.email || null) as string | null,
       company: (item.companyName || item.company || null) as string | null,
-      job_title: (item.title || item.jobTitle || null) as string | null,
-      linkedin_url: (item.linkedinUrl || item.profileUrl || null) as string | null,
+      job_title: (item.title || item.jobTitle || item.job_title || null) as string | null,
+      linkedin_url: (item.linkedinUrl || item.profileUrl || item.linkedin_url || null) as string | null,
       country: (item.location || item.country || null) as string | null,
       workspace_id: workspaceId,
     }));
 
     // Filter by email if requested
     if (onlyWithEmail) {
-      leads = leads.filter((lead: { email: string | null }) => lead.email);
+      leads = leads.filter((lead) => lead.email);
     }
 
+    // Filter out leads without email (required for unique constraint)
+    const leadsWithEmail = leads.filter((lead) => lead.email);
+    const leadsWithoutEmail = leads.filter((lead) => !lead.email);
+
+    console.log(`Processing ${leadsWithEmail.length} leads with email, ${leadsWithoutEmail.length} without`);
+
+    let insertedLeads: LeadRecord[] = [];
+
     // ============================================
-    // BATCH UPSERT: Insert leads with conflict handling
-    // Using linkedin_url as unique identifier when available
+    // BATCH UPSERT: Leads WITH email using unique index (workspace_id, email)
     // ============================================
-    if (leads.length > 0) {
-      const { data: insertedLeads, error: insertError } = await supabase
+    if (leadsWithEmail.length > 0) {
+      const { data: upsertedLeads, error: upsertError } = await supabase
         .from('leads')
-        .upsert(leads, {
-          onConflict: 'workspace_id,linkedin_url',
+        .upsert(leadsWithEmail, {
+          onConflict: 'workspace_id,email',
           ignoreDuplicates: false,
         })
         .select();
 
-      if (insertError) {
-        console.error('Error upserting leads:', insertError);
-        // Try simple insert if upsert fails (might be missing unique constraint)
-        const { data: simpleInsert, error: simpleError } = await supabase
-          .from('leads')
-          .insert(leads)
-          .select();
-        
-        if (simpleError) {
-          console.error('Simple insert also failed:', simpleError);
-        } else {
-          leads = simpleInsert || leads;
-        }
+      if (upsertError) {
+        console.error('Error upserting leads with email:', upsertError);
+        // Don't fail completely, continue with insert fallback
       } else {
-        leads = insertedLeads || leads;
+        insertedLeads = upsertedLeads || [];
+      }
+    }
+
+    // ============================================
+    // SIMPLE INSERT: Leads WITHOUT email (no unique constraint applies)
+    // ============================================
+    if (leadsWithoutEmail.length > 0) {
+      const { data: insertedNoEmail, error: insertError } = await supabase
+        .from('leads')
+        .insert(leadsWithoutEmail)
+        .select();
+
+      if (insertError) {
+        console.error('Error inserting leads without email:', insertError);
+      } else if (insertedNoEmail) {
+        insertedLeads = [...insertedLeads, ...insertedNoEmail];
       }
     }
 
     return new Response(JSON.stringify({
       success: true,
       status: 'SUCCEEDED',
-      leadsCount: leads.length,
-      leads,
+      leadsCount: insertedLeads.length,
+      leads: insertedLeads,
     }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
 
   } catch (err) {
@@ -182,42 +202,3 @@ serve(async (req) => {
     return new Response(JSON.stringify({ error: error.message }), { status: 500, headers: corsHeaders });
   }
 });
-
-// Helper function for mock/demo data
-async function getMockResponse(
-  // deno-lint-ignore no-explicit-any
-  supabase: SupabaseClient<any, any, any>,
-  workspaceId: string,
-  onlyWithEmail: boolean
-) {
-  const mockLeads: LeadRecord[] = [
-    { full_name: 'João Silva', email: 'joao@empresa.com', company: 'Tech Corp', job_title: 'CEO', country: 'Brasil', linkedin_url: 'https://linkedin.com/in/joaosilva', workspace_id: workspaceId },
-    { full_name: 'Maria Santos', email: 'maria@startup.io', company: 'Startup IO', job_title: 'CTO', country: 'Brasil', linkedin_url: 'https://linkedin.com/in/mariasantos', workspace_id: workspaceId },
-    { full_name: 'Pedro Costa', email: null, company: 'Big Corp', job_title: 'Director', country: 'Portugal', linkedin_url: 'https://linkedin.com/in/pedrocosta', workspace_id: workspaceId },
-  ];
-
-  const leadsToInsert = mockLeads.filter(lead => !onlyWithEmail || lead.email);
-
-  const { data: insertedLeads, error: insertError } = await supabase
-    .from('leads')
-    .insert(leadsToInsert)
-    .select();
-
-  if (insertError) {
-    console.error('Error inserting mock leads:', insertError);
-  }
-
-  return new Response(JSON.stringify({
-    success: true,
-    status: 'SUCCEEDED',
-    leadsCount: leadsToInsert.length,
-    leads: insertedLeads || leadsToInsert,
-    mock: true,
-  }), { 
-    headers: { 
-      'Access-Control-Allow-Origin': '*',
-      'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
-      'Content-Type': 'application/json',
-    } 
-  });
-}

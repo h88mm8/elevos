@@ -57,16 +57,28 @@ serve(async (req) => {
       console.error('Error inserting leads:', insertError);
     }
 
-    // Deduct credits
-    await supabase.rpc('deduct_leads_credits', { 
-      p_workspace_id: workspaceId, 
-      p_amount: mockLeads.length 
-    }).catch(() => {
-      // RPC might not exist, update directly
-      supabase.from('credits').update({ 
-        leads_credits: supabase.sql`leads_credits - ${mockLeads.length}` 
-      }).eq('workspace_id', workspaceId);
-    });
+    // Deduct credits - get current credits first then update
+    const { data: currentCredits } = await supabase
+      .from('credits')
+      .select('leads_credits')
+      .eq('workspace_id', workspaceId)
+      .single();
+
+    if (currentCredits) {
+      await supabase
+        .from('credits')
+        .update({ leads_credits: currentCredits.leads_credits - mockLeads.length })
+        .eq('workspace_id', workspaceId);
+
+      // Log credit usage
+      await supabase.from('credit_history').insert({
+        workspace_id: workspaceId,
+        type: 'lead_search',
+        amount: -mockLeads.length,
+        description: `Busca de ${mockLeads.length} leads`,
+        reference_id: runId,
+      });
+    }
 
     return new Response(JSON.stringify({
       success: true,
@@ -75,7 +87,8 @@ serve(async (req) => {
       leads: insertedLeads || leadsToInsert,
     }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
 
-  } catch (error) {
+  } catch (err) {
+    const error = err as Error;
     console.error('Error in get-leads-results:', error);
     return new Response(JSON.stringify({ error: error.message }), { status: 500, headers: corsHeaders });
   }

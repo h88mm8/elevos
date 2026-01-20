@@ -95,7 +95,8 @@ serve(async (req) => {
       person: apolloData.person,
     }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
 
-  } catch (error) {
+  } catch (err) {
+    const error = err as Error;
     console.error('Error in enrich-lead:', error);
     return new Response(JSON.stringify({ error: error.message }), { status: 500, headers: corsHeaders });
   }

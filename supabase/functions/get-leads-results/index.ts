@@ -85,19 +85,11 @@ serve(async (req) => {
 
     const runData = await runResponse.json();
     const status = runData.data?.status;
+    const stats = runData.data?.stats || {};
 
-    console.log('Apify run status:', { runId, status });
+    console.log('Apify run status:', { runId, status, stats });
 
-    // If still running, return status
-    if (status === 'RUNNING' || status === 'READY') {
-      return new Response(JSON.stringify({
-        success: true,
-        status,
-        message: 'Search still in progress',
-      }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
-    }
-
-    // If failed, return error
+    // If failed, return error immediately
     if (status === 'FAILED' || status === 'ABORTED' || status === 'TIMED-OUT') {
       return new Response(JSON.stringify({
         success: false,
@@ -106,9 +98,26 @@ serve(async (req) => {
       }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
     }
 
-    // If succeeded, get dataset items
+    // ============================================
+    // FETCH DATASET: Even if RUNNING (partial results)
+    // ============================================
     const datasetId = runData.data?.defaultDatasetId;
     if (!datasetId) {
+      // No dataset yet - return progress only
+      if (status === 'RUNNING' || status === 'READY') {
+        return new Response(JSON.stringify({
+          success: true,
+          status,
+          partial: true,
+          message: 'Execução ainda em andamento...',
+          leadsCount: 0,
+          leads: [],
+          progress: {
+            totalItems: stats.totalItems || 0,
+            itemsProcessed: stats.itemsProcessed || 0,
+          },
+        }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+      }
       return new Response(
         JSON.stringify({ error: 'No dataset found for this run' }),
         { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
@@ -143,6 +152,24 @@ serve(async (req) => {
     // Filter by email if requested
     if (onlyWithEmail) {
       leads = leads.filter((lead) => lead.email);
+    }
+
+    const isPartial = status !== 'SUCCEEDED';
+
+    // If partial and no leads yet, return progress
+    if (isPartial && leads.length === 0) {
+      return new Response(JSON.stringify({
+        success: true,
+        status,
+        partial: true,
+        message: 'Execução ainda em andamento...',
+        leadsCount: 0,
+        leads: [],
+        progress: {
+          totalItems: stats.totalItems || 0,
+          itemsProcessed: stats.itemsProcessed || 0,
+        },
+      }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
     }
 
     // Filter out leads without email (required for unique constraint)
@@ -191,9 +218,15 @@ serve(async (req) => {
 
     return new Response(JSON.stringify({
       success: true,
-      status: 'SUCCEEDED',
+      status,
+      partial: isPartial,
+      message: isPartial ? 'Resultados parciais disponíveis' : 'Execução concluída',
       leadsCount: insertedLeads.length,
       leads: insertedLeads,
+      progress: {
+        totalItems: stats.totalItems || 0,
+        itemsProcessed: stats.itemsProcessed || 0,
+      },
     }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
 
   } catch (err) {

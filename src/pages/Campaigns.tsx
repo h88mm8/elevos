@@ -1,7 +1,8 @@
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import { useCampaigns } from '@/hooks/useCampaigns';
 import { useLeads } from '@/hooks/useLeads';
+import { useAccounts } from '@/hooks/useAccounts';
 import AppLayout from '@/components/layout/AppLayout';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -23,7 +24,8 @@ import {
   Mail,
   MessageCircle,
   Linkedin,
-  Calendar
+  Calendar,
+  AlertCircle
 } from 'lucide-react';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
@@ -54,6 +56,7 @@ export default function Campaigns() {
   const { currentWorkspace } = useAuth();
   const { campaigns, isLoading, createCampaign, refetchCampaigns } = useCampaigns();
   const { leads } = useLeads();
+  const { accounts } = useAccounts();
   const { toast } = useToast();
 
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -64,7 +67,23 @@ export default function Campaigns() {
   const [type, setType] = useState<'email' | 'whatsapp' | 'linkedin'>('email');
   const [message, setMessage] = useState('');
   const [subject, setSubject] = useState('');
+  const [selectedAccountId, setSelectedAccountId] = useState<string>('');
   const [selectedLeadIds, setSelectedLeadIds] = useState<Set<string>>(new Set());
+
+  // Filter accounts by campaign type
+  const channelAccounts = useMemo(() => {
+    const channelMap: Record<string, string> = {
+      whatsapp: 'whatsapp',
+      linkedin: 'linkedin',
+      email: 'email',
+    };
+    return accounts.filter(
+      acc => acc.channel === channelMap[type] && acc.status === 'connected'
+    );
+  }, [accounts, type]);
+
+  // Check if account is required (WhatsApp and LinkedIn need an account)
+  const requiresAccount = type === 'whatsapp' || type === 'linkedin';
 
   // Filter leads based on campaign type
   const validLeads = leads.filter(lead => {
@@ -79,7 +98,14 @@ export default function Campaigns() {
     setType('email');
     setMessage('');
     setSubject('');
+    setSelectedAccountId('');
     setSelectedLeadIds(new Set());
+  }
+
+  // Reset account when type changes
+  function handleTypeChange(newType: 'email' | 'whatsapp' | 'linkedin') {
+    setType(newType);
+    setSelectedAccountId('');
   }
 
   async function handleCreateCampaign() {
@@ -87,6 +113,16 @@ export default function Campaigns() {
       toast({
         title: 'Campos obrigatórios',
         description: 'Preencha todos os campos e selecione pelo menos 1 lead.',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    // Validate account selection for WhatsApp/LinkedIn
+    if (requiresAccount && !selectedAccountId) {
+      toast({
+        title: 'Conta obrigatória',
+        description: `Selecione uma conta de ${typeLabels[type]} para enviar a campanha.`,
         variant: 'destructive',
       });
       return;
@@ -103,6 +139,7 @@ export default function Campaigns() {
           type,
           message,
           subject: type === 'email' ? subject : undefined,
+          accountId: selectedAccountId || undefined,
           leads: selectedLeadsData.map(l => ({
             email: l.email,
             full_name: l.full_name,
@@ -189,7 +226,7 @@ export default function Campaigns() {
                   </div>
                   <div className="space-y-2">
                     <Label htmlFor="type">Tipo</Label>
-                    <Select value={type} onValueChange={(v: 'email' | 'whatsapp' | 'linkedin') => setType(v)}>
+                    <Select value={type} onValueChange={(v: 'email' | 'whatsapp' | 'linkedin') => handleTypeChange(v)}>
                       <SelectTrigger>
                         <SelectValue />
                       </SelectTrigger>
@@ -216,6 +253,44 @@ export default function Campaigns() {
                     </Select>
                   </div>
                 </div>
+
+                {/* Account selection for WhatsApp/LinkedIn */}
+                {requiresAccount && (
+                  <div className="space-y-2">
+                    <Label htmlFor="account">
+                      Conta de {typeLabels[type]} *
+                    </Label>
+                    {channelAccounts.length === 0 ? (
+                      <div className="flex items-center gap-2 p-3 border rounded-lg bg-muted/50 text-sm text-muted-foreground">
+                        <AlertCircle className="h-4 w-4 text-amber-500" />
+                        <span>
+                          Nenhuma conta de {typeLabels[type]} conectada. 
+                          Vá em Configurações {'>'} Integrações para sincronizar contas.
+                        </span>
+                      </div>
+                    ) : (
+                      <Select value={selectedAccountId} onValueChange={setSelectedAccountId}>
+                        <SelectTrigger>
+                          <SelectValue placeholder="Selecione uma conta..." />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {channelAccounts.map((account) => (
+                            <SelectItem key={account.id} value={account.id}>
+                              <div className="flex items-center gap-2">
+                                {type === 'whatsapp' ? (
+                                  <MessageCircle className="h-4 w-4" />
+                                ) : (
+                                  <Linkedin className="h-4 w-4" />
+                                )}
+                                {account.name || account.account_id.slice(0, 12)}
+                              </div>
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    )}
+                  </div>
+                )}
 
                 {type === 'email' && (
                   <div className="space-y-2">

@@ -32,3 +32,12 @@ verify_jwt = false
 
 [functions.send-message]
 verify_jwt = false
+
+[functions.get-accounts]
+verify_jwt = false
+
+[functions.sync-accounts]
+verify_jwt = false
+
+[functions.webhook-messages]
+verify_jwt = false

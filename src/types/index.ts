@@ -204,3 +204,15 @@ export interface Message {
   text: string;
   timestamp: string;
 }
+
+export interface Account {
+  id: string;
+  workspace_id: string;
+  provider: string;
+  channel: string;
+  account_id: string;
+  name: string | null;
+  status: 'connected' | 'disconnected' | 'error';
+  created_at: string;
+  updated_at: string;
+}

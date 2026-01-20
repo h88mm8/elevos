@@ -264,6 +264,7 @@ serve(async (req) => {
       return {
         id: chat.id || chat.chat_id,
         account_id: chat.account_id,
+        attendee_identifier: phoneNumber, // Used for deduplication
         attendee_name: profile?.displayName || chat.name || formattedPhone || 'Contato',
         attendee_email: null,
         attendee_picture: profile?.profilePicture || null,
@@ -273,11 +274,40 @@ serve(async (req) => {
       };
     });
 
-    console.log(`Mapped ${mappedChats.length} chats with profiles (${cachedMap.size} from cache)`);
+    // ============================================
+    // DEDUPLICATE CHATS BY PHONE NUMBER
+    // Keep only the most recent chat for each unique phone number
+    // ============================================
+    const chatMap = new Map<string, any>();
+    
+    for (const chat of mappedChats) {
+      const key = chat.attendee_identifier || chat.id;
+      const existing = chatMap.get(key);
+      
+      if (!existing) {
+        chatMap.set(key, chat);
+      } else {
+        // Keep the one with the most recent message
+        const existingDate = new Date(existing.last_message_at || 0).getTime();
+        const currentDate = new Date(chat.last_message_at || 0).getTime();
+        
+        if (currentDate > existingDate) {
+          // Merge unread counts when deduplicating
+          chat.unread_count = (chat.unread_count || 0) + (existing.unread_count || 0);
+          chatMap.set(key, chat);
+        } else {
+          existing.unread_count = (existing.unread_count || 0) + (chat.unread_count || 0);
+        }
+      }
+    }
+    
+    const deduplicatedChats = Array.from(chatMap.values());
+
+    console.log(`Mapped ${mappedChats.length} chats, deduplicated to ${deduplicatedChats.length} (${cachedMap.size} profiles from cache)`);
 
     return new Response(JSON.stringify({
       success: true,
-      chats: mappedChats,
+      chats: deduplicatedChats,
       cursor: providerData.cursor,
     }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
 

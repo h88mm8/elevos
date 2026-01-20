@@ -204,6 +204,7 @@ export interface Message {
   sender: 'me' | 'them';
   text: string;
   timestamp: string;
+  status?: 'sending' | 'sent' | 'delivered' | 'read';
 }
 
 export interface Account {

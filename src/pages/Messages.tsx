@@ -21,7 +21,9 @@ import {
   Image,
   FileText,
   Film,
-  Music
+  Music,
+  Check,
+  CheckCheck
 } from 'lucide-react';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
@@ -39,6 +41,24 @@ function getFileIcon(mimeType: string) {
   if (mimeType.startsWith('video/')) return Film;
   if (mimeType.startsWith('audio/')) return Music;
   return FileText;
+}
+
+// Message status indicator component
+function MessageStatus({ status }: { status?: Message['status'] }) {
+  if (!status) return null;
+  
+  switch (status) {
+    case 'sending':
+      return <Loader2 className="h-3 w-3 animate-spin text-primary-foreground/70" />;
+    case 'sent':
+      return <Check className="h-3 w-3 text-primary-foreground/70" />;
+    case 'delivered':
+      return <CheckCheck className="h-3 w-3 text-primary-foreground/70" />;
+    case 'read':
+      return <CheckCheck className="h-3 w-3 text-accent" />;
+    default:
+      return null;
+  }
 }
 
 // Highlight matching text in a message
@@ -305,6 +325,7 @@ export default function Messages() {
       sender: 'me',
       text: messageText || (selectedFile ? `📎 ${selectedFile.name}` : ''),
       timestamp: new Date().toISOString(),
+      status: 'sending',
     };
     setMessages(prev => [...prev, tempMessage]);
 
@@ -355,10 +376,10 @@ export default function Messages() {
 
       if (error) throw error;
 
-      // Replace temp message with real one
+      // Replace temp message with real one (mark as sent)
       setMessages(prev => prev.map(m => 
         m.id === tempMessage.id 
-          ? { ...m, id: data.messageId || m.id }
+          ? { ...m, id: data.messageId || m.id, status: 'sent' as const }
           : m
       ));
     } catch (error: any) {
@@ -639,14 +660,17 @@ export default function Messages() {
                                     : msg.text
                                   }
                                 </p>
-                                <p className={cn(
-                                  'text-xs mt-1',
-                                  msg.sender === 'me' ? 'text-primary-foreground/70' : 'text-muted-foreground'
+                                <div className={cn(
+                                  'flex items-center gap-1 text-xs mt-1',
+                                  msg.sender === 'me' ? 'text-primary-foreground/70 justify-end' : 'text-muted-foreground'
                                 )}>
-                                  {msg.timestamp && !isNaN(new Date(msg.timestamp).getTime())
-                                    ? format(new Date(msg.timestamp), 'HH:mm', { locale: ptBR })
-                                    : '—'}
-                                </p>
+                                  <span>
+                                    {msg.timestamp && !isNaN(new Date(msg.timestamp).getTime())
+                                      ? format(new Date(msg.timestamp), 'HH:mm', { locale: ptBR })
+                                      : '—'}
+                                  </span>
+                                  {msg.sender === 'me' && <MessageStatus status={msg.status} />}
+                                </div>
                               </div>
                             </div>
                           );

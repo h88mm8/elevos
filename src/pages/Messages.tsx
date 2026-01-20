@@ -306,9 +306,19 @@ export default function Messages() {
     }
   }, [currentWorkspace]);
 
+  // Scroll to bottom when new messages arrive (not on initial load - that's handled in fetchMessages)
+  const lastMessageId = messages.length > 0 ? messages[messages.length - 1]?.id : null;
+  const prevLastMessageIdRef = useRef<string | null>(null);
+  
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages.length > 0 && messages[messages.length - 1]?.id]);
+    // Only auto-scroll if we're already at bottom and it's a new message
+    if (lastMessageId && prevLastMessageIdRef.current && lastMessageId !== prevLastMessageIdRef.current) {
+      if (isScrolledToBottom) {
+        messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+      }
+    }
+    prevLastMessageIdRef.current = lastMessageId;
+  }, [lastMessageId, isScrolledToBottom]);
 
   // Cleanup file preview URL
   useEffect(() => {
@@ -370,13 +380,18 @@ export default function Messages() {
         before: beforeCursor,
       });
 
-      const newMessages = data.messages || [];
+      // Messages come from API newest first, but we need oldest first (newest at bottom)
+      const newMessages = (data.messages || []).reverse();
       
       if (beforeCursor) {
-        // Prepend older messages
+        // Prepend older messages (they come newest first, so after reverse they're oldest first)
         setMessages(prev => [...newMessages, ...prev]);
       } else {
         setMessages(newMessages);
+        // Force scroll to bottom after initial load
+        setTimeout(() => {
+          messagesEndRef.current?.scrollIntoView({ behavior: 'auto' });
+        }, 100);
       }
       
       setCursor(data.cursor || null);

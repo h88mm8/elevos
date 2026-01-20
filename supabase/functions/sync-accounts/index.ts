@@ -68,12 +68,12 @@ serve(async (req) => {
     const PROVIDER_API_KEY = Deno.env.get('UNIPILE_API_KEY');
 
     if (!PROVIDER_DSN || !PROVIDER_API_KEY) {
-      console.log('Provider not configured, returning empty accounts');
+      console.log('Messaging provider not configured, returning empty accounts');
       return new Response(JSON.stringify({
         success: true,
         accounts: [],
         synced: 0,
-        message: 'Messaging integration not configured',
+        message: 'Messaging service not configured',
       }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
     }
 

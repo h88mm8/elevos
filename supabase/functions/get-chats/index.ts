@@ -29,7 +29,7 @@ serve(async (req) => {
       return new Response(JSON.stringify({ error: 'Unauthorized' }), { status: 401, headers: corsHeaders });
     }
 
-    const { workspaceId, accountId, limit = 50 } = await req.json();
+    const { workspaceId, accountId, limit = 50, cursor } = await req.json();
 
     if (!workspaceId) {
       return new Response(JSON.stringify({ error: 'workspaceId is required' }), { status: 400, headers: corsHeaders });
@@ -50,56 +50,59 @@ serve(async (req) => {
     }
 
     // ============================================
-    // CALL UNIPILE API: Get chats
+    // CALL MESSAGING PROVIDER API: Get chats
     // ============================================
-    const UNIPILE_DSN = Deno.env.get('UNIPILE_DSN');
-    const UNIPILE_API_KEY = Deno.env.get('UNIPILE_API_KEY');
+    const PROVIDER_DSN = Deno.env.get('UNIPILE_DSN');
+    const PROVIDER_API_KEY = Deno.env.get('UNIPILE_API_KEY');
 
-    if (!UNIPILE_DSN || !UNIPILE_API_KEY) {
-      console.log('Unipile not configured, returning empty chats');
+    if (!PROVIDER_DSN || !PROVIDER_API_KEY) {
+      console.log('Messaging provider not configured, returning empty chats');
       return new Response(JSON.stringify({
         success: true,
         chats: [],
-        message: 'Unipile integration not configured',
+        message: 'Messaging service not configured',
       }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
     }
 
-    let url = `https://${UNIPILE_DSN}/api/v1/chats?limit=${limit}`;
+    let url = `https://${PROVIDER_DSN}/api/v1/chats?limit=${limit}`;
     if (accountId) {
       url += `&account_id=${accountId}`;
     }
+    if (cursor) {
+      url += `&cursor=${cursor}`;
+    }
 
-    const unipileResponse = await fetch(url, {
+    const providerResponse = await fetch(url, {
       method: 'GET',
       headers: {
-        'X-API-KEY': UNIPILE_API_KEY,
+        'X-API-KEY': PROVIDER_API_KEY,
         'accept': 'application/json',
       },
     });
 
-    if (!unipileResponse.ok) {
-      const errorText = await unipileResponse.text();
-      console.error('Unipile API error:', unipileResponse.status, errorText);
+    if (!providerResponse.ok) {
+      const errorText = await providerResponse.text();
+      console.error('Provider API error:', providerResponse.status, errorText);
       
       // Return empty array instead of failing
-      if (unipileResponse.status === 401 || unipileResponse.status === 403) {
+      if (providerResponse.status === 401 || providerResponse.status === 403) {
         return new Response(JSON.stringify({
           success: false,
-          error: 'Unipile authentication failed',
+          error: 'Provider authentication failed',
           chats: [],
         }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
       }
       
-      throw new Error(`Unipile API error: ${unipileResponse.status}`);
+      throw new Error(`Provider API error: ${providerResponse.status}`);
     }
 
-    const unipileData = await unipileResponse.json();
-    console.log(`Retrieved ${unipileData.items?.length || 0} chats from Unipile`);
+    const providerData = await providerResponse.json();
+    console.log(`Retrieved ${providerData.items?.length || 0} chats from provider`);
 
     return new Response(JSON.stringify({
       success: true,
-      chats: unipileData.items || [],
-      cursor: unipileData.cursor,
+      chats: providerData.items || [],
+      cursor: providerData.cursor,
     }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
 
   } catch (err) {

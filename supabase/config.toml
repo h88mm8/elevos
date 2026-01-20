@@ -45,8 +45,8 @@ verify_jwt = false
 [functions.create-qr-session]
 verify_jwt = false
 
-[functions.ws-qr-status]
+[functions.save-account]
 verify_jwt = false
 
-[functions.save-account]
+[functions.webhook-qr-status]
 verify_jwt = false

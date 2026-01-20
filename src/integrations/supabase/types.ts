@@ -480,6 +480,59 @@ export type Database = {
         }
         Relationships: []
       }
+      qr_sessions: {
+        Row: {
+          account_id: string | null
+          account_name: string | null
+          channel: string
+          created_at: string
+          error: string | null
+          expires_at: string
+          id: string
+          qr_code: string | null
+          session_id: string
+          status: string
+          updated_at: string
+          workspace_id: string
+        }
+        Insert: {
+          account_id?: string | null
+          account_name?: string | null
+          channel?: string
+          created_at?: string
+          error?: string | null
+          expires_at: string
+          id?: string
+          qr_code?: string | null
+          session_id: string
+          status?: string
+          updated_at?: string
+          workspace_id: string
+        }
+        Update: {
+          account_id?: string | null
+          account_name?: string | null
+          channel?: string
+          created_at?: string
+          error?: string | null
+          expires_at?: string
+          id?: string
+          qr_code?: string | null
+          session_id?: string
+          status?: string
+          updated_at?: string
+          workspace_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "qr_sessions_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       workspace_invites: {
         Row: {
           accepted_at: string | null

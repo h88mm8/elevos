@@ -178,57 +178,111 @@ serve(async (req) => {
       }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
     }
 
-    // Filter out leads without email (required for unique constraint)
+    // Filter leads by email presence
     const leadsWithEmail = leads.filter((lead) => lead.email);
     const leadsWithoutEmail = leads.filter((lead) => !lead.email);
 
     console.log(`Processing ${leadsWithEmail.length} leads with email, ${leadsWithoutEmail.length} without`);
 
-    let insertedLeads: LeadRecord[] = [];
+    let savedLeads: LeadRecord[] = [];
+    let saveError: string | null = null;
 
     // ============================================
-    // BATCH UPSERT: Leads WITH email using unique index (workspace_id, email)
+    // SMART INSERT: Check for duplicates first, then insert new leads only
     // ============================================
     if (leadsWithEmail.length > 0) {
-      const { data: upsertedLeads, error: upsertError } = await supabase
-        .from('leads')
-        .upsert(leadsWithEmail, {
-          onConflict: 'workspace_id,email',
-          ignoreDuplicates: false,
-        })
-        .select();
+      try {
+        // Get existing emails in this workspace to avoid duplicates
+        const emails = leadsWithEmail.map(l => l.email).filter(Boolean) as string[];
+        const { data: existingLeads } = await supabase
+          .from('leads')
+          .select('email, linkedin_url')
+          .eq('workspace_id', workspaceId)
+          .in('email', emails);
 
-      if (upsertError) {
-        console.error('Error upserting leads with email:', upsertError);
-        // Don't fail completely, continue with insert fallback
-      } else {
-        insertedLeads = upsertedLeads || [];
+        const existingEmails = new Set((existingLeads || []).map(e => e.email));
+        
+        // Filter only new leads (not already in database)
+        const newLeads = leadsWithEmail.filter(l => l.email && !existingEmails.has(l.email));
+        
+        console.log(`Found ${existingEmails.size} existing leads, ${newLeads.length} new leads to insert`);
+
+        if (newLeads.length > 0) {
+          const { data: inserted, error: insertError } = await supabase
+            .from('leads')
+            .insert(newLeads)
+            .select();
+
+          if (insertError) {
+            console.error('Error inserting new leads:', insertError);
+            saveError = insertError.message;
+          } else if (inserted) {
+            savedLeads = inserted;
+            console.log(`Successfully inserted ${inserted.length} new leads`);
+          }
+        }
+      } catch (err) {
+        console.error('Error in lead deduplication:', err);
+        saveError = (err as Error).message;
       }
     }
 
     // ============================================
-    // SIMPLE INSERT: Leads WITHOUT email (no unique constraint applies)
+    // INSERT: Leads WITHOUT email (check linkedin_url for duplicates)
     // ============================================
     if (leadsWithoutEmail.length > 0) {
-      const { data: insertedNoEmail, error: insertError } = await supabase
-        .from('leads')
-        .insert(leadsWithoutEmail)
-        .select();
+      try {
+        // Get existing linkedin_urls to avoid duplicates
+        const linkedinUrls = leadsWithoutEmail.map(l => l.linkedin_url).filter(Boolean) as string[];
+        
+        let newLeadsNoEmail = leadsWithoutEmail;
+        
+        if (linkedinUrls.length > 0) {
+          const { data: existingByLinkedin } = await supabase
+            .from('leads')
+            .select('linkedin_url')
+            .eq('workspace_id', workspaceId)
+            .in('linkedin_url', linkedinUrls);
 
-      if (insertError) {
-        console.error('Error inserting leads without email:', insertError);
-      } else if (insertedNoEmail) {
-        insertedLeads = [...insertedLeads, ...insertedNoEmail];
+          const existingLinkedins = new Set((existingByLinkedin || []).map(e => e.linkedin_url));
+          newLeadsNoEmail = leadsWithoutEmail.filter(l => !l.linkedin_url || !existingLinkedins.has(l.linkedin_url));
+        }
+
+        if (newLeadsNoEmail.length > 0) {
+          const { data: insertedNoEmail, error: insertError } = await supabase
+            .from('leads')
+            .insert(newLeadsNoEmail)
+            .select();
+
+          if (insertError) {
+            console.error('Error inserting leads without email:', insertError);
+          } else if (insertedNoEmail) {
+            savedLeads = [...savedLeads, ...insertedNoEmail];
+            console.log(`Successfully inserted ${insertedNoEmail.length} leads without email`);
+          }
+        }
+      } catch (err) {
+        console.error('Error inserting leads without email:', err);
       }
     }
+
+    // ============================================
+    // RESPONSE: Return ALL processed leads, even if save failed
+    // This ensures UI shows results even on DB errors
+    // ============================================
+    const responseLeads = savedLeads.length > 0 ? savedLeads : leads;
+    const responseCount = savedLeads.length > 0 ? savedLeads.length : leads.length;
 
     return new Response(JSON.stringify({
       success: true,
       status,
       partial: isPartial,
       message: isPartial ? 'Resultados parciais disponíveis' : 'Execução concluída',
-      leadsCount: insertedLeads.length,
-      leads: insertedLeads,
+      leadsCount: responseCount,
+      leads: responseLeads,
+      savedCount: savedLeads.length,
+      totalProcessed: leads.length,
+      warning: saveError ? `Alguns leads podem não ter sido salvos: ${saveError}` : undefined,
       progress: {
         totalItems: stats.totalItems || 0,
         itemsProcessed: stats.itemsProcessed || 0,

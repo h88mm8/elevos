@@ -1,4 +1,5 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -10,8 +11,99 @@ serve(async (req) => {
     return new Response(null, { headers: corsHeaders });
   }
 
-  return new Response(JSON.stringify({
-    success: true,
-    messages: [],
-  }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+  try {
+    const authHeader = req.headers.get('Authorization');
+    if (!authHeader?.startsWith('Bearer ')) {
+      return new Response(JSON.stringify({ error: 'Unauthorized' }), { status: 401, headers: corsHeaders });
+    }
+
+    const supabase = createClient(
+      Deno.env.get('SUPABASE_URL')!,
+      Deno.env.get('SUPABASE_ANON_KEY')!,
+      { global: { headers: { Authorization: authHeader } } }
+    );
+
+    const token = authHeader.replace('Bearer ', '');
+    const { data: claimsData, error: claimsError } = await supabase.auth.getUser(token);
+    if (claimsError || !claimsData.user) {
+      return new Response(JSON.stringify({ error: 'Unauthorized' }), { status: 401, headers: corsHeaders });
+    }
+
+    const { workspaceId, chatId, limit = 50, before } = await req.json();
+
+    if (!workspaceId || !chatId) {
+      return new Response(JSON.stringify({ error: 'workspaceId and chatId are required' }), { status: 400, headers: corsHeaders });
+    }
+
+    // ============================================
+    // MEMBERSHIP CHECK: Verify user belongs to workspace
+    // ============================================
+    const { data: member } = await supabase
+      .from('workspace_members')
+      .select('id')
+      .eq('workspace_id', workspaceId)
+      .eq('user_id', claimsData.user.id)
+      .maybeSingle();
+
+    if (!member) {
+      return new Response(JSON.stringify({ error: 'Not a member of this workspace' }), { status: 403, headers: corsHeaders });
+    }
+
+    // ============================================
+    // CALL UNIPILE API: Get chat messages
+    // ============================================
+    const UNIPILE_DSN = Deno.env.get('UNIPILE_DSN');
+    const UNIPILE_API_KEY = Deno.env.get('UNIPILE_API_KEY');
+
+    if (!UNIPILE_DSN || !UNIPILE_API_KEY) {
+      console.log('Unipile not configured, returning empty messages');
+      return new Response(JSON.stringify({
+        success: true,
+        messages: [],
+        message: 'Unipile integration not configured',
+      }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+    }
+
+    let url = `https://${UNIPILE_DSN}/api/v1/chats/${chatId}/messages?limit=${limit}`;
+    if (before) {
+      url += `&before=${before}`;
+    }
+
+    const unipileResponse = await fetch(url, {
+      method: 'GET',
+      headers: {
+        'X-API-KEY': UNIPILE_API_KEY,
+        'accept': 'application/json',
+      },
+    });
+
+    if (!unipileResponse.ok) {
+      const errorText = await unipileResponse.text();
+      console.error('Unipile API error:', unipileResponse.status, errorText);
+      
+      if (unipileResponse.status === 404) {
+        return new Response(JSON.stringify({
+          success: false,
+          error: 'Chat not found',
+          messages: [],
+        }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+      }
+      
+      throw new Error(`Unipile API error: ${unipileResponse.status}`);
+    }
+
+    const unipileData = await unipileResponse.json();
+    console.log(`Retrieved ${unipileData.items?.length || 0} messages from chat ${chatId}`);
+
+    return new Response(JSON.stringify({
+      success: true,
+      messages: unipileData.items || [],
+      cursor: unipileData.cursor,
+    }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+
+  } catch (err) {
+    const error = err as Error;
+    console.error('Error in get-chat-messages:', error);
+    return new Response(JSON.stringify({ error: error.message }), { status: 500, headers: corsHeaders });
+  }
 });

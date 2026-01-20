@@ -137,8 +137,8 @@ export default function Messages() {
   }
 
   const filteredChats = chats.filter(chat => 
-    chat.attendee_name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    chat.attendee_email?.toLowerCase().includes(searchQuery.toLowerCase())
+    (chat.attendee_name?.toLowerCase() || '').includes(searchQuery.toLowerCase()) ||
+    (chat.attendee_email?.toLowerCase() || '').includes(searchQuery.toLowerCase())
   );
 
   return (

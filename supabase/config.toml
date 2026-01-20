@@ -42,11 +42,11 @@ verify_jwt = false
 [functions.webhook-messages]
 verify_jwt = false
 
-[functions.create-qr-session]
-verify_jwt = false
-
 [functions.save-account]
 verify_jwt = false
 
 [functions.webhook-account-status]
+verify_jwt = false
+
+[functions.create-connect-link]
 verify_jwt = false

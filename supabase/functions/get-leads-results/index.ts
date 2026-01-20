@@ -74,12 +74,12 @@ serve(async (req) => {
       `https://api.apify.com/v2/actor-runs/${runId}?token=${APIFY_API_TOKEN}`
     );
 
-    // NO MOCK FALLBACK - return real 404 error
+    // Return real Apify status (not hardcoded 404)
     if (!runResponse.ok) {
-      console.error('Apify run not found:', runId, runResponse.status);
+      console.error('Apify run error:', runId, runResponse.status);
       return new Response(
-        JSON.stringify({ error: `Apify run not found: ${runId}`, status: runResponse.status }),
-        { status: 404, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        JSON.stringify({ error: `Apify error: ${runId}`, apifyStatus: runResponse.status }),
+        { status: runResponse.status, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
 

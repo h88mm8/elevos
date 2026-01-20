@@ -123,25 +123,32 @@ serve(async (req) => {
       apifyInput.company_domain = Array.isArray(domain) ? domain : [domain];
     }
 
-    // contact_location - for region/country/state (array)
-    if (filters?.country || filters?.location) {
-      const location = filters.country || filters.location;
-      apifyInput.contact_location = Array.isArray(location) ? location : [location];
+    // contact_location - for country/region (array)
+    if (filters?.country) {
+      apifyInput.contact_location = Array.isArray(filters.country) 
+        ? filters.country 
+        : [filters.country];
     }
 
-    // contact_city - for specific city (array)
-    if (filters?.city) {
-      apifyInput.contact_city = Array.isArray(filters.city) ? filters.city : [filters.city];
+    // contact_city - for specific city (Localização field in UI)
+    if (filters?.location) {
+      apifyInput.contact_city = Array.isArray(filters.location) 
+        ? filters.location 
+        : [filters.location];
     }
 
-    console.log('Calling Apify actor code_crafter~leads-finder with input:', JSON.stringify(apifyInput));
+    // Log the EXACT payload being sent
+    console.log('=== APIFY PAYLOAD (sent directly, NOT wrapped in input) ===');
+    console.log(JSON.stringify(apifyInput, null, 2));
 
+    // Send payload DIRECTLY to actor (not wrapped in { input: ... })
+    // This ensures fetch_count is respected and not overwritten by actor defaults
     const apifyResponse = await fetch(
       `https://api.apify.com/v2/acts/code_crafter~leads-finder/runs?token=${APIFY_API_TOKEN}`,
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ input: apifyInput }),
+        body: JSON.stringify(apifyInput),
       }
     );
 

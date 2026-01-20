@@ -23,8 +23,6 @@ import {
   Send,
   Download,
   RefreshCw,
-  Coins,
-  MapPin
 } from 'lucide-react';
 import { Lead } from '@/types';
 import { useNavigate } from 'react-router-dom';
@@ -46,6 +44,13 @@ export default function Leads() {
   const [searching, setSearching] = useState(false);
   const [pollingRunId, setPollingRunId] = useState<string | null>(null);
 
+  // Progress state for partial results
+  const [searchProgress, setSearchProgress] = useState({
+    itemsProcessed: 0,
+    totalItems: 0,
+  });
+  const [partialCount, setPartialCount] = useState(0);
+
   // Selection state
   const [selectedLeads, setSelectedLeads] = useState<Set<string>>(new Set());
   const [enrichingLeads, setEnrichingLeads] = useState<Set<string>>(new Set());
@@ -54,6 +59,9 @@ export default function Leads() {
     if (!currentWorkspace) return;
     
     setSearching(true);
+    setSearchProgress({ itemsProcessed: 0, totalItems: 0 });
+    setPartialCount(0);
+    
     try {
       const { data, error } = await supabase.functions.invoke('search-leads', {
         body: {
@@ -119,6 +127,8 @@ export default function Leads() {
       if (attempts >= maxAttempts) {
         setSearching(false);
         setPollingRunId(null);
+        setSearchProgress({ itemsProcessed: 0, totalItems: 0 });
+        setPartialCount(0);
         toast({
           title: 'Timeout',
           description: 'A busca demorou muito. Tente novamente.',
@@ -138,25 +148,44 @@ export default function Leads() {
 
         if (error) throw error;
 
+        // Update progress from response
+        if (data.progress) {
+          setSearchProgress({
+            totalItems: data.progress.totalItems || 0,
+            itemsProcessed: data.progress.itemsProcessed || 0,
+          });
+        }
+
+        // Update partial count and refetch if leads available
+        if (data.leadsCount > 0) {
+          setPartialCount(data.leadsCount);
+          refetchLeads();
+        }
+
         if (data.status === 'SUCCEEDED') {
+          // Search completed - stop polling
           setSearching(false);
           setPollingRunId(null);
+          setSearchProgress({ itemsProcessed: 0, totalItems: 0 });
+          setPartialCount(0);
           refetchLeads();
           refetchCredits();
           toast({
             title: 'Busca concluída',
             description: `${data.leadsCount || 0} leads encontrados`,
           });
-        } else if (data.status === 'FAILED') {
+        } else if (data.status === 'FAILED' || data.status === 'ABORTED') {
           throw new Error('A busca falhou');
         } else {
-          // Still running, poll again
+          // Still running - continue polling
           attempts++;
           setTimeout(poll, 5000);
         }
       } catch (error: any) {
         setSearching(false);
         setPollingRunId(null);
+        setSearchProgress({ itemsProcessed: 0, totalItems: 0 });
+        setPartialCount(0);
         toast({
           title: 'Erro ao buscar resultados',
           description: error.message,
@@ -272,6 +301,10 @@ export default function Leads() {
     navigate('/campaigns', { state: { selectedLeadIds: selectedIds } });
   }
 
+  const progressPercent = searchProgress.totalItems > 0
+    ? Math.min(100, Math.round((searchProgress.itemsProcessed / searchProgress.totalItems) * 100))
+    : 0;
+
   return (
     <AppLayout>
       <div className="space-y-6">
@@ -305,14 +338,35 @@ export default function Leads() {
           </div>
         </div>
 
-        {/* Active Search Banner */}
+        {/* Active Search Banner with Progress */}
         {searching && (
-          <div className="bg-primary/10 border border-primary/20 rounded-lg p-4 flex items-center gap-3">
-            <Loader2 className="h-5 w-5 animate-spin text-primary" />
-            <div>
-              <p className="font-medium">Buscando leads...</p>
-              <p className="text-sm text-muted-foreground">
-                Isso pode levar alguns segundos. Não feche esta página.
+          <div className="bg-primary/10 border border-primary/20 rounded-lg p-4 space-y-3">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <Loader2 className="h-5 w-5 animate-spin text-primary" />
+                <div>
+                  <p className="font-medium">Buscando leads...</p>
+                  <p className="text-sm text-muted-foreground">
+                    {partialCount > 0
+                      ? `${partialCount} leads encontrados até agora`
+                      : 'Aguardando resultados...'}
+                  </p>
+                </div>
+              </div>
+            </div>
+            
+            {/* Progress bar */}
+            <div className="space-y-1">
+              <div className="h-2 w-full rounded-full bg-muted overflow-hidden">
+                <div
+                  className="h-full bg-primary transition-all duration-300"
+                  style={{ width: `${progressPercent}%` }}
+                />
+              </div>
+              <p className="text-xs text-muted-foreground text-right">
+                {searchProgress.totalItems > 0
+                  ? `${searchProgress.itemsProcessed} / ${searchProgress.totalItems} processados`
+                  : 'Estimando progresso...'}
               </p>
             </div>
           </div>
@@ -505,7 +559,8 @@ export default function Leads() {
                             rel="noopener noreferrer"
                             className="text-primary hover:underline inline-flex items-center gap-1"
                           >
-                            <ExternalLink className="h-4 w-4" />
+                            <ExternalLink className="h-3 w-3" />
+                            Perfil
                           </a>
                         ) : (
                           <span className="text-muted-foreground">-</span>
@@ -514,7 +569,7 @@ export default function Leads() {
                       <TableCell>
                         {!lead.phone && lead.email && (
                           <Button
-                            variant="ghost"
+                            variant="outline"
                             size="sm"
                             onClick={() => handleEnrichLead(lead)}
                             disabled={enrichingLeads.has(lead.id)}

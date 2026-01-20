@@ -148,12 +148,18 @@ serve(async (req) => {
     const providerData = await providerResponse.json();
     console.log('Provider response:', JSON.stringify(providerData));
 
-    // Extract QR code and session info
+    // Extract QR code and session info - handle multiple response formats
     const accountId = providerData.account_id || providerData.object?.account_id;
-    const qrCodeString = providerData.qrCodeString || providerData.object?.qrCodeString;
-    const code = providerData.code || providerData.object?.code;
+    
+    // Provider returns QR in checkpoint.qrcode format
+    const qrCode = 
+      providerData.checkpoint?.qrcode ||
+      providerData.qrCodeString || 
+      providerData.object?.qrCodeString ||
+      providerData.code || 
+      providerData.object?.code;
 
-    if (!qrCodeString && !code) {
+    if (!qrCode) {
       console.error('No QR code in provider response:', providerData);
       
       await serviceClient.from('qr_session_logs').insert({
@@ -169,8 +175,7 @@ serve(async (req) => {
       }), { status: 500, headers: corsHeaders });
     }
 
-    // Use qrCodeString (base64) or code (raw string)
-    const qrCode = qrCodeString || code;
+    console.log(`QR code extracted successfully, account_id: ${accountId}`);
 
     // ============================================
     // STORE SESSION IN DATABASE

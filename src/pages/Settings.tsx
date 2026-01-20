@@ -15,6 +15,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { useToast } from '@/hooks/use-toast';
 import { supabase } from '@/integrations/supabase/client';
+import ConnectWhatsAppModal from '@/components/integrations/ConnectWhatsAppModal';
 import { 
   Building2, 
   Users, 
@@ -38,11 +39,12 @@ export default function Settings() {
   const { profile, workspaces, currentWorkspace, setCurrentWorkspace, user } = useAuth();
   const { credits, creditHistory, isLoading: creditsLoading } = useCredits();
   const { members, isLoading: membersLoading, removeMember, updateRole } = useWorkspaceMembers();
-  const { accounts, isLoading: accountsLoading, syncAccounts, isSyncing } = useAccounts();
+  const { accounts, isLoading: accountsLoading, syncAccounts, isSyncing, refetchAccounts } = useAccounts();
   const { toast } = useToast();
 
   const [createWorkspaceOpen, setCreateWorkspaceOpen] = useState(false);
   const [inviteMemberOpen, setInviteMemberOpen] = useState(false);
+  const [connectWhatsAppOpen, setConnectWhatsAppOpen] = useState(false);
   const [newWorkspaceName, setNewWorkspaceName] = useState('');
   const [inviteEmail, setInviteEmail] = useState('');
   const [creating, setCreating] = useState(false);
@@ -441,23 +443,33 @@ export default function Settings() {
                     </CardDescription>
                   </div>
                   {isAdmin && (
-                    <Button 
-                      size="sm" 
-                      onClick={handleSyncAccounts}
-                      disabled={isSyncing}
-                    >
-                      {isSyncing ? (
-                        <>
-                          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                          Sincronizando...
-                        </>
-                      ) : (
-                        <>
-                          <RefreshCw className="mr-2 h-4 w-4" />
-                          Sincronizar Contas
-                        </>
-                      )}
-                    </Button>
+                    <div className="flex items-center gap-2">
+                      <Button 
+                        size="sm" 
+                        onClick={() => setConnectWhatsAppOpen(true)}
+                      >
+                        <Plus className="mr-2 h-4 w-4" />
+                        Conectar WhatsApp
+                      </Button>
+                      <Button 
+                        size="sm" 
+                        variant="outline"
+                        onClick={handleSyncAccounts}
+                        disabled={isSyncing}
+                      >
+                        {isSyncing ? (
+                          <>
+                            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                            Sincronizando...
+                          </>
+                        ) : (
+                          <>
+                            <RefreshCw className="mr-2 h-4 w-4" />
+                            Sincronizar
+                          </>
+                        )}
+                      </Button>
+                    </div>
                   )}
                 </div>
               </CardHeader>
@@ -585,6 +597,12 @@ export default function Settings() {
           </TabsContent>
         </Tabs>
       </div>
+
+      <ConnectWhatsAppModal
+        open={connectWhatsAppOpen}
+        onOpenChange={setConnectWhatsAppOpen}
+        onConnected={refetchAccounts}
+      />
     </AppLayout>
   );
 }

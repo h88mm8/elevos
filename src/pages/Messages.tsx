@@ -109,6 +109,58 @@ export default function Messages() {
   const [messageSearchQuery, setMessageSearchQuery] = useState('');
   const [messageSearchActive, setMessageSearchActive] = useState(false);
   const [currentMatchIndex, setCurrentMatchIndex] = useState(0);
+  
+  // New messages indicator state
+  const [hasNewMessages, setHasNewMessages] = useState(false);
+  const [isScrolledToBottom, setIsScrolledToBottom] = useState(true);
+  const audioContextRef = useRef<AudioContext | null>(null);
+
+  // Play notification sound
+  const playNotificationSound = useCallback(() => {
+    try {
+      if (!audioContextRef.current) {
+        audioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)();
+      }
+      const ctx = audioContextRef.current;
+      
+      // Create a pleasant notification beep
+      const oscillator = ctx.createOscillator();
+      const gainNode = ctx.createGain();
+      
+      oscillator.connect(gainNode);
+      gainNode.connect(ctx.destination);
+      
+      oscillator.frequency.setValueAtTime(880, ctx.currentTime); // A5 note
+      oscillator.type = 'sine';
+      
+      gainNode.gain.setValueAtTime(0.3, ctx.currentTime);
+      gainNode.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.3);
+      
+      oscillator.start(ctx.currentTime);
+      oscillator.stop(ctx.currentTime + 0.3);
+    } catch (e) {
+      // Silently fail if audio is not supported
+      console.warn('Audio notification not supported:', e);
+    }
+  }, []);
+
+  // Track scroll position
+  const handleScroll = useCallback((e: React.UIEvent<HTMLDivElement>) => {
+    const target = e.target as HTMLDivElement;
+    const isAtBottom = target.scrollHeight - target.scrollTop - target.clientHeight < 100;
+    setIsScrolledToBottom(isAtBottom);
+    
+    // Clear new messages indicator when scrolled to bottom
+    if (isAtBottom && hasNewMessages) {
+      setHasNewMessages(false);
+    }
+  }, [hasNewMessages]);
+
+  // Scroll to bottom and clear indicator
+  const scrollToBottom = useCallback(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    setHasNewMessages(false);
+  }, []);
 
   // Find matching messages
   const matchingMessages = useMemo(() => {
@@ -191,6 +243,9 @@ export default function Messages() {
             const chat = chats.find(c => c.id === newMessage.chat_id);
             const senderName = chat?.attendee_name || 'Novo contato';
             
+            // Play notification sound
+            playNotificationSound();
+            
             // Show toast notification
             toast({
               title: senderName,
@@ -224,6 +279,11 @@ export default function Messages() {
                 if (prev.some(m => m.id === mappedMessage.id)) return prev;
                 return [...prev, mappedMessage];
               });
+              
+              // Show new messages indicator if not scrolled to bottom
+              if (!isScrolledToBottom) {
+                setHasNewMessages(true);
+              }
             }
           }
         }
@@ -233,7 +293,7 @@ export default function Messages() {
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [currentWorkspace, chats, selectedChat, toast]);
+  }, [currentWorkspace, chats, selectedChat, toast, isScrolledToBottom, playNotificationSound]);
 
   useEffect(() => {
     if (currentWorkspace) {
@@ -668,8 +728,12 @@ export default function Messages() {
                     </div>
                   )}
                 </CardHeader>
-                <CardContent className="flex-1 overflow-hidden p-0">
-                  <ScrollArea className="h-full p-4" ref={scrollAreaRef}>
+                <CardContent className="flex-1 overflow-hidden p-0 relative">
+                  <ScrollArea 
+                    className="h-full p-4" 
+                    ref={scrollAreaRef}
+                    onScrollCapture={handleScroll}
+                  >
                     {loadingMessages ? (
                       <div className="space-y-4">
                         {[1, 2, 3].map((i) => (
@@ -753,6 +817,18 @@ export default function Messages() {
                       </div>
                     )}
                   </ScrollArea>
+                  
+                  {/* New messages indicator */}
+                  {hasNewMessages && (
+                    <Button
+                      onClick={scrollToBottom}
+                      className="absolute bottom-4 left-1/2 -translate-x-1/2 shadow-lg animate-fade-in"
+                      size="sm"
+                    >
+                      <ChevronDown className="h-4 w-4 mr-2" />
+                      Novas mensagens
+                    </Button>
+                  )}
                 </CardContent>
                 <div className="p-4 border-t space-y-2">
                   {/* File preview */}

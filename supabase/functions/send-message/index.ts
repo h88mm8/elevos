@@ -61,10 +61,28 @@ serve(async (req) => {
     }
 
     // ============================================
+    // VALIDATE ACCOUNT: If accountId provided, verify it belongs to workspace
+    // ============================================
+    if (accountId) {
+      const { data: account } = await supabase
+        .from('accounts')
+        .select('id')
+        .eq('account_id', accountId)
+        .eq('workspace_id', workspaceId)
+        .maybeSingle();
+
+      if (!account) {
+        return new Response(JSON.stringify({ 
+          error: 'Account not found or does not belong to this workspace' 
+        }), { status: 403, headers: corsHeaders });
+      }
+    }
+
+    // ============================================
     // CALL MESSAGING PROVIDER API: Send message
     // ============================================
-    const PROVIDER_DSN = Deno.env.get('UNIPILE_DSN');
-    const PROVIDER_API_KEY = Deno.env.get('UNIPILE_API_KEY');
+    const PROVIDER_DSN = Deno.env.get('MESSAGING_DSN');
+    const PROVIDER_API_KEY = Deno.env.get('MESSAGING_API_KEY');
 
     if (!PROVIDER_DSN || !PROVIDER_API_KEY) {
       console.log('Messaging provider not configured, returning mock response');

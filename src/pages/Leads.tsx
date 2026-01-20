@@ -15,6 +15,7 @@ import { Switch } from '@/components/ui/switch';
 import { useToast } from '@/hooks/use-toast';
 import { supabase } from '@/integrations/supabase/client';
 import { CountrySelect } from '@/components/leads/CountrySelect';
+import { LeadDetailsDrawer } from '@/components/leads/LeadDetailsDrawer';
 import { 
   Search, 
   Phone, 
@@ -24,6 +25,9 @@ import {
   Send,
   Download,
   RefreshCw,
+  Eye,
+  MapPin,
+  Building2,
 } from 'lucide-react';
 import { Lead } from '@/types';
 import { useNavigate } from 'react-router-dom';
@@ -55,6 +59,10 @@ export default function Leads() {
   // Selection state
   const [selectedLeads, setSelectedLeads] = useState<Set<string>>(new Set());
   const [enrichingLeads, setEnrichingLeads] = useState<Set<string>>(new Set());
+
+  // Details drawer state
+  const [selectedLead, setSelectedLead] = useState<Lead | null>(null);
+  const [drawerOpen, setDrawerOpen] = useState(false);
 
   async function handleSearch() {
     if (!currentWorkspace) return;
@@ -289,15 +297,33 @@ export default function Leads() {
   function exportCSV() {
     const selectedData = leads.filter(l => selectedLeads.has(l.id));
     const csv = [
-      ['Nome', 'Email', 'Telefone', 'Empresa', 'Cargo', 'LinkedIn'].join(','),
+      [
+        'Nome', 'Email', 'Email Pessoal', 'Telefone', 'Celular', 'Empresa', 'Cargo', 
+        'Headline', 'Nível', 'Indústria', 'Cidade', 'Estado', 'País', 'Website', 
+        'Tamanho', 'Faturamento', 'LinkedIn', 'LinkedIn Empresa', 'Tecnologias', 'Keywords'
+      ].join(','),
       ...selectedData.map(l => [
         l.full_name || '',
         l.email || '',
+        l.personal_email || '',
         l.phone || '',
+        l.mobile_number || '',
         l.company || '',
         l.job_title || '',
+        l.headline || '',
+        l.seniority_level || '',
+        l.industry || '',
+        l.city || '',
+        l.state || '',
+        l.country || '',
+        l.company_website || '',
+        l.company_size || '',
+        l.company_annual_revenue || '',
         l.linkedin_url || '',
-      ].map(v => `"${v}"`).join(','))
+        l.company_linkedin || '',
+        l.company_technologies || '',
+        l.keywords || '',
+      ].map(v => `"${(v || '').replace(/"/g, '""')}"`).join(','))
     ].join('\n');
 
     const blob = new Blob([csv], { type: 'text/csv' });
@@ -313,6 +339,16 @@ export default function Leads() {
     // Navigate to campaigns with selected leads
     const selectedIds = Array.from(selectedLeads);
     navigate('/campaigns', { state: { selectedLeadIds: selectedIds } });
+  }
+
+  function openLeadDetails(lead: Lead) {
+    setSelectedLead(lead);
+    setDrawerOpen(true);
+  }
+
+  function getLocation(lead: Lead) {
+    const parts = [lead.city, lead.state, lead.country].filter(Boolean);
+    return parts.length > 0 ? parts.join(', ') : null;
   }
 
   const progressPercent = searchProgress.totalItems > 0
@@ -517,94 +553,160 @@ export default function Leads() {
                 <p className="text-sm">Use o formulário acima para buscar leads.</p>
               </div>
             ) : (
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead className="w-12">
-                      <Checkbox
-                        checked={selectedLeads.size === leads.length && leads.length > 0}
-                        onCheckedChange={toggleSelectAll}
-                      />
-                    </TableHead>
-                    <TableHead>Nome</TableHead>
-                    <TableHead>Email</TableHead>
-                    <TableHead>Telefone</TableHead>
-                    <TableHead>Empresa</TableHead>
-                    <TableHead>Cargo</TableHead>
-                    <TableHead>LinkedIn</TableHead>
-                    <TableHead className="w-24">Ações</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {leads.map((lead) => (
-                    <TableRow key={lead.id}>
-                      <TableCell>
+              <div className="overflow-x-auto">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead className="w-12">
                         <Checkbox
-                          checked={selectedLeads.has(lead.id)}
-                          onCheckedChange={() => toggleSelectLead(lead.id)}
+                          checked={selectedLeads.size === leads.length && leads.length > 0}
+                          onCheckedChange={toggleSelectAll}
                         />
-                      </TableCell>
-                      <TableCell className="font-medium">
-                        {lead.full_name || '-'}
-                      </TableCell>
-                      <TableCell>
-                        {lead.email ? (
-                          <span className="text-sm">{lead.email}</span>
-                        ) : (
-                          <span className="text-muted-foreground">-</span>
-                        )}
-                      </TableCell>
-                      <TableCell>
-                        {lead.phone ? (
-                          <Badge variant="secondary">{lead.phone}</Badge>
-                        ) : (
-                          <span className="text-muted-foreground">-</span>
-                        )}
-                      </TableCell>
-                      <TableCell>{lead.company || '-'}</TableCell>
-                      <TableCell>{lead.job_title || '-'}</TableCell>
-                      <TableCell>
-                        {lead.linkedin_url ? (
-                          <a
-                            href={lead.linkedin_url}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="text-primary hover:underline inline-flex items-center gap-1"
-                          >
-                            <ExternalLink className="h-3 w-3" />
-                            Perfil
-                          </a>
-                        ) : (
-                          <span className="text-muted-foreground">-</span>
-                        )}
-                      </TableCell>
-                      <TableCell>
-                        {!lead.phone && lead.email && (
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={() => handleEnrichLead(lead)}
-                            disabled={enrichingLeads.has(lead.id)}
-                          >
-                            {enrichingLeads.has(lead.id) ? (
-                              <Loader2 className="h-4 w-4 animate-spin" />
-                            ) : (
-                              <>
-                                <Phone className="mr-1 h-3 w-3" />
-                                Enriquecer
-                              </>
-                            )}
-                          </Button>
-                        )}
-                      </TableCell>
+                      </TableHead>
+                      <TableHead>Nome</TableHead>
+                      <TableHead>Email</TableHead>
+                      <TableHead>Empresa</TableHead>
+                      <TableHead>Cargo</TableHead>
+                      <TableHead>Localização</TableHead>
+                      <TableHead>Indústria</TableHead>
+                      <TableHead>LinkedIn</TableHead>
+                      <TableHead className="w-32">Ações</TableHead>
                     </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
+                  </TableHeader>
+                  <TableBody>
+                    {leads.map((lead) => (
+                      <TableRow key={lead.id} className="group">
+                        <TableCell>
+                          <Checkbox
+                            checked={selectedLeads.has(lead.id)}
+                            onCheckedChange={() => toggleSelectLead(lead.id)}
+                          />
+                        </TableCell>
+                        <TableCell className="font-medium">
+                          <div className="flex flex-col">
+                            <span>{lead.full_name || '-'}</span>
+                            {lead.headline && (
+                              <span className="text-xs text-muted-foreground truncate max-w-[200px]">
+                                {lead.headline}
+                              </span>
+                            )}
+                          </div>
+                        </TableCell>
+                        <TableCell>
+                          {lead.email ? (
+                            <div className="flex flex-col">
+                              <span className="text-sm">{lead.email}</span>
+                              {lead.phone || lead.mobile_number ? (
+                                <Badge variant="secondary" className="w-fit mt-1 text-xs">
+                                  <Phone className="h-3 w-3 mr-1" />
+                                  {lead.phone || lead.mobile_number}
+                                </Badge>
+                              ) : null}
+                            </div>
+                          ) : (
+                            <span className="text-muted-foreground">-</span>
+                          )}
+                        </TableCell>
+                        <TableCell>
+                          <div className="flex flex-col">
+                            <div className="flex items-center gap-1">
+                              <Building2 className="h-3 w-3 text-muted-foreground" />
+                              <span>{lead.company || '-'}</span>
+                            </div>
+                            {lead.company_size && (
+                              <Badge variant="outline" className="w-fit mt-1 text-xs">
+                                {lead.company_size}
+                              </Badge>
+                            )}
+                          </div>
+                        </TableCell>
+                        <TableCell>
+                          <div className="flex flex-col">
+                            <span>{lead.job_title || '-'}</span>
+                            {lead.seniority_level && (
+                              <Badge variant="secondary" className="w-fit mt-1 text-xs">
+                                {lead.seniority_level}
+                              </Badge>
+                            )}
+                          </div>
+                        </TableCell>
+                        <TableCell>
+                          {getLocation(lead) ? (
+                            <div className="flex items-center gap-1 text-sm">
+                              <MapPin className="h-3 w-3 text-muted-foreground" />
+                              <span className="truncate max-w-[150px]">{getLocation(lead)}</span>
+                            </div>
+                          ) : (
+                            <span className="text-muted-foreground">-</span>
+                          )}
+                        </TableCell>
+                        <TableCell>
+                          {lead.industry ? (
+                            <span className="text-sm">{lead.industry}</span>
+                          ) : (
+                            <span className="text-muted-foreground">-</span>
+                          )}
+                        </TableCell>
+                        <TableCell>
+                          {lead.linkedin_url ? (
+                            <a
+                              href={lead.linkedin_url}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="text-primary hover:underline inline-flex items-center gap-1"
+                            >
+                              <ExternalLink className="h-3 w-3" />
+                              Perfil
+                            </a>
+                          ) : (
+                            <span className="text-muted-foreground">-</span>
+                          )}
+                        </TableCell>
+                        <TableCell>
+                          <div className="flex items-center gap-1">
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => openLeadDetails(lead)}
+                              className="opacity-0 group-hover:opacity-100 transition-opacity"
+                            >
+                              <Eye className="h-4 w-4" />
+                            </Button>
+                            {!lead.phone && !lead.mobile_number && lead.email && (
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={() => handleEnrichLead(lead)}
+                                disabled={enrichingLeads.has(lead.id)}
+                              >
+                                {enrichingLeads.has(lead.id) ? (
+                                  <Loader2 className="h-4 w-4 animate-spin" />
+                                ) : (
+                                  <>
+                                    <Phone className="mr-1 h-3 w-3" />
+                                    Enriquecer
+                                  </>
+                                )}
+                              </Button>
+                            )}
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
             )}
           </CardContent>
         </Card>
       </div>
+
+      {/* Lead Details Drawer */}
+      <LeadDetailsDrawer
+        lead={selectedLead}
+        open={drawerOpen}
+        onOpenChange={setDrawerOpen}
+      />
     </AppLayout>
   );
 }

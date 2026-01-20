@@ -7,12 +7,42 @@ const corsHeaders = {
 };
 
 interface LeadRecord {
+  // Dados pessoais
   full_name: string | null;
+  first_name: string | null;
+  last_name: string | null;
   email: string | null;
-  company: string | null;
-  job_title: string | null;
-  country: string | null;
+  personal_email: string | null;
+  mobile_number: string | null;
   linkedin_url: string | null;
+  phone: string | null;
+  
+  // Cargo e nível
+  job_title: string | null;
+  headline: string | null;
+  seniority_level: string | null;
+  industry: string | null;
+  
+  // Localização
+  city: string | null;
+  state: string | null;
+  country: string | null;
+  
+  // Dados da empresa
+  company: string | null;
+  company_website: string | null;
+  company_domain: string | null;
+  company_linkedin: string | null;
+  company_size: string | null;
+  company_industry: string | null;
+  company_annual_revenue: string | null;
+  company_description: string | null;
+  company_founded_year: number | null;
+  company_phone: string | null;
+  company_address: string | null;
+  keywords: string | null;
+  company_technologies: string | null;
+  
   workspace_id: string;
 }
 
@@ -140,14 +170,44 @@ serve(async (req) => {
     const datasetItems = await datasetResponse.json();
     console.log(`Retrieved ${datasetItems.length} items from Apify dataset`);
 
-    // Transform Apify data to our lead format (using official field names from docs)
+    // Transform Apify data to our lead format (mapping ALL fields from Apify)
     let leads: LeadRecord[] = datasetItems.map((item: Record<string, unknown>) => ({
+      // Dados pessoais
       full_name: (item.full_name || item.fullName || item.name || null) as string | null,
+      first_name: (item.first_name || item.firstName || null) as string | null,
+      last_name: (item.last_name || item.lastName || null) as string | null,
       email: (item.email || null) as string | null,
-      company: (item.company_name || item.companyName || item.company || null) as string | null,
-      job_title: (item.job_title || item.title || item.jobTitle || null) as string | null,
+      personal_email: (item.personal_email || item.personalEmail || null) as string | null,
+      mobile_number: (item.mobile_number || item.mobileNumber || item.phone || null) as string | null,
+      phone: (item.phone || item.mobile_number || null) as string | null,
       linkedin_url: (item.linkedin || item.linkedinUrl || item.profileUrl || null) as string | null,
+      
+      // Cargo e nível
+      job_title: (item.job_title || item.title || item.jobTitle || null) as string | null,
+      headline: (item.headline || null) as string | null,
+      seniority_level: (item.seniority_level || item.seniorityLevel || null) as string | null,
+      industry: (item.industry || null) as string | null,
+      
+      // Localização
+      city: (item.city || null) as string | null,
+      state: (item.state || null) as string | null,
       country: (item.country || item.location || null) as string | null,
+      
+      // Dados da empresa
+      company: (item.company_name || item.companyName || item.company || null) as string | null,
+      company_website: (item.company_website || item.companyWebsite || null) as string | null,
+      company_domain: (item.company_domain || item.companyDomain || null) as string | null,
+      company_linkedin: (item.company_linkedin || item.companyLinkedin || null) as string | null,
+      company_size: (item.company_size || item.companySize || null) as string | null,
+      company_industry: (item.company_industry || item.companyIndustry || null) as string | null,
+      company_annual_revenue: (item.company_annual_revenue || item.companyAnnualRevenue || null) as string | null,
+      company_description: (item.company_description || item.companyDescription || null) as string | null,
+      company_founded_year: (item.company_founded_year || item.companyFoundedYear || null) as number | null,
+      company_phone: (item.company_phone || item.companyPhone || null) as string | null,
+      company_address: (item.company_full_address || item.company_street_address || item.companyAddress || null) as string | null,
+      keywords: (item.keywords || null) as string | null,
+      company_technologies: (item.company_technologies || item.companyTechnologies || null) as string | null,
+      
       workspace_id: workspaceId,
     }));
 

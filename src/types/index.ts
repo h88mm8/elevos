@@ -50,13 +50,43 @@ export interface CreditHistory {
 export interface Lead {
   id: string;
   workspace_id: string;
+  
+  // Dados pessoais
   full_name: string | null;
+  first_name: string | null;
+  last_name: string | null;
   email: string | null;
+  personal_email: string | null;
   phone: string | null;
-  company: string | null;
-  job_title: string | null;
+  mobile_number: string | null;
   linkedin_url: string | null;
+  
+  // Cargo e nível
+  job_title: string | null;
+  headline: string | null;
+  seniority_level: string | null;
+  industry: string | null;
+  
+  // Localização
+  city: string | null;
+  state: string | null;
   country: string | null;
+  
+  // Dados da empresa
+  company: string | null;
+  company_website: string | null;
+  company_domain: string | null;
+  company_linkedin: string | null;
+  company_size: string | null;
+  company_industry: string | null;
+  company_annual_revenue: string | null;
+  company_description: string | null;
+  company_founded_year: number | null;
+  company_phone: string | null;
+  company_address: string | null;
+  keywords: string | null;
+  company_technologies: string | null;
+  
   enriched_at: string | null;
   created_at: string;
   updated_at: string;

@@ -193,44 +193,107 @@ export type Database = {
       }
       leads: {
         Row: {
+          city: string | null
           company: string | null
+          company_address: string | null
+          company_annual_revenue: string | null
+          company_description: string | null
+          company_domain: string | null
+          company_founded_year: number | null
+          company_industry: string | null
+          company_linkedin: string | null
+          company_phone: string | null
+          company_size: string | null
+          company_technologies: string | null
+          company_website: string | null
           country: string | null
           created_at: string
           email: string | null
           enriched_at: string | null
+          first_name: string | null
           full_name: string | null
+          headline: string | null
           id: string
+          industry: string | null
           job_title: string | null
+          keywords: string | null
+          last_name: string | null
           linkedin_url: string | null
+          mobile_number: string | null
+          personal_email: string | null
           phone: string | null
+          seniority_level: string | null
+          state: string | null
           updated_at: string
           workspace_id: string
         }
         Insert: {
+          city?: string | null
           company?: string | null
+          company_address?: string | null
+          company_annual_revenue?: string | null
+          company_description?: string | null
+          company_domain?: string | null
+          company_founded_year?: number | null
+          company_industry?: string | null
+          company_linkedin?: string | null
+          company_phone?: string | null
+          company_size?: string | null
+          company_technologies?: string | null
+          company_website?: string | null
           country?: string | null
           created_at?: string
           email?: string | null
           enriched_at?: string | null
+          first_name?: string | null
           full_name?: string | null
+          headline?: string | null
           id?: string
+          industry?: string | null
           job_title?: string | null
+          keywords?: string | null
+          last_name?: string | null
           linkedin_url?: string | null
+          mobile_number?: string | null
+          personal_email?: string | null
           phone?: string | null
+          seniority_level?: string | null
+          state?: string | null
           updated_at?: string
           workspace_id: string
         }
         Update: {
+          city?: string | null
           company?: string | null
+          company_address?: string | null
+          company_annual_revenue?: string | null
+          company_description?: string | null
+          company_domain?: string | null
+          company_founded_year?: number | null
+          company_industry?: string | null
+          company_linkedin?: string | null
+          company_phone?: string | null
+          company_size?: string | null
+          company_technologies?: string | null
+          company_website?: string | null
           country?: string | null
           created_at?: string
           email?: string | null
           enriched_at?: string | null
+          first_name?: string | null
           full_name?: string | null
+          headline?: string | null
           id?: string
+          industry?: string | null
           job_title?: string | null
+          keywords?: string | null
+          last_name?: string | null
           linkedin_url?: string | null
+          mobile_number?: string | null
+          personal_email?: string | null
           phone?: string | null
+          seniority_level?: string | null
+          state?: string | null
           updated_at?: string
           workspace_id?: string
         }

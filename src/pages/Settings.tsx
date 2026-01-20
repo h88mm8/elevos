@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import { useCredits } from '@/hooks/useCredits';
 import { useWorkspaceMembers } from '@/hooks/useWorkspaceMembers';
@@ -15,7 +15,6 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { useToast } from '@/hooks/use-toast';
 import { supabase } from '@/integrations/supabase/client';
-import ConnectWhatsAppModal from '@/components/integrations/ConnectWhatsAppModal';
 import { 
   Building2, 
   Users, 
@@ -30,7 +29,8 @@ import {
   Linkedin,
   Mail,
   CheckCircle2,
-  XCircle
+  XCircle,
+  ExternalLink
 } from 'lucide-react';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
@@ -44,11 +44,12 @@ export default function Settings() {
 
   const [createWorkspaceOpen, setCreateWorkspaceOpen] = useState(false);
   const [inviteMemberOpen, setInviteMemberOpen] = useState(false);
-  const [connectWhatsAppOpen, setConnectWhatsAppOpen] = useState(false);
   const [newWorkspaceName, setNewWorkspaceName] = useState('');
   const [inviteEmail, setInviteEmail] = useState('');
   const [creating, setCreating] = useState(false);
   const [inviting, setInviting] = useState(false);
+  const [connectingWhatsApp, setConnectingWhatsApp] = useState(false);
+  const [waitingForConnection, setWaitingForConnection] = useState(false);
 
   const currentMember = members.find(m => m.user_id === user?.id);
   const isAdmin = currentMember?.role === 'admin';
@@ -80,6 +81,102 @@ export default function Settings() {
       });
     }
   }
+
+  // ============================================
+  // CONNECT WHATSAPP VIA HOSTED AUTH LINK
+  // ============================================
+  async function handleConnectWhatsApp() {
+    if (!currentWorkspace) return;
+
+    setConnectingWhatsApp(true);
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) {
+        toast({
+          title: 'Sessão expirada',
+          description: 'Faça login novamente.',
+          variant: 'destructive',
+        });
+        return;
+      }
+
+      const response = await supabase.functions.invoke('create-connect-link', {
+        body: { workspaceId: currentWorkspace.id, channel: 'whatsapp' },
+      });
+
+      if (response.error) {
+        throw new Error(response.error.message || 'Erro ao criar link de conexão');
+      }
+
+      const { url } = response.data;
+      if (!url) {
+        throw new Error('URL de conexão não retornada');
+      }
+
+      // Open the hosted auth link in a new tab
+      window.open(url, '_blank');
+
+      // Show waiting state and start polling for new accounts
+      setWaitingForConnection(true);
+      toast({
+        title: 'Link aberto',
+        description: 'Complete a conexão na nova aba. A conta aparecerá automaticamente.',
+      });
+
+      // Poll for new accounts for 2 minutes
+      const pollInterval = setInterval(async () => {
+        await refetchAccounts();
+      }, 5000);
+
+      setTimeout(() => {
+        clearInterval(pollInterval);
+        setWaitingForConnection(false);
+      }, 120000); // Stop polling after 2 minutes
+
+    } catch (error: any) {
+      console.error('Error connecting WhatsApp:', error);
+      toast({
+        title: 'Erro ao conectar',
+        description: error.message,
+        variant: 'destructive',
+      });
+    } finally {
+      setConnectingWhatsApp(false);
+    }
+  }
+
+  // Subscribe to accounts table for realtime updates
+  useEffect(() => {
+    if (!currentWorkspace) return;
+
+    const channel = supabase
+      .channel('accounts-changes')
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'accounts',
+          filter: `workspace_id=eq.${currentWorkspace.id}`,
+        },
+        (payload) => {
+          console.log('Account change detected:', payload);
+          refetchAccounts();
+          if (payload.eventType === 'INSERT' || (payload.eventType === 'UPDATE' && payload.new?.status === 'connected')) {
+            setWaitingForConnection(false);
+            toast({
+              title: 'Conta conectada!',
+              description: 'Uma nova conta foi adicionada com sucesso.',
+            });
+          }
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [currentWorkspace?.id, refetchAccounts, toast]);
 
   async function handleCreateWorkspace() {
     if (!newWorkspaceName.trim()) return;
@@ -446,10 +543,26 @@ export default function Settings() {
                     <div className="flex items-center gap-2">
                       <Button 
                         size="sm" 
-                        onClick={() => setConnectWhatsAppOpen(true)}
+                        onClick={handleConnectWhatsApp}
+                        disabled={connectingWhatsApp || waitingForConnection}
                       >
-                        <Plus className="mr-2 h-4 w-4" />
-                        Conectar WhatsApp
+                        {connectingWhatsApp ? (
+                          <>
+                            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                            Gerando link...
+                          </>
+                        ) : waitingForConnection ? (
+                          <>
+                            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                            Aguardando conexão...
+                          </>
+                        ) : (
+                          <>
+                            <Plus className="mr-2 h-4 w-4" />
+                            Conectar WhatsApp
+                            <ExternalLink className="ml-1 h-3 w-3" />
+                          </>
+                        )}
                       </Button>
                       <Button 
                         size="sm" 
@@ -597,12 +710,6 @@ export default function Settings() {
           </TabsContent>
         </Tabs>
       </div>
-
-      <ConnectWhatsAppModal
-        open={connectWhatsAppOpen}
-        onOpenChange={setConnectWhatsAppOpen}
-        onConnected={refetchAccounts}
-      />
     </AppLayout>
   );
 }

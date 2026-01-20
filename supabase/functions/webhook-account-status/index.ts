@@ -67,33 +67,47 @@ serve(async (req) => {
     // ============================================
     // EXTRACT EVENT DATA
     // ============================================
-    // Provider webhook format: { AccountStatus: { account_id, message, account_type }, reason? }
-    const accountStatusData = payload.AccountStatus || payload.accountStatus || payload;
+    // Provider webhook formats:
+    // 1. QR flow: { AccountStatus: { account_id, message, account_type }, reason? }
+    // 2. Hosted Auth: { event, account_id, name (workspaceId), ... }
+    const accountStatusData = payload.AccountStatus || payload.accountStatus || {};
     const eventData = payload.data || payload.object || payload;
     
-    // Extract account ID from AccountStatus or other fields
+    // Extract account ID from various possible locations
     const accountId = accountStatusData.account_id || eventData.account_id || eventData.id || payload.account_id;
+    
+    // Name field contains the workspaceId in Hosted Auth flow
     const accountName = accountStatusData.name || eventData.name || eventData.display_name || payload.name;
     
-    // Extract status from AccountStatus.message or other fields
+    // Extract status/message from AccountStatus or other fields
     const accountMessage = accountStatusData.message || '';
     const accountStatus = accountMessage || eventData.status || payload.status;
-    const accountType = accountStatusData.account_type || eventData.account_type || 'whatsapp';
+    const accountType = accountStatusData.account_type || eventData.account_type || payload.account_type || 'whatsapp';
     
     // Event type and other fields
     const eventType = payload.event || payload.type || accountMessage;
     const qrCode = eventData.qrCodeString || eventData.qr_code || eventData.qrcode;
     const errorMessage = payload.reason || eventData.error || payload.error;
 
-    console.log(`Event: ${eventType}, Account: ${accountId}, Status: ${accountStatus}, Message: ${accountMessage}`);
+    console.log(`Event: ${eventType}, Account: ${accountId}, Status: ${accountStatus}, Message: ${accountMessage}, Name: ${accountName}`);
 
     // ============================================
-    // FIND THE QR SESSION
+    // DETERMINE WORKSPACE ID
     // ============================================
+    // In Hosted Auth flow, the 'name' field contains the workspaceId
+    // In QR flow, we look up the session
+    let workspaceId: string | null = null;
     let session = null;
 
-    // Try to find by account_id (session_id in our table)
-    if (accountId) {
+    // Check if name is a valid UUID (workspaceId from Hosted Auth)
+    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    if (accountName && uuidRegex.test(accountName)) {
+      workspaceId = accountName;
+      console.log(`Workspace ID from Hosted Auth name: ${workspaceId}`);
+    }
+
+    // Fallback: Try to find by account_id in qr_sessions (legacy QR flow)
+    if (!workspaceId && accountId) {
       const { data } = await serviceClient
         .from('qr_sessions')
         .select('*')
@@ -102,12 +116,19 @@ serve(async (req) => {
         .limit(1);
       
       session = data?.[0];
+      if (session) {
+        workspaceId = session.workspace_id;
+        console.log(`Workspace ID from QR session: ${workspaceId}`);
+      }
     }
 
-    // If not found, try by account name pattern (workspaceId-timestamp)
-    if (!session && accountName && accountName.includes('-')) {
-      const workspaceId = accountName.split('-')[0];
-      if (workspaceId && workspaceId.length === 36) {
+    // Fallback: Try by account name pattern (workspaceId-timestamp)
+    if (!workspaceId && accountName && accountName.includes('-')) {
+      const possibleWorkspaceId = accountName.split('-')[0];
+      if (possibleWorkspaceId && uuidRegex.test(possibleWorkspaceId)) {
+        workspaceId = possibleWorkspaceId;
+        console.log(`Workspace ID from name pattern: ${workspaceId}`);
+        
         const { data } = await serviceClient
           .from('qr_sessions')
           .select('*')
@@ -237,15 +258,24 @@ serve(async (req) => {
     // ============================================
     // SAVE/UPDATE ACCOUNT IF CONNECTED
     // ============================================
-    if (newStatus === 'connected' && session && accountId) {
+    // Now we use workspaceId directly (from Hosted Auth or QR session)
+    if (newStatus === 'connected' && workspaceId && accountId) {
+      // Map account type to channel
+      const channelMap: Record<string, string> = {
+        'WHATSAPP': 'whatsapp',
+        'LINKEDIN': 'linkedin',
+        'MAIL': 'email',
+      };
+      const channel = channelMap[accountType?.toUpperCase()] || session?.channel || 'whatsapp';
+
       const { error: upsertError } = await serviceClient
         .from('accounts')
         .upsert({
           account_id: accountId,
-          workspace_id: session.workspace_id,
-          channel: session.channel || 'whatsapp',
+          workspace_id: workspaceId,
+          channel: channel,
           status: 'connected',
-          name: accountName || `Account ${accountId.slice(0, 8)}`,
+          name: `Account ${accountId.slice(0, 8)}`,
           provider: 'messaging',
           updated_at: new Date().toISOString(),
         }, {
@@ -255,8 +285,10 @@ serve(async (req) => {
       if (upsertError) {
         console.error('Error upserting account:', upsertError);
       } else {
-        console.log(`Account ${accountId} saved/updated successfully`);
+        console.log(`Account ${accountId} saved/updated successfully for workspace ${workspaceId}`);
       }
+    } else if (newStatus === 'connected' && !workspaceId) {
+      console.warn(`Cannot save account ${accountId}: no workspaceId found`);
     }
 
     return new Response(JSON.stringify({

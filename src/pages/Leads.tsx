@@ -143,6 +143,7 @@ export default function Leads() {
             workspaceId: currentWorkspace?.id,
             runId,
             onlyWithEmail,
+            fetchCount, // Pass limit to backend
           },
         });
 
@@ -176,6 +177,18 @@ export default function Leads() {
           });
         } else if (data.status === 'FAILED' || data.status === 'ABORTED') {
           throw new Error('A busca falhou');
+        } else if (data.leadsCount >= fetchCount) {
+          // Reached requested limit - stop even if RUNNING
+          setSearching(false);
+          setPollingRunId(null);
+          setSearchProgress({ itemsProcessed: 0, totalItems: 0 });
+          setPartialCount(0);
+          refetchLeads();
+          refetchCredits();
+          toast({
+            title: 'Busca concluída',
+            description: `${data.leadsCount} leads encontrados (limite atingido)`,
+          });
         } else {
           // Still running - continue polling
           attempts++;

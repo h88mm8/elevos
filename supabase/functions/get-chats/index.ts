@@ -123,18 +123,28 @@ serve(async (req) => {
     }
 
     // Map provider response to our Chat interface
+    // Based on actual Unipile response structure from logs:
+    // {"object":"Chat","name":null,"type":0,"folder":["INBOX"],"pinned":0,"unread":0,
+    //  "archived":0,"read_only":0,"timestamp":"2026-01-20T23:00:44.000Z",
+    //  "account_id":"...","muted_until":null,"provider_id":"...",
+    //  "account_type":"WHATSAPP","unread_count":0,
+    //  "attendee_provider_id":"...","attendee_public_identifier":"556796637769@s.whatsapp.net",
+    //  "id":"nQpbh5msWOm2S11fyOe_uA"}
     const mappedChats = (providerData.items || []).map((chat: any) => {
-      // Unipile returns attendees as an array, get the first non-self attendee
-      const attendee = chat.attendees?.find((a: any) => a.is_self !== true) || chat.attendees?.[0] || {};
+      // Try to get a readable name from various fields
+      const attendeeIdentifier = chat.attendee_public_identifier || chat.attendee_provider_id || '';
+      // Extract phone number from WhatsApp identifier (e.g., "556796637769@s.whatsapp.net" -> "556796637769")
+      const phoneNumber = attendeeIdentifier.split('@')[0] || '';
+      const formattedPhone = phoneNumber ? `+${phoneNumber.slice(0, 2)} ${phoneNumber.slice(2)}` : '';
       
       return {
         id: chat.id || chat.chat_id,
         account_id: chat.account_id,
-        attendee_name: attendee.display_name || attendee.name || chat.name || 'Sem nome',
-        attendee_email: attendee.email || null,
-        last_message: chat.last_message?.text || chat.last_message_text || '',
-        last_message_at: chat.last_message?.date || chat.last_message_date || chat.updated_at || null,
-        unread_count: chat.unread_count || 0,
+        attendee_name: chat.name || formattedPhone || 'Contato',
+        attendee_email: null,
+        last_message: chat.last_message?.text || chat.snippet || '',
+        last_message_at: chat.timestamp || chat.last_message?.date || null,
+        unread_count: chat.unread_count || chat.unread || 0,
       };
     });
 

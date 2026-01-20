@@ -65,8 +65,9 @@ serve(async (req) => {
     }
 
     let url = `https://${PROVIDER_DSN}/api/v1/chats/${chatId}/messages?limit=${limit}`;
+    // Use 'cursor' for pagination (not 'before' which expects ISO datetime)
     if (before) {
-      url += `&before=${before}`;
+      url += `&cursor=${before}`;
     }
 
     const providerResponse = await fetch(url, {
@@ -101,13 +102,31 @@ serve(async (req) => {
     }
 
     // Map provider response to our Message interface
-    const mappedMessages = (providerData.items || []).map((msg: any) => ({
-      id: msg.id || msg.message_id,
-      chat_id: chatId,
-      sender: msg.is_sender || msg.sender_id === 'me' ? 'me' : 'them',
-      text: msg.text || msg.body || msg.content || '',
-      timestamp: msg.date || msg.timestamp || msg.created_at || null,
-    }));
+    // Based on actual Unipile response structure from logs:
+    // {"object":"Message","seen":0,"text":"e vc esta em que area sabia??","edited":0,
+    //  "hidden":0,"chat_id":"...","deleted":0,"seen_by":{},"behavior":0,"is_event":0,
+    //  "original":"{\"key\":{...\"fromMe\":true,...},...}
+    // The "fromMe" field in original.key indicates if the message was sent by us
+    const mappedMessages = (providerData.items || []).map((msg: any) => {
+      // Parse is_sender from the original JSON if available
+      let isSender = false;
+      try {
+        if (msg.original) {
+          const original = typeof msg.original === 'string' ? JSON.parse(msg.original) : msg.original;
+          isSender = original?.key?.fromMe === true;
+        }
+      } catch (e) {
+        // If parsing fails, default to false
+      }
+      
+      return {
+        id: msg.id || msg.message_id,
+        chat_id: chatId,
+        sender: isSender ? 'me' : 'them',
+        text: msg.text || msg.body || msg.content || '',
+        timestamp: msg.date || msg.timestamp || msg.created_at || null,
+      };
+    });
 
     return new Response(JSON.stringify({
       success: true,

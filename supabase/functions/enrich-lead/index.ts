@@ -29,70 +29,115 @@ serve(async (req) => {
       return new Response(JSON.stringify({ error: 'Unauthorized' }), { status: 401, headers: corsHeaders });
     }
 
-    const { workspaceId, email, revealPhone } = await req.json();
+    const { workspaceId, email, leadId, revealPhone } = await req.json();
 
     if (!workspaceId || !email) {
       return new Response(JSON.stringify({ error: 'workspaceId and email are required' }), { status: 400, headers: corsHeaders });
     }
 
-    // Check phone credits
-    const { data: credits } = await supabase
-      .from('credits')
-      .select('phone_credits')
+    // ============================================
+    // MEMBERSHIP CHECK: Verify user belongs to workspace
+    // ============================================
+    const { data: member } = await supabase
+      .from('workspace_members')
+      .select('id')
       .eq('workspace_id', workspaceId)
-      .single();
+      .eq('user_id', claimsData.user.id)
+      .maybeSingle();
 
-    if (!credits || credits.phone_credits < 1) {
-      return new Response(JSON.stringify({ error: 'Insufficient phone credits', code: 402 }), { status: 402, headers: corsHeaders });
+    if (!member) {
+      return new Response(JSON.stringify({ error: 'Not a member of this workspace' }), { status: 403, headers: corsHeaders });
     }
 
-    // Call Apollo API
+    // ============================================
+    // CALL APOLLO API: Enrich lead with phone number
+    // ============================================
     const APOLLO_API_KEY = Deno.env.get('APOLLO_API_KEY');
+    if (!APOLLO_API_KEY) {
+      return new Response(JSON.stringify({ error: 'APOLLO_API_KEY not configured' }), { status: 500, headers: corsHeaders });
+    }
+
     const apolloResponse = await fetch('https://api.apollo.io/v1/people/match', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         'Cache-Control': 'no-cache',
-        'X-Api-Key': APOLLO_API_KEY!,
+        'X-Api-Key': APOLLO_API_KEY,
       },
       body: JSON.stringify({
         email,
-        reveal_phone_number: revealPhone,
+        reveal_phone_number: revealPhone !== false, // Default to true
       }),
     });
 
+    if (!apolloResponse.ok) {
+      const errorText = await apolloResponse.text();
+      throw new Error(`Apollo API error: ${apolloResponse.status} - ${errorText}`);
+    }
+
     const apolloData = await apolloResponse.json();
-    console.log('Apollo response:', apolloData);
+    console.log('Apollo response for:', email);
 
     const phone = apolloData.person?.phone_numbers?.[0]?.sanitized_number || null;
 
+    // ============================================
+    // DEBIT CREDITS: Only if phone was found
+    // Generate unique enrichRequestId per call to avoid collisions
+    // ============================================
     if (phone) {
+      // Generate unique request ID for this enrichment call
+      const enrichRequestId = crypto.randomUUID();
+
+      const { data: debitSuccess, error: debitError } = await supabase.rpc('deduct_credits', {
+        p_workspace_id: workspaceId,
+        p_type: 'phone',
+        p_amount: 1,
+        p_reference_id: enrichRequestId, // MANDATORY: UUID per call (not email to avoid collision)
+        p_description: `Enriquecimento: ${email}`,
+      });
+
+      if (debitError) {
+        console.error('Credit system error:', debitError);
+        return new Response(JSON.stringify({ error: 'Credit system error', details: debitError.message }), { 
+          status: 500, 
+          headers: corsHeaders 
+        });
+      }
+
+      if (!debitSuccess) {
+        return new Response(JSON.stringify({ 
+          error: 'Insufficient phone credits', 
+          code: 'INSUFFICIENT_CREDITS',
+          phone, // Still return the phone so frontend knows it was found
+          message: 'Phone found but no credits to charge',
+        }), { 
+          status: 402, 
+          headers: corsHeaders 
+        });
+      }
+
+      console.log(`Phone credit debited for workspace ${workspaceId}, enrichRequestId: ${enrichRequestId}`);
+
       // Update lead with phone
-      await supabase
+      const updateFilter = leadId 
+        ? { id: leadId }
+        : { workspace_id: workspaceId, email };
+
+      const { error: updateError } = await supabase
         .from('leads')
         .update({ phone, enriched_at: new Date().toISOString() })
-        .eq('workspace_id', workspaceId)
-        .eq('email', email);
+        .match(updateFilter);
 
-      // Deduct credit
-      await supabase
-        .from('credits')
-        .update({ phone_credits: credits.phone_credits - 1 })
-        .eq('workspace_id', workspaceId);
-
-      // Log credit usage
-      await supabase.from('credit_history').insert({
-        workspace_id: workspaceId,
-        type: 'phone_enrich',
-        amount: -1,
-        description: `Enriquecimento: ${email}`,
-      });
+      if (updateError) {
+        console.error('Error updating lead:', updateError);
+      }
     }
 
     return new Response(JSON.stringify({
       success: true,
       phone,
       person: apolloData.person,
+      credited: !!phone, // Whether a credit was charged
     }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
 
   } catch (err) {

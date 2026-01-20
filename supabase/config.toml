@@ -1,1 +1,34 @@
 project_id = "pcqompvgdgufjqibiwdj"
+
+[functions.search-leads]
+verify_jwt = false
+
+[functions.get-leads-results]
+verify_jwt = false
+
+[functions.enrich-lead]
+verify_jwt = false
+
+[functions.create-campaign]
+verify_jwt = false
+
+[functions.get-credits]
+verify_jwt = false
+
+[functions.add-credits]
+verify_jwt = false
+
+[functions.invite-member]
+verify_jwt = false
+
+[functions.accept-invite]
+verify_jwt = false
+
+[functions.get-chats]
+verify_jwt = false
+
+[functions.get-chat-messages]
+verify_jwt = false
+
+[functions.send-message]
+verify_jwt = false

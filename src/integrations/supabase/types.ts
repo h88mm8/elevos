@@ -274,6 +274,47 @@ export type Database = {
         }
         Relationships: []
       }
+      workspace_invites: {
+        Row: {
+          accepted_at: string | null
+          created_at: string
+          email: string
+          id: string
+          role: string
+          status: string
+          token: string
+          workspace_id: string
+        }
+        Insert: {
+          accepted_at?: string | null
+          created_at?: string
+          email: string
+          id?: string
+          role: string
+          status?: string
+          token: string
+          workspace_id: string
+        }
+        Update: {
+          accepted_at?: string | null
+          created_at?: string
+          email?: string
+          id?: string
+          role?: string
+          status?: string
+          token?: string
+          workspace_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "workspace_invites_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       workspace_members: {
         Row: {
           id: string
@@ -335,6 +376,26 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      add_credits: {
+        Args: {
+          p_amount: number
+          p_description?: string
+          p_reference_id?: string
+          p_type: string
+          p_workspace_id: string
+        }
+        Returns: boolean
+      }
+      deduct_credits: {
+        Args: {
+          p_amount: number
+          p_description?: string
+          p_reference_id: string
+          p_type: string
+          p_workspace_id: string
+        }
+        Returns: boolean
+      }
       is_workspace_admin: { Args: { workspace_uuid: string }; Returns: boolean }
       is_workspace_member: {
         Args: { workspace_uuid: string }

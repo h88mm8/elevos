@@ -1,4 +1,5 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -10,8 +11,132 @@ serve(async (req) => {
     return new Response(null, { headers: corsHeaders });
   }
 
-  return new Response(JSON.stringify({
-    success: true,
-    messageId: 'msg-' + Date.now(),
-  }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+  try {
+    const authHeader = req.headers.get('Authorization');
+    if (!authHeader?.startsWith('Bearer ')) {
+      return new Response(JSON.stringify({ error: 'Unauthorized' }), { status: 401, headers: corsHeaders });
+    }
+
+    const supabase = createClient(
+      Deno.env.get('SUPABASE_URL')!,
+      Deno.env.get('SUPABASE_ANON_KEY')!,
+      { global: { headers: { Authorization: authHeader } } }
+    );
+
+    const token = authHeader.replace('Bearer ', '');
+    const { data: claimsData, error: claimsError } = await supabase.auth.getUser(token);
+    if (claimsError || !claimsData.user) {
+      return new Response(JSON.stringify({ error: 'Unauthorized' }), { status: 401, headers: corsHeaders });
+    }
+
+    const { workspaceId, chatId, accountId, attendeesIds, text } = await req.json();
+
+    if (!workspaceId) {
+      return new Response(JSON.stringify({ error: 'workspaceId is required' }), { status: 400, headers: corsHeaders });
+    }
+
+    if (!text) {
+      return new Response(JSON.stringify({ error: 'text is required' }), { status: 400, headers: corsHeaders });
+    }
+
+    // Need either chatId (existing chat) or accountId + attendeesIds (new chat)
+    if (!chatId && (!accountId || !attendeesIds?.length)) {
+      return new Response(JSON.stringify({ 
+        error: 'Either chatId or (accountId + attendeesIds) is required' 
+      }), { status: 400, headers: corsHeaders });
+    }
+
+    // ============================================
+    // MEMBERSHIP CHECK: Verify user belongs to workspace
+    // ============================================
+    const { data: member } = await supabase
+      .from('workspace_members')
+      .select('id')
+      .eq('workspace_id', workspaceId)
+      .eq('user_id', claimsData.user.id)
+      .maybeSingle();
+
+    if (!member) {
+      return new Response(JSON.stringify({ error: 'Not a member of this workspace' }), { status: 403, headers: corsHeaders });
+    }
+
+    // ============================================
+    // CALL UNIPILE API: Send message
+    // ============================================
+    const UNIPILE_DSN = Deno.env.get('UNIPILE_DSN');
+    const UNIPILE_API_KEY = Deno.env.get('UNIPILE_API_KEY');
+
+    if (!UNIPILE_DSN || !UNIPILE_API_KEY) {
+      console.log('Unipile not configured, returning mock response');
+      return new Response(JSON.stringify({
+        success: true,
+        messageId: 'mock-' + crypto.randomUUID(),
+        message: 'Unipile integration not configured',
+      }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+    }
+
+    let url: string;
+    let body: Record<string, unknown>;
+
+    if (chatId) {
+      // Send message to existing chat
+      url = `https://${UNIPILE_DSN}/api/v1/chats/${chatId}/messages`;
+      body = { text };
+    } else {
+      // Create new chat and send message
+      url = `https://${UNIPILE_DSN}/api/v1/chats`;
+      body = {
+        account_id: accountId,
+        attendees_ids: attendeesIds,
+        text,
+      };
+    }
+
+    const unipileResponse = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'X-API-KEY': UNIPILE_API_KEY,
+        'accept': 'application/json',
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(body),
+    });
+
+    if (!unipileResponse.ok) {
+      const errorText = await unipileResponse.text();
+      console.error('Unipile API error:', unipileResponse.status, errorText);
+      
+      if (unipileResponse.status === 404) {
+        return new Response(JSON.stringify({
+          success: false,
+          error: 'Chat not found',
+        }), { status: 404, headers: corsHeaders });
+      }
+      
+      if (unipileResponse.status === 400) {
+        return new Response(JSON.stringify({
+          success: false,
+          error: 'Invalid request to messaging service',
+          details: errorText,
+        }), { status: 400, headers: corsHeaders });
+      }
+      
+      throw new Error(`Unipile API error: ${unipileResponse.status}`);
+    }
+
+    const unipileData = await unipileResponse.json();
+    console.log('Message sent via Unipile:', unipileData);
+
+    return new Response(JSON.stringify({
+      success: true,
+      messageId: unipileData.message_id || unipileData.id,
+      chatId: unipileData.chat_id || chatId,
+      data: unipileData,
+    }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+
+  } catch (err) {
+    const error = err as Error;
+    console.error('Error in send-message:', error);
+    return new Response(JSON.stringify({ error: error.message }), { status: 500, headers: corsHeaders });
+  }
 });

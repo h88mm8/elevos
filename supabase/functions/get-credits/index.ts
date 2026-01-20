@@ -29,7 +29,7 @@ serve(async (req) => {
       return new Response(JSON.stringify({ error: 'Unauthorized' }), { status: 401, headers: corsHeaders });
     }
 
-    const { workspaceId, accountId, limit = 50 } = await req.json();
+    const { workspaceId } = await req.json();
 
     if (!workspaceId) {
       return new Response(JSON.stringify({ error: 'workspaceId is required' }), { status: 400, headers: corsHeaders });
@@ -50,61 +50,29 @@ serve(async (req) => {
     }
 
     // ============================================
-    // CALL UNIPILE API: Get chats
+    // GET CREDITS: Return current credit balance
     // ============================================
-    const UNIPILE_DSN = Deno.env.get('UNIPILE_DSN');
-    const UNIPILE_API_KEY = Deno.env.get('UNIPILE_API_KEY');
+    const { data: credits, error: creditsError } = await supabase
+      .from('credits')
+      .select('leads_credits, phone_credits, updated_at')
+      .eq('workspace_id', workspaceId)
+      .single();
 
-    if (!UNIPILE_DSN || !UNIPILE_API_KEY) {
-      console.log('Unipile not configured, returning empty chats');
-      return new Response(JSON.stringify({
-        success: true,
-        chats: [],
-        message: 'Unipile integration not configured',
-      }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+    if (creditsError) {
+      console.error('Error fetching credits:', creditsError);
+      return new Response(JSON.stringify({ error: 'Failed to fetch credits' }), { status: 500, headers: corsHeaders });
     }
-
-    let url = `https://${UNIPILE_DSN}/api/v1/chats?limit=${limit}`;
-    if (accountId) {
-      url += `&account_id=${accountId}`;
-    }
-
-    const unipileResponse = await fetch(url, {
-      method: 'GET',
-      headers: {
-        'X-API-KEY': UNIPILE_API_KEY,
-        'accept': 'application/json',
-      },
-    });
-
-    if (!unipileResponse.ok) {
-      const errorText = await unipileResponse.text();
-      console.error('Unipile API error:', unipileResponse.status, errorText);
-      
-      // Return empty array instead of failing
-      if (unipileResponse.status === 401 || unipileResponse.status === 403) {
-        return new Response(JSON.stringify({
-          success: false,
-          error: 'Unipile authentication failed',
-          chats: [],
-        }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
-      }
-      
-      throw new Error(`Unipile API error: ${unipileResponse.status}`);
-    }
-
-    const unipileData = await unipileResponse.json();
-    console.log(`Retrieved ${unipileData.items?.length || 0} chats from Unipile`);
 
     return new Response(JSON.stringify({
       success: true,
-      chats: unipileData.items || [],
-      cursor: unipileData.cursor,
+      leads_credits: credits?.leads_credits ?? 0,
+      phone_credits: credits?.phone_credits ?? 0,
+      updated_at: credits?.updated_at,
     }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
 
   } catch (err) {
     const error = err as Error;
-    console.error('Error in get-chats:', error);
+    console.error('Error in get-credits:', error);
     return new Response(JSON.stringify({ error: error.message }), { status: 500, headers: corsHeaders });
   }
 });

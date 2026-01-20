@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import AppLayout from '@/components/layout/AppLayout';
 import { Button } from '@/components/ui/button';
@@ -15,6 +15,7 @@ import {
   User,
   Search,
   ChevronUp,
+  ChevronDown,
   Paperclip,
   X,
   Image,
@@ -40,6 +41,22 @@ function getFileIcon(mimeType: string) {
   return FileText;
 }
 
+// Highlight matching text in a message
+function highlightText(text: string, query: string): React.ReactNode {
+  if (!query.trim()) return text;
+  
+  const regex = new RegExp(`(${query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`, 'gi');
+  const parts = text.split(regex);
+  
+  return parts.map((part, i) => 
+    regex.test(part) ? (
+      <mark key={i} className="bg-accent text-accent-foreground rounded px-0.5">
+        {part}
+      </mark>
+    ) : part
+  );
+}
+
 export default function Messages() {
   const { currentWorkspace } = useAuth();
   const { toast } = useToast();
@@ -47,6 +64,7 @@ export default function Messages() {
   const messagesTopRef = useRef<HTMLDivElement>(null);
   const scrollAreaRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const messageRefs = useRef<Map<string, HTMLDivElement>>(new Map());
 
   const [chats, setChats] = useState<Chat[]>([]);
   const [selectedChat, setSelectedChat] = useState<Chat | null>(null);
@@ -66,6 +84,41 @@ export default function Messages() {
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [filePreview, setFilePreview] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
+  
+  // Message search state
+  const [messageSearchQuery, setMessageSearchQuery] = useState('');
+  const [messageSearchActive, setMessageSearchActive] = useState(false);
+  const [currentMatchIndex, setCurrentMatchIndex] = useState(0);
+
+  // Find matching messages
+  const matchingMessages = useMemo(() => {
+    if (!messageSearchQuery.trim()) return [];
+    const query = messageSearchQuery.toLowerCase();
+    return messages
+      .filter(msg => msg.text?.toLowerCase().includes(query))
+      .map(msg => msg.id);
+  }, [messages, messageSearchQuery]);
+
+  // Navigate to a specific match
+  const navigateToMatch = useCallback((index: number) => {
+    if (matchingMessages.length === 0) return;
+    const clampedIndex = Math.max(0, Math.min(index, matchingMessages.length - 1));
+    setCurrentMatchIndex(clampedIndex);
+    
+    const messageId = matchingMessages[clampedIndex];
+    const element = messageRefs.current.get(messageId);
+    if (element) {
+      element.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+  }, [matchingMessages]);
+
+  const goToNextMatch = useCallback(() => {
+    navigateToMatch((currentMatchIndex + 1) % matchingMessages.length);
+  }, [currentMatchIndex, matchingMessages.length, navigateToMatch]);
+
+  const goToPrevMatch = useCallback(() => {
+    navigateToMatch((currentMatchIndex - 1 + matchingMessages.length) % matchingMessages.length);
+  }, [currentMatchIndex, matchingMessages.length, navigateToMatch]);
 
   // Subscribe to typing events
   useEffect(() => {
@@ -185,8 +238,11 @@ export default function Messages() {
   function handleSelectChat(chat: Chat) {
     setSelectedChat(chat);
     fetchMessages(chat.id);
-    // Clear any selected file when changing chats
+    // Clear any selected file and search when changing chats
     clearSelectedFile();
+    setMessageSearchQuery('');
+    setMessageSearchActive(false);
+    setCurrentMatchIndex(0);
   }
 
   function handleFileSelect(e: React.ChangeEvent<HTMLInputElement>) {
@@ -422,34 +478,100 @@ export default function Messages() {
           <Card className="md:col-span-2 flex flex-col">
             {selectedChat ? (
               <>
-                <CardHeader className="pb-3 border-b">
-                  <div className="flex items-center gap-3">
-                    {selectedChat.attendee_picture ? (
-                      <img 
-                        src={selectedChat.attendee_picture} 
-                        alt={selectedChat.attendee_name}
-                        className="h-10 w-10 rounded-full object-cover"
-                        onError={(e) => {
-                          e.currentTarget.style.display = 'none';
-                          e.currentTarget.nextElementSibling?.classList.remove('hidden');
-                        }}
-                      />
-                    ) : null}
-                    <div className={cn(
-                      "h-10 w-10 rounded-full bg-primary/10 flex items-center justify-center",
-                      selectedChat.attendee_picture && "hidden"
-                    )}>
-                      <User className="h-5 w-5 text-primary" />
-                    </div>
-                    <div>
-                      <CardTitle className="text-lg">{selectedChat.attendee_name}</CardTitle>
-                      {typingChats[selectedChat.id] ? (
-                        <p className="text-sm text-primary italic animate-pulse">digitando...</p>
-                      ) : selectedChat.attendee_email ? (
-                        <p className="text-sm text-muted-foreground">{selectedChat.attendee_email}</p>
+                <CardHeader className="pb-3 border-b space-y-3">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-3">
+                      {selectedChat.attendee_picture ? (
+                        <img 
+                          src={selectedChat.attendee_picture} 
+                          alt={selectedChat.attendee_name}
+                          className="h-10 w-10 rounded-full object-cover"
+                          onError={(e) => {
+                            e.currentTarget.style.display = 'none';
+                            e.currentTarget.nextElementSibling?.classList.remove('hidden');
+                          }}
+                        />
                       ) : null}
+                      <div className={cn(
+                        "h-10 w-10 rounded-full bg-primary/10 flex items-center justify-center",
+                        selectedChat.attendee_picture && "hidden"
+                      )}>
+                        <User className="h-5 w-5 text-primary" />
+                      </div>
+                      <div>
+                        <CardTitle className="text-lg">{selectedChat.attendee_name}</CardTitle>
+                        {typingChats[selectedChat.id] ? (
+                          <p className="text-sm text-primary italic animate-pulse">digitando...</p>
+                        ) : selectedChat.attendee_email ? (
+                          <p className="text-sm text-muted-foreground">{selectedChat.attendee_email}</p>
+                        ) : null}
+                      </div>
                     </div>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      onClick={() => setMessageSearchActive(!messageSearchActive)}
+                      className={cn(messageSearchActive && "bg-muted")}
+                    >
+                      <Search className="h-4 w-4" />
+                    </Button>
                   </div>
+                  
+                  {/* Message Search Bar */}
+                  {messageSearchActive && (
+                    <div className="flex items-center gap-2">
+                      <div className="relative flex-1">
+                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                        <Input
+                          placeholder="Buscar nas mensagens..."
+                          className="pl-9 pr-20"
+                          value={messageSearchQuery}
+                          onChange={(e) => {
+                            setMessageSearchQuery(e.target.value);
+                            setCurrentMatchIndex(0);
+                          }}
+                          autoFocus
+                        />
+                        {messageSearchQuery && (
+                          <div className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-muted-foreground">
+                            {matchingMessages.length > 0 
+                              ? `${currentMatchIndex + 1}/${matchingMessages.length}`
+                              : '0/0'
+                            }
+                          </div>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-1">
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          onClick={goToPrevMatch}
+                          disabled={matchingMessages.length === 0}
+                        >
+                          <ChevronUp className="h-4 w-4" />
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          onClick={goToNextMatch}
+                          disabled={matchingMessages.length === 0}
+                        >
+                          <ChevronDown className="h-4 w-4" />
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          onClick={() => {
+                            setMessageSearchActive(false);
+                            setMessageSearchQuery('');
+                            setCurrentMatchIndex(0);
+                          }}
+                        >
+                          <X className="h-4 w-4" />
+                        </Button>
+                      </div>
+                    </div>
+                  )}
                 </CardHeader>
                 <CardContent className="flex-1 overflow-hidden p-0">
                   <ScrollArea className="h-full p-4" ref={scrollAreaRef}>
@@ -485,34 +607,50 @@ export default function Messages() {
                           </div>
                         )}
                         
-                        {messages.map((msg) => (
-                          <div
-                            key={msg.id}
-                            className={cn(
-                              'flex',
-                              msg.sender === 'me' ? 'justify-end' : 'justify-start'
-                            )}
-                          >
+                        {messages.map((msg) => {
+                          const isMatch = matchingMessages.includes(msg.id);
+                          const isCurrentMatch = matchingMessages[currentMatchIndex] === msg.id;
+                          
+                          return (
                             <div
+                              key={msg.id}
+                              ref={(el) => {
+                                if (el) messageRefs.current.set(msg.id, el);
+                                else messageRefs.current.delete(msg.id);
+                              }}
                               className={cn(
-                                'max-w-[70%] rounded-lg px-4 py-2',
-                                msg.sender === 'me'
-                                  ? 'bg-primary text-primary-foreground'
-                                  : 'bg-muted'
+                                'flex transition-all duration-300',
+                                msg.sender === 'me' ? 'justify-end' : 'justify-start',
+                                isCurrentMatch && 'scale-[1.02]'
                               )}
                             >
-                              <p className="text-sm whitespace-pre-wrap">{msg.text}</p>
-                              <p className={cn(
-                                'text-xs mt-1',
-                                msg.sender === 'me' ? 'text-primary-foreground/70' : 'text-muted-foreground'
-                              )}>
-                                {msg.timestamp && !isNaN(new Date(msg.timestamp).getTime())
-                                  ? format(new Date(msg.timestamp), 'HH:mm', { locale: ptBR })
-                                  : '—'}
-                              </p>
+                              <div
+                                className={cn(
+                                  'max-w-[70%] rounded-lg px-4 py-2 transition-all',
+                                  msg.sender === 'me'
+                                    ? 'bg-primary text-primary-foreground'
+                                    : 'bg-muted',
+                                  isCurrentMatch && 'ring-2 ring-accent ring-offset-2 ring-offset-background'
+                                )}
+                              >
+                                <p className="text-sm whitespace-pre-wrap">
+                                  {messageSearchQuery && isMatch 
+                                    ? highlightText(msg.text || '', messageSearchQuery)
+                                    : msg.text
+                                  }
+                                </p>
+                                <p className={cn(
+                                  'text-xs mt-1',
+                                  msg.sender === 'me' ? 'text-primary-foreground/70' : 'text-muted-foreground'
+                                )}>
+                                  {msg.timestamp && !isNaN(new Date(msg.timestamp).getTime())
+                                    ? format(new Date(msg.timestamp), 'HH:mm', { locale: ptBR })
+                                    : '—'}
+                                </p>
+                              </div>
                             </div>
-                          </div>
-                        ))}
+                          );
+                        })}
                         <div ref={messagesEndRef} />
                       </div>
                     )}

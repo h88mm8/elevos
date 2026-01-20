@@ -40,7 +40,7 @@ serve(async (req) => {
 
     const body = await req.json();
     workspaceId = body.workspaceId;
-    const { filters } = body;
+    const { filters, onlyWithEmail } = body;
     fetchCount = body.fetch_count || 10;
 
     if (!workspaceId) {
@@ -101,9 +101,13 @@ serve(async (req) => {
     }
 
     // Build input payload with filters at root level (not nested)
+    // onlyWithEmail: true (default) → only validated emails
+    // onlyWithEmail: false → include unknown emails too
     const apifyInput: Record<string, unknown> = {
       fetch_count: fetchCount,
-      email_status: ['validated'],
+      email_status: onlyWithEmail === false 
+        ? ['validated', 'unknown'] 
+        : ['validated'],
     };
 
     // Add filters directly to input (not nested inside a filters object)

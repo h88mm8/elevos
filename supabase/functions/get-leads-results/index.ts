@@ -39,7 +39,8 @@ serve(async (req) => {
       return new Response(JSON.stringify({ error: 'Unauthorized' }), { status: 401, headers: corsHeaders });
     }
 
-    const { workspaceId, runId, onlyWithEmail } = await req.json();
+    const { workspaceId, runId, onlyWithEmail, fetchCount } = await req.json();
+    const limit = fetchCount || 50; // Default limit to prevent over-fetching
 
     if (!workspaceId || !runId) {
       return new Response(JSON.stringify({ error: 'workspaceId and runId are required' }), { status: 400, headers: corsHeaders });
@@ -124,8 +125,9 @@ serve(async (req) => {
       );
     }
 
+    // Limit results from Apify dataset to prevent over-fetching
     const datasetResponse = await fetch(
-      `https://api.apify.com/v2/datasets/${datasetId}/items?token=${APIFY_API_TOKEN}`
+      `https://api.apify.com/v2/datasets/${datasetId}/items?token=${APIFY_API_TOKEN}&limit=${limit}`
     );
 
     if (!datasetResponse.ok) {
@@ -138,14 +140,14 @@ serve(async (req) => {
     const datasetItems = await datasetResponse.json();
     console.log(`Retrieved ${datasetItems.length} items from Apify dataset`);
 
-    // Transform Apify data to our lead format
+    // Transform Apify data to our lead format (using official field names from docs)
     let leads: LeadRecord[] = datasetItems.map((item: Record<string, unknown>) => ({
-      full_name: (item.fullName || item.name || item.full_name || null) as string | null,
+      full_name: (item.full_name || item.fullName || item.name || null) as string | null,
       email: (item.email || null) as string | null,
-      company: (item.companyName || item.company || null) as string | null,
-      job_title: (item.title || item.jobTitle || item.job_title || null) as string | null,
-      linkedin_url: (item.linkedinUrl || item.profileUrl || item.linkedin_url || null) as string | null,
-      country: (item.location || item.country || null) as string | null,
+      company: (item.company_name || item.companyName || item.company || null) as string | null,
+      job_title: (item.job_title || item.title || item.jobTitle || null) as string | null,
+      linkedin_url: (item.linkedin || item.linkedinUrl || item.profileUrl || null) as string | null,
+      country: (item.country || item.location || null) as string | null,
       workspace_id: workspaceId,
     }));
 
@@ -153,6 +155,10 @@ serve(async (req) => {
     if (onlyWithEmail) {
       leads = leads.filter((lead) => lead.email);
     }
+
+    // SAFETY LIMIT: Ensure we never exceed the requested fetchCount
+    leads = leads.slice(0, limit);
+    console.log(`Limited to ${leads.length} leads (limit: ${limit})`);
 
     const isPartial = status !== 'SUCCEEDED';
 

@@ -100,9 +100,9 @@ serve(async (req) => {
       throw new Error('APIFY_API_TOKEN not configured');
     }
 
-    // Build input payload with filters at root level (not nested)
-    // onlyWithEmail: true (default) → only validated emails
-    // onlyWithEmail: false → include unknown emails too
+    // Build input payload following official Apify documentation
+    // Field names: contact_job_title, contact_location, contact_city, company_domain
+    // All values must be arrays
     const apifyInput: Record<string, unknown> = {
       fetch_count: fetchCount,
       email_status: onlyWithEmail === false 
@@ -110,12 +110,29 @@ serve(async (req) => {
         : ['validated'],
     };
 
-    // Add filters directly to input (not nested inside a filters object)
-    if (filters?.job_title) apifyInput.job_title = filters.job_title;
-    if (filters?.company_domain) apifyInput.company_domain = filters.company_domain;
-    if (filters?.company) apifyInput.company_domain = filters.company; // Alias support
-    if (filters?.country) apifyInput.country = filters.country;
-    if (filters?.location) apifyInput.location = filters.location;
+    // contact_job_title - array of job titles
+    if (filters?.job_title) {
+      apifyInput.contact_job_title = Array.isArray(filters.job_title) 
+        ? filters.job_title 
+        : [filters.job_title];
+    }
+
+    // company_domain - array of domains
+    if (filters?.company_domain || filters?.company) {
+      const domain = filters.company_domain || filters.company;
+      apifyInput.company_domain = Array.isArray(domain) ? domain : [domain];
+    }
+
+    // contact_location - for region/country/state (array)
+    if (filters?.country || filters?.location) {
+      const location = filters.country || filters.location;
+      apifyInput.contact_location = Array.isArray(location) ? location : [location];
+    }
+
+    // contact_city - for specific city (array)
+    if (filters?.city) {
+      apifyInput.contact_city = Array.isArray(filters.city) ? filters.city : [filters.city];
+    }
 
     console.log('Calling Apify actor code_crafter~leads-finder with input:', JSON.stringify(apifyInput));
 

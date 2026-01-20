@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import AppLayout from '@/components/layout/AppLayout';
 import { Button } from '@/components/ui/button';
@@ -13,7 +13,8 @@ import {
   Send, 
   Loader2,
   User,
-  Search
+  Search,
+  ChevronUp
 } from 'lucide-react';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
@@ -24,6 +25,8 @@ export default function Messages() {
   const { currentWorkspace } = useAuth();
   const { toast } = useToast();
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const messagesTopRef = useRef<HTMLDivElement>(null);
+  const scrollAreaRef = useRef<HTMLDivElement>(null);
 
   const [chats, setChats] = useState<Chat[]>([]);
   const [selectedChat, setSelectedChat] = useState<Chat | null>(null);
@@ -32,8 +35,11 @@ export default function Messages() {
   
   const [loadingChats, setLoadingChats] = useState(true);
   const [loadingMessages, setLoadingMessages] = useState(false);
+  const [loadingOlder, setLoadingOlder] = useState(false);
   const [sending, setSending] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
+  const [cursor, setCursor] = useState<string | null>(null);
+  const [hasMore, setHasMore] = useState(true);
 
   useEffect(() => {
     if (currentWorkspace) {
@@ -43,7 +49,7 @@ export default function Messages() {
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages]);
+  }, [messages.length > 0 && messages[messages.length - 1]?.id]);
 
   async function fetchChats() {
     setLoadingChats(true);
@@ -57,22 +63,44 @@ export default function Messages() {
       setChats(data.chats || []);
     } catch (error: any) {
       console.error('Error fetching chats:', error);
-      // Don't show error toast, just show empty state
     } finally {
       setLoadingChats(false);
     }
   }
 
-  async function fetchMessages(chatId: string) {
-    setLoadingMessages(true);
+  async function fetchMessages(chatId: string, beforeCursor?: string) {
+    if (beforeCursor) {
+      setLoadingOlder(true);
+    } else {
+      setLoadingMessages(true);
+      setMessages([]);
+      setCursor(null);
+      setHasMore(true);
+    }
+
     try {
       const { data, error } = await supabase.functions.invoke('get-chat-messages', {
-        body: { workspaceId: currentWorkspace?.id, chatId },
+        body: { 
+          workspaceId: currentWorkspace?.id, 
+          chatId,
+          limit: 50,
+          before: beforeCursor,
+        },
       });
 
       if (error) throw error;
 
-      setMessages(data.messages || []);
+      const newMessages = data.messages || [];
+      
+      if (beforeCursor) {
+        // Prepend older messages
+        setMessages(prev => [...newMessages, ...prev]);
+      } else {
+        setMessages(newMessages);
+      }
+      
+      setCursor(data.cursor || null);
+      setHasMore(!!data.cursor && newMessages.length > 0);
     } catch (error: any) {
       toast({
         title: 'Erro ao carregar mensagens',
@@ -81,8 +109,14 @@ export default function Messages() {
       });
     } finally {
       setLoadingMessages(false);
+      setLoadingOlder(false);
     }
   }
+
+  const loadOlderMessages = useCallback(() => {
+    if (!selectedChat || !cursor || loadingOlder || !hasMore) return;
+    fetchMessages(selectedChat.id, cursor);
+  }, [selectedChat, cursor, loadingOlder, hasMore]);
 
   function handleSelectChat(chat: Chat) {
     setSelectedChat(chat);
@@ -233,7 +267,7 @@ export default function Messages() {
                   </div>
                 </CardHeader>
                 <CardContent className="flex-1 overflow-hidden p-0">
-                  <ScrollArea className="h-full p-4">
+                  <ScrollArea className="h-full p-4" ref={scrollAreaRef}>
                     {loadingMessages ? (
                       <div className="space-y-4">
                         {[1, 2, 3].map((i) => (
@@ -246,6 +280,26 @@ export default function Messages() {
                       </div>
                     ) : (
                       <div className="space-y-4">
+                        {/* Load older messages button */}
+                        {hasMore && (
+                          <div ref={messagesTopRef} className="flex justify-center py-2">
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={loadOlderMessages}
+                              disabled={loadingOlder}
+                              className="text-muted-foreground"
+                            >
+                              {loadingOlder ? (
+                                <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                              ) : (
+                                <ChevronUp className="h-4 w-4 mr-2" />
+                              )}
+                              {loadingOlder ? 'Carregando...' : 'Carregar mensagens anteriores'}
+                            </Button>
+                          </div>
+                        )}
+                        
                         {messages.map((msg) => (
                           <div
                             key={msg.id}

@@ -78,7 +78,7 @@ function highlightText(text: string, query: string): React.ReactNode {
 }
 
 export default function Messages() {
-  const { currentWorkspace } = useAuth();
+  const { currentWorkspace, session } = useAuth();
   const { toast } = useToast();
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const messagesTopRef = useRef<HTMLDivElement>(null);
@@ -254,18 +254,34 @@ export default function Messages() {
     };
   }, [filePreview]);
 
+  const invokeAuthedFunction = useCallback(async (name: string, body: any) => {
+    const accessToken = session?.access_token;
+    if (!accessToken) {
+      throw new Error('Sessão expirada. Faça login novamente.');
+    }
+
+    const { data, error } = await supabase.functions.invoke(name, {
+      body,
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+      },
+    });
+
+    if (error) throw error;
+    return data;
+  }, [session?.access_token]);
+
   async function fetchChats() {
     setLoadingChats(true);
     try {
-      const { data, error } = await supabase.functions.invoke('get-chats', {
-        body: { workspaceId: currentWorkspace.id },
-      });
-
-      if (error) throw error;
-
+      const data = await invokeAuthedFunction('get-chats', { workspaceId: currentWorkspace.id });
       setChats(data.chats || []);
     } catch (error: any) {
-      console.error('Error fetching chats:', error);
+      toast({
+        title: 'Erro ao carregar conversas',
+        description: error.message,
+        variant: 'destructive',
+      });
     } finally {
       setLoadingChats(false);
     }
@@ -282,16 +298,12 @@ export default function Messages() {
     }
 
     try {
-      const { data, error } = await supabase.functions.invoke('get-chat-messages', {
-        body: { 
-          workspaceId: currentWorkspace?.id, 
-          chatId,
-          limit: 50,
-          before: beforeCursor,
-        },
+      const data = await invokeAuthedFunction('get-chat-messages', {
+        workspaceId: currentWorkspace?.id,
+        chatId,
+        limit: 50,
+        before: beforeCursor,
       });
-
-      if (error) throw error;
 
       const newMessages = data.messages || [];
       
@@ -429,18 +441,14 @@ export default function Messages() {
         clearSelectedFile();
       }
 
-      const { data, error } = await supabase.functions.invoke('send-message', {
-        body: {
-          workspaceId: currentWorkspace?.id,
-          chatId: selectedChat.id,
-          text: messageText || undefined,
-          attachmentUrl,
-          attachmentType,
-          attachmentName,
-        },
+      const data = await invokeAuthedFunction('send-message', {
+        workspaceId: currentWorkspace?.id,
+        chatId: selectedChat.id,
+        text: messageText || undefined,
+        attachmentUrl,
+        attachmentType,
+        attachmentName,
       });
-
-      if (error) throw error;
 
       // Replace temp message with real one (mark as sent)
       setMessages(prev => prev.map(m => 

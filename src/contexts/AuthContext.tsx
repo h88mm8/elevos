@@ -27,33 +27,39 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    // Get initial session
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setSession(session);
-      setUser(session?.user ?? null);
-      if (session?.user) {
-        fetchUserData(session.user.id);
+    // Listen for auth changes FIRST (prevents missing events during init)
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, nextSession) => {
+      setSession(nextSession);
+      setUser(nextSession?.user ?? null);
+
+      if (nextSession?.user) {
+        setLoading(true);
+        // Defer Supabase calls to avoid auth deadlocks
+        setTimeout(() => {
+          fetchUserData(nextSession.user.id);
+        }, 0);
       } else {
+        setProfile(null);
+        setWorkspaces([]);
+        setCurrentWorkspace(null);
         setLoading(false);
       }
     });
 
-    // Listen for auth changes
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      async (_event, session) => {
-        setSession(session);
-        setUser(session?.user ?? null);
-        if (session?.user) {
-          // Small delay to ensure triggers have completed
-          setTimeout(() => fetchUserData(session.user.id), 500);
-        } else {
-          setProfile(null);
-          setWorkspaces([]);
-          setCurrentWorkspace(null);
-          setLoading(false);
-        }
+    // THEN check for existing session
+    supabase.auth.getSession().then(({ data: { session: existingSession } }) => {
+      setSession(existingSession);
+      setUser(existingSession?.user ?? null);
+
+      if (existingSession?.user) {
+        setLoading(true);
+        setTimeout(() => {
+          fetchUserData(existingSession.user.id);
+        }, 0);
+      } else {
+        setLoading(false);
       }
-    );
+    });
 
     return () => subscription.unsubscribe();
   }, []);
@@ -114,7 +120,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       email,
       password,
       options: {
-        data: { full_name: fullName }
+        data: { full_name: fullName },
+        emailRedirectTo: `${window.location.origin}/`,
       }
     });
     return { error };

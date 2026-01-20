@@ -47,9 +47,19 @@ export interface CreditHistory {
   created_at: string;
 }
 
+export interface LeadList {
+  id: string;
+  workspace_id: string;
+  name: string;
+  description: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface Lead {
   id: string;
   workspace_id: string;
+  list_id: string | null;
   
   // Dados pessoais
   full_name: string | null;
@@ -92,6 +102,14 @@ export interface Lead {
   updated_at: string;
 }
 
+export interface LeadFilters {
+  company: string;
+  jobTitle: string;
+  industry: string;
+  country: string;
+  listId: string | null;
+}
+
 export interface Campaign {
   id: string;
   workspace_id: string;
@@ -130,11 +148,13 @@ export interface SearchLeadsRequest {
   };
   fetch_count: number;
   onlyWithEmail?: boolean;
+  listId?: string;
 }
 
 export interface SearchLeadsResponse {
   success: boolean;
   runId: string;
+  listId?: string;
   message?: string;
 }
 
@@ -144,6 +164,7 @@ export interface GetLeadsResultsRequest {
   onlyWithEmail?: boolean;
   limit?: number;
   offset?: number;
+  listId?: string;
 }
 
 export interface EnrichLeadRequest {

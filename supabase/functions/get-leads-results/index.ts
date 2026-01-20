@@ -44,6 +44,7 @@ interface LeadRecord {
   company_technologies: string | null;
   
   workspace_id: string;
+  list_id: string | null;
 }
 
 serve(async (req) => {
@@ -69,7 +70,7 @@ serve(async (req) => {
       return new Response(JSON.stringify({ error: 'Unauthorized' }), { status: 401, headers: corsHeaders });
     }
 
-    const { workspaceId, runId, onlyWithEmail, fetchCount } = await req.json();
+    const { workspaceId, runId, onlyWithEmail, fetchCount, listId } = await req.json();
     const limit = fetchCount || 50; // Default limit to prevent over-fetching
 
     if (!workspaceId || !runId) {
@@ -217,6 +218,7 @@ serve(async (req) => {
         company_technologies: (item.company_technologies || null) as string | null,
         
         workspace_id: workspaceId,
+        list_id: listId || null,
       };
     });
 

@@ -70,6 +70,20 @@ export function useLeads() {
     },
   });
 
+  const moveLeadsMutation = useMutation({
+    mutationFn: async ({ leadIds, listId }: { leadIds: string[]; listId: string | null }) => {
+      const { error } = await supabase
+        .from('leads')
+        .update({ list_id: listId })
+        .in('id', leadIds);
+      
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['leads', currentWorkspace?.id] });
+    },
+  });
+
   return {
     leads: leadsQuery.data ?? [],
     isLoading: leadsQuery.isLoading,
@@ -77,6 +91,7 @@ export function useLeads() {
     createLead: createLeadMutation.mutateAsync,
     updateLead: updateLeadMutation.mutateAsync,
     deleteLeads: deleteLeadsMutation.mutateAsync,
+    moveLeads: moveLeadsMutation.mutateAsync,
     refetchLeads: () => queryClient.invalidateQueries({ queryKey: ['leads', currentWorkspace?.id] }),
   };
 }

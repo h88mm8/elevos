@@ -49,7 +49,7 @@ export default function Messages() {
     setLoadingChats(true);
     try {
       const { data, error } = await supabase.functions.invoke('get-chats', {
-        body: {},
+        body: { workspaceId: currentWorkspace.id },
       });
 
       if (error) throw error;
@@ -67,7 +67,7 @@ export default function Messages() {
     setLoadingMessages(true);
     try {
       const { data, error } = await supabase.functions.invoke('get-chat-messages', {
-        body: { chatId },
+        body: { workspaceId: currentWorkspace?.id, chatId },
       });
 
       if (error) throw error;
@@ -109,6 +109,7 @@ export default function Messages() {
     try {
       const { data, error } = await supabase.functions.invoke('send-message', {
         body: {
+          workspaceId: currentWorkspace?.id,
           chatId: selectedChat.id,
           text: messageText,
         },

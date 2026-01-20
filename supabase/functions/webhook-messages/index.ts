@@ -177,6 +177,41 @@ serve(async (req) => {
             break;
           }
 
+          case 'typing.started':
+          case 'typing.stopped':
+          case 'chat.typing': {
+            // Find account by provider account_id
+            const { data: account } = await supabase
+              .from('accounts')
+              .select('id, workspace_id')
+              .eq('account_id', data.account_id)
+              .maybeSingle();
+
+            if (!account) {
+              console.warn(`Account not found for typing event: ${data.account_id}`);
+              continue;
+            }
+
+            // Broadcast typing event via Realtime
+            const isTyping = eventType === 'typing.started' || 
+                            (eventType === 'chat.typing' && data.status !== 'stopped');
+            
+            const channel = supabase.channel(`typing:${account.workspace_id}`);
+            await channel.send({
+              type: 'broadcast',
+              event: 'typing',
+              payload: {
+                chat_id: data.chat_id,
+                is_typing: isTyping,
+                timestamp: new Date().toISOString(),
+              },
+            });
+            
+            console.log(`Typing event broadcast for chat ${data.chat_id}: ${isTyping}`);
+            processedCount++;
+            break;
+          }
+
           default:
             console.log(`Unhandled event type: ${eventType}`);
         }

@@ -82,7 +82,8 @@ serve(async (req) => {
       message: 'Lead search started',
     }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
 
-  } catch (error) {
+  } catch (err) {
+    const error = err as Error;
     console.error('Error in search-leads:', error);
     return new Response(JSON.stringify({ error: error.message }), { status: 500, headers: corsHeaders });
   }

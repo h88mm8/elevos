@@ -6,6 +6,9 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
+const MAX_ATTEMPTS = 3;
+const COOLDOWN_MINUTES = 5;
+
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
@@ -54,6 +57,42 @@ serve(async (req) => {
     }
 
     // ============================================
+    // SERVICE CLIENT (for bypassing RLS)
+    // ============================================
+    const serviceClient = createClient(
+      Deno.env.get('SUPABASE_URL')!,
+      Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
+    );
+
+    // ============================================
+    // CHECK ATTEMPTS LIMIT
+    // ============================================
+    const cooldownTime = new Date(Date.now() - COOLDOWN_MINUTES * 60 * 1000);
+    
+    const { data: recentSessions } = await serviceClient
+      .from('qr_sessions')
+      .select('attempts, created_at')
+      .eq('workspace_id', workspaceId)
+      .eq('channel', channel)
+      .gte('created_at', cooldownTime.toISOString())
+      .order('created_at', { ascending: false })
+      .limit(1);
+
+    const lastSession = recentSessions?.[0];
+    const currentAttempts = lastSession?.attempts || 0;
+
+    if (currentAttempts >= MAX_ATTEMPTS) {
+      const waitMinutes = COOLDOWN_MINUTES;
+      console.log(`Workspace ${workspaceId} exceeded max attempts (${currentAttempts}/${MAX_ATTEMPTS})`);
+      
+      return new Response(JSON.stringify({
+        error: 'Limite de tentativas atingido',
+        details: `Aguarde ${waitMinutes} minutos antes de tentar novamente.`,
+        retry_after: waitMinutes * 60,
+      }), { status: 429, headers: corsHeaders });
+    }
+
+    // ============================================
     // PROVIDER CONFIGURATION
     // ============================================
     const PROVIDER_DSN = Deno.env.get('UNIPILE_DSN');
@@ -62,21 +101,20 @@ serve(async (req) => {
     if (!PROVIDER_DSN || !PROVIDER_API_KEY) {
       console.log('Messaging provider not configured');
       return new Response(JSON.stringify({
-        error: 'Messaging service not configured',
+        error: 'Serviço de mensagens não configurado',
       }), { status: 503, headers: corsHeaders });
     }
 
     // ============================================
-    // CREATE HOSTED LINK WITH WEBHOOK NOTIFICATION
+    // CREATE ACCOUNT WITH QR CODE
     // ============================================
-    console.log(`Creating QR session for channel: ${channel}`);
+    console.log(`Creating QR session for channel: ${channel}, attempt: ${currentAttempts + 1}`);
 
     const expiresAt = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
     const sessionName = `${workspaceId}-${Date.now()}`;
 
-    // Create hosted auth link - this returns a URL that shows the QR code
-    // The notify_url will receive webhook events when status changes
-    const providerResponse = await fetch(`https://${PROVIDER_DSN}/api/v1/hosted/accounts/link`, {
+    // Call provider API to create account with QR
+    const providerResponse = await fetch(`https://${PROVIDER_DSN}/api/v1/accounts`, {
       method: 'POST',
       headers: {
         'X-API-KEY': PROVIDER_API_KEY,
@@ -84,11 +122,7 @@ serve(async (req) => {
         'accept': 'application/json',
       },
       body: JSON.stringify({
-        type: 'create',
-        providers: [channel.toUpperCase()],
-        api_url: `https://${PROVIDER_DSN}`,
-        expiresOn: expiresAt.toISOString(),
-        notify_url: `${Deno.env.get('SUPABASE_URL')}/functions/v1/webhook-qr-status`,
+        provider: 'WHATSAPP',
         name: sessionName,
       }),
     });
@@ -97,97 +131,89 @@ serve(async (req) => {
       const errorText = await providerResponse.text();
       console.error('Provider API error:', providerResponse.status, errorText);
       
+      // Log the failure
+      await serviceClient.from('qr_session_logs').insert({
+        session_id: sessionName,
+        status: 'provider_error',
+        error: errorText,
+        metadata: { provider_status: providerResponse.status },
+      });
+      
       return new Response(JSON.stringify({
-        error: 'Failed to create QR session',
-        details: errorText,
+        error: 'Falha ao criar sessão',
+        details: 'Não foi possível conectar ao serviço de mensagens.',
       }), { status: providerResponse.status, headers: corsHeaders });
     }
 
     const providerData = await providerResponse.json();
     console.log('Provider response:', JSON.stringify(providerData));
 
-    // Extract session info
-    const sessionId = providerData.object?.id || providerData.id || sessionName;
-    const hostedUrl = providerData.object?.url || providerData.url || null;
+    // Extract QR code and session info
+    const accountId = providerData.account_id || providerData.object?.account_id;
+    const qrCodeString = providerData.qrCodeString || providerData.object?.qrCodeString;
+    const code = providerData.code || providerData.object?.code;
 
-    // ============================================
-    // FETCH INITIAL QR CODE FROM HOSTED LINK
-    // ============================================
-    let qrCode: string | null = null;
-
-    // Try to get the QR code from the provider response
-    if (providerData.object?.qr_code) {
-      qrCode = providerData.object.qr_code;
-    } else if (providerData.qr_code) {
-      qrCode = providerData.qr_code;
+    if (!qrCodeString && !code) {
+      console.error('No QR code in provider response:', providerData);
+      
+      await serviceClient.from('qr_session_logs').insert({
+        session_id: sessionName,
+        status: 'no_qr_code',
+        error: 'Provider did not return QR code',
+        metadata: providerData,
+      });
+      
+      return new Response(JSON.stringify({
+        error: 'QR Code não disponível',
+        details: 'O serviço não retornou um QR Code válido.',
+      }), { status: 500, headers: corsHeaders });
     }
 
-    // If no QR code in response, try to fetch the checkpoint to get QR data
-    if (!qrCode && hostedUrl) {
-      try {
-        // Extract token from hosted URL if available
-        const urlMatch = hostedUrl.match(/\/link\/([^\/\?]+)/);
-        if (urlMatch) {
-          const linkToken = urlMatch[1];
-          console.log(`Fetching checkpoint for link token: ${linkToken}`);
-          
-          const checkpointResponse = await fetch(`https://${PROVIDER_DSN}/api/v1/hosted/accounts/link/${linkToken}/checkpoint`, {
-            method: 'GET',
-            headers: {
-              'X-API-KEY': PROVIDER_API_KEY,
-              'accept': 'application/json',
-            },
-          });
-          
-          if (checkpointResponse.ok) {
-            const checkpointData = await checkpointResponse.json();
-            console.log('Checkpoint response:', JSON.stringify(checkpointData));
-            
-            if (checkpointData.object?.qrcode) {
-              qrCode = checkpointData.object.qrcode;
-            } else if (checkpointData.qrcode) {
-              qrCode = checkpointData.qrcode;
-            }
-          }
-        }
-      } catch (err) {
-        console.log('Could not fetch checkpoint QR:', err);
-      }
-    }
+    // Use qrCodeString (base64) or code (raw string)
+    const qrCode = qrCodeString || code;
 
     // ============================================
-    // STORE SESSION IN DATABASE (for Realtime updates)
+    // STORE SESSION IN DATABASE
     // ============================================
-    const serviceClient = createClient(
-      Deno.env.get('SUPABASE_URL')!,
-      Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
-    );
-
-    const { error: insertError } = await serviceClient
+    const { data: session, error: insertError } = await serviceClient
       .from('qr_sessions')
       .insert({
-        session_id: sessionId,
+        session_id: accountId || sessionName,
         workspace_id: workspaceId,
         channel,
         status: 'pending',
         qr_code: qrCode,
+        attempts: currentAttempts + 1,
         expires_at: expiresAt.toISOString(),
-      });
+      })
+      .select()
+      .single();
 
     if (insertError) {
       console.error('Error inserting QR session:', insertError);
-      // Don't fail - session can still work with just the hosted URL
     }
 
-    console.log(`QR session created: ${sessionId}, has QR: ${!!qrCode}, has URL: ${!!hostedUrl}`);
+    // Log session creation
+    await serviceClient.from('qr_session_logs').insert({
+      session_id: accountId || sessionName,
+      status: 'pending',
+      metadata: { 
+        attempt: currentAttempts + 1,
+        has_qr: !!qrCode,
+        account_id: accountId,
+      },
+    });
+
+    console.log(`QR session created: ${accountId || sessionName}, attempt: ${currentAttempts + 1}`);
 
     return new Response(JSON.stringify({
       success: true,
-      session_id: sessionId,
+      session_id: accountId || sessionName,
       qr_code: qrCode,
-      hosted_url: hostedUrl, // Fallback if QR not available
       expires_at: expiresAt.toISOString(),
       channel,
+      attempts: currentAttempts + 1,
+      max_attempts: MAX_ATTEMPTS,
     }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
 
   } catch (err) {

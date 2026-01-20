@@ -29,14 +29,15 @@ serve(async (req) => {
       return new Response(JSON.stringify({ error: 'Unauthorized' }), { status: 401, headers: corsHeaders });
     }
 
-    const { workspaceId, chatId, accountId, attendeesIds, text } = await req.json();
+    const { workspaceId, chatId, accountId, attendeesIds, text, attachmentUrl, attachmentType, attachmentName } = await req.json();
 
     if (!workspaceId) {
       return new Response(JSON.stringify({ error: 'workspaceId is required' }), { status: 400, headers: corsHeaders });
     }
 
-    if (!text) {
-      return new Response(JSON.stringify({ error: 'text is required' }), { status: 400, headers: corsHeaders });
+    // Must have either text or attachment
+    if (!text && !attachmentUrl) {
+      return new Response(JSON.stringify({ error: 'text or attachment is required' }), { status: 400, headers: corsHeaders });
     }
 
     // Need either chatId (existing chat) or accountId + attendeesIds (new chat)
@@ -94,31 +95,69 @@ serve(async (req) => {
     }
 
     let url: string;
-    let body: Record<string, unknown>;
+    let providerResponse: Response;
 
     if (chatId) {
       // Send message to existing chat
       url = `https://${PROVIDER_DSN}/api/v1/chats/${chatId}/messages`;
-      body = { text };
+      
+      // Check if we're sending an attachment
+      if (attachmentUrl) {
+        console.log('Sending message with attachment:', { attachmentUrl, attachmentType, attachmentName });
+        
+        // Fetch the file from the signed URL
+        const fileResponse = await fetch(attachmentUrl);
+        if (!fileResponse.ok) {
+          throw new Error('Failed to fetch attachment file');
+        }
+        
+        const fileBlob = await fileResponse.blob();
+        
+        // Create FormData for multipart upload
+        const formData = new FormData();
+        formData.append('file', fileBlob, attachmentName || 'attachment');
+        
+        if (text) {
+          formData.append('text', text);
+        }
+        
+        providerResponse = await fetch(url, {
+          method: 'POST',
+          headers: {
+            'X-API-KEY': PROVIDER_API_KEY,
+            'accept': 'application/json',
+          },
+          body: formData,
+        });
+      } else {
+        // Text-only message
+        providerResponse = await fetch(url, {
+          method: 'POST',
+          headers: {
+            'X-API-KEY': PROVIDER_API_KEY,
+            'accept': 'application/json',
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ text }),
+        });
+      }
     } else {
-      // Create new chat and send message
+      // Create new chat and send message (text only for new chats)
       url = `https://${PROVIDER_DSN}/api/v1/chats`;
-      body = {
-        account_id: accountId,
-        attendees_ids: attendeesIds,
-        text,
-      };
+      providerResponse = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'X-API-KEY': PROVIDER_API_KEY,
+          'accept': 'application/json',
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          account_id: accountId,
+          attendees_ids: attendeesIds,
+          text: text || '',
+        }),
+      });
     }
-
-    const providerResponse = await fetch(url, {
-      method: 'POST',
-      headers: {
-        'X-API-KEY': PROVIDER_API_KEY,
-        'accept': 'application/json',
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(body),
-    });
 
     if (!providerResponse.ok) {
       const errorText = await providerResponse.text();

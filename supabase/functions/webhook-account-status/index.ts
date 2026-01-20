@@ -67,17 +67,25 @@ serve(async (req) => {
     // ============================================
     // EXTRACT EVENT DATA
     // ============================================
-    // Provider webhook format varies - extract relevant fields
-    const eventType = payload.event || payload.type || payload.status;
+    // Provider webhook format: { AccountStatus: { account_id, message, account_type }, reason? }
+    const accountStatusData = payload.AccountStatus || payload.accountStatus || payload;
     const eventData = payload.data || payload.object || payload;
     
-    const accountId = eventData.account_id || eventData.id || payload.account_id;
-    const accountName = eventData.name || eventData.display_name || payload.name;
-    const accountStatus = eventData.status || payload.status;
+    // Extract account ID from AccountStatus or other fields
+    const accountId = accountStatusData.account_id || eventData.account_id || eventData.id || payload.account_id;
+    const accountName = accountStatusData.name || eventData.name || eventData.display_name || payload.name;
+    
+    // Extract status from AccountStatus.message or other fields
+    const accountMessage = accountStatusData.message || '';
+    const accountStatus = accountMessage || eventData.status || payload.status;
+    const accountType = accountStatusData.account_type || eventData.account_type || 'whatsapp';
+    
+    // Event type and other fields
+    const eventType = payload.event || payload.type || accountMessage;
     const qrCode = eventData.qrCodeString || eventData.qr_code || eventData.qrcode;
-    const errorMessage = eventData.error || eventData.message || payload.error;
+    const errorMessage = payload.reason || eventData.error || payload.error;
 
-    console.log(`Event: ${eventType}, Account: ${accountId}, Status: ${accountStatus}`);
+    console.log(`Event: ${eventType}, Account: ${accountId}, Status: ${accountStatus}, Message: ${accountMessage}`);
 
     // ============================================
     // FIND THE QR SESSION
@@ -120,6 +128,7 @@ serve(async (req) => {
 
     const normalizedEvent = (eventType || '').toLowerCase().replace(/[._-]/g, '');
     const normalizedAccountStatus = (accountStatus || '').toUpperCase();
+    const normalizedMessage = (accountMessage || '').toUpperCase();
 
     // QR Code Updated
     if (normalizedEvent === 'qrupdated' || normalizedEvent === 'qrcode' || normalizedEvent === 'checkpoint') {
@@ -129,14 +138,17 @@ serve(async (req) => {
         console.log('QR code updated');
       }
     }
-    // Account Connected
+    // Account Connected (OK or CREATION_SUCCESS messages)
     else if (
+      normalizedMessage === 'OK' ||
+      normalizedMessage === 'CREATION_SUCCESS' ||
       normalizedEvent === 'connected' ||
       normalizedEvent === 'accountcreated' ||
       normalizedEvent === 'accountconnected' ||
       normalizedEvent === 'success' ||
       normalizedAccountStatus === 'OK' ||
-      normalizedAccountStatus === 'CONNECTED'
+      normalizedAccountStatus === 'CONNECTED' ||
+      normalizedAccountStatus === 'CREATION_SUCCESS'
     ) {
       newStatus = 'connected';
       updateData = {
@@ -148,6 +160,8 @@ serve(async (req) => {
     }
     // Account Failed / Error
     else if (
+      normalizedMessage === 'FAILED' ||
+      normalizedMessage === 'ERROR' ||
       normalizedEvent === 'failed' ||
       normalizedEvent === 'error' ||
       normalizedEvent === 'expired' ||
@@ -163,6 +177,8 @@ serve(async (req) => {
     }
     // Account Disconnected / Credentials Invalid
     else if (
+      normalizedMessage === 'CREDENTIALS' ||
+      normalizedMessage === 'DISCONNECTED' ||
       normalizedEvent === 'disconnected' ||
       normalizedEvent === 'credentials' ||
       normalizedAccountStatus === 'DISCONNECTED' ||
@@ -184,10 +200,10 @@ serve(async (req) => {
 
       // Also update QR session if exists
       newStatus = 'disconnected';
-      updateData = { status: newStatus, error: 'Conta desconectada' };
+      updateData = { status: newStatus, error: errorMessage || 'Conta desconectada' };
     }
     else {
-      console.log(`Unhandled event type: ${eventType}, status: ${accountStatus}`);
+      console.log(`Unhandled event type: ${eventType}, status: ${accountStatus}, message: ${accountMessage}`);
     }
 
     // ============================================

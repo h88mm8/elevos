@@ -171,45 +171,54 @@ serve(async (req) => {
     console.log(`Retrieved ${datasetItems.length} items from Apify dataset`);
 
     // Transform Apify data to our lead format (mapping ALL fields from Apify)
-    let leads: LeadRecord[] = datasetItems.map((item: Record<string, unknown>) => ({
-      // Dados pessoais
-      full_name: (item.full_name || item.fullName || item.name || null) as string | null,
-      first_name: (item.first_name || item.firstName || null) as string | null,
-      last_name: (item.last_name || item.lastName || null) as string | null,
-      email: (item.email || null) as string | null,
-      personal_email: (item.personal_email || item.personalEmail || null) as string | null,
-      mobile_number: (item.mobile_number || item.mobileNumber || item.phone || null) as string | null,
-      phone: (item.phone || item.mobile_number || null) as string | null,
-      linkedin_url: (item.linkedin || item.linkedinUrl || item.profileUrl || null) as string | null,
+    // Using exact field names from Apify CSV export
+    let leads: LeadRecord[] = datasetItems.map((item: Record<string, unknown>) => {
+      // Log first item for debugging
+      if (datasetItems.indexOf(item) === 0) {
+        console.log('Sample Apify item keys:', Object.keys(item));
+        console.log('Sample Apify item:', JSON.stringify(item).substring(0, 500));
+      }
       
-      // Cargo e nível
-      job_title: (item.job_title || item.title || item.jobTitle || null) as string | null,
-      headline: (item.headline || null) as string | null,
-      seniority_level: (item.seniority_level || item.seniorityLevel || null) as string | null,
-      industry: (item.industry || null) as string | null,
-      
-      // Localização
-      city: (item.city || null) as string | null,
-      state: (item.state || null) as string | null,
-      country: (item.country || item.location || null) as string | null,
-      
-      // Dados da empresa
-      company: (item.company_name || item.companyName || item.company || null) as string | null,
-      company_website: (item.company_website || item.companyWebsite || null) as string | null,
-      company_domain: (item.company_domain || item.companyDomain || null) as string | null,
-      company_linkedin: (item.company_linkedin || item.companyLinkedin || null) as string | null,
-      company_size: (item.company_size || item.companySize || null) as string | null,
-      company_industry: (item.company_industry || item.companyIndustry || null) as string | null,
-      company_annual_revenue: (item.company_annual_revenue || item.companyAnnualRevenue || null) as string | null,
-      company_description: (item.company_description || item.companyDescription || null) as string | null,
-      company_founded_year: (item.company_founded_year || item.companyFoundedYear || null) as number | null,
-      company_phone: (item.company_phone || item.companyPhone || null) as string | null,
-      company_address: (item.company_full_address || item.company_street_address || item.companyAddress || null) as string | null,
-      keywords: (item.keywords || null) as string | null,
-      company_technologies: (item.company_technologies || item.companyTechnologies || null) as string | null,
-      
-      workspace_id: workspaceId,
-    }));
+      return {
+        // Dados pessoais
+        full_name: (item.full_name || null) as string | null,
+        first_name: (item.first_name || null) as string | null,
+        last_name: (item.last_name || null) as string | null,
+        email: (item.email || null) as string | null,
+        personal_email: (item.personal_email || null) as string | null,
+        mobile_number: (item.mobile_number || null) as string | null,
+        phone: (item.mobile_number || null) as string | null,
+        linkedin_url: (item.linkedin || null) as string | null,
+        
+        // Cargo e nível
+        job_title: (item.job_title || null) as string | null,
+        headline: (item.headline || null) as string | null,
+        seniority_level: (item.seniority_level || null) as string | null,
+        industry: (item.industry || null) as string | null,
+        
+        // Localização
+        city: (item.city || null) as string | null,
+        state: (item.state || null) as string | null,
+        country: (item.country || null) as string | null,
+        
+        // Dados da empresa
+        company: (item.company_name || null) as string | null,
+        company_website: (item.company_website || null) as string | null,
+        company_domain: (item.company_domain || null) as string | null,
+        company_linkedin: (item.company_linkedin || null) as string | null,
+        company_size: (item.company_size || null) as string | null,
+        company_industry: (item.industry || null) as string | null,
+        company_annual_revenue: (item.company_annual_revenue || null) as string | null,
+        company_description: (item.company_description || null) as string | null,
+        company_founded_year: (item.company_founded_year ? parseInt(String(item.company_founded_year)) : null) as number | null,
+        company_phone: (item.company_phone || null) as string | null,
+        company_address: (item.company_full_address || item.company_street_address || null) as string | null,
+        keywords: (item.keywords || null) as string | null,
+        company_technologies: (item.company_technologies || null) as string | null,
+        
+        workspace_id: workspaceId,
+      };
+    });
 
     // Filter by email if requested
     if (onlyWithEmail) {

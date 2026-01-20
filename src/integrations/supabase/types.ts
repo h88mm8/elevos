@@ -191,6 +191,41 @@ export type Database = {
           },
         ]
       }
+      lead_lists: {
+        Row: {
+          created_at: string
+          description: string | null
+          id: string
+          name: string
+          updated_at: string
+          workspace_id: string
+        }
+        Insert: {
+          created_at?: string
+          description?: string | null
+          id?: string
+          name: string
+          updated_at?: string
+          workspace_id: string
+        }
+        Update: {
+          created_at?: string
+          description?: string | null
+          id?: string
+          name?: string
+          updated_at?: string
+          workspace_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "lead_lists_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       leads: {
         Row: {
           city: string | null
@@ -219,6 +254,7 @@ export type Database = {
           keywords: string | null
           last_name: string | null
           linkedin_url: string | null
+          list_id: string | null
           mobile_number: string | null
           personal_email: string | null
           phone: string | null
@@ -254,6 +290,7 @@ export type Database = {
           keywords?: string | null
           last_name?: string | null
           linkedin_url?: string | null
+          list_id?: string | null
           mobile_number?: string | null
           personal_email?: string | null
           phone?: string | null
@@ -289,6 +326,7 @@ export type Database = {
           keywords?: string | null
           last_name?: string | null
           linkedin_url?: string | null
+          list_id?: string | null
           mobile_number?: string | null
           personal_email?: string | null
           phone?: string | null
@@ -298,6 +336,13 @@ export type Database = {
           workspace_id?: string
         }
         Relationships: [
+          {
+            foreignKeyName: "leads_list_id_fkey"
+            columns: ["list_id"]
+            isOneToOne: false
+            referencedRelation: "lead_lists"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "leads_workspace_id_fkey"
             columns: ["workspace_id"]

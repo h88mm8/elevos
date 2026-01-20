@@ -1,6 +1,7 @@
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import { useLeads } from '@/hooks/useLeads';
+import { useLeadLists } from '@/hooks/useLeadLists';
 import { useCredits } from '@/hooks/useCredits';
 import AppLayout from '@/components/layout/AppLayout';
 import { Button } from '@/components/ui/button';
@@ -16,6 +17,10 @@ import { useToast } from '@/hooks/use-toast';
 import { supabase } from '@/integrations/supabase/client';
 import { CountrySelect } from '@/components/leads/CountrySelect';
 import { LeadDetailsDrawer } from '@/components/leads/LeadDetailsDrawer';
+import { LeadFilters } from '@/components/leads/LeadFilters';
+import { CreateListDialog } from '@/components/leads/CreateListDialog';
+import { MoveLeadsDialog } from '@/components/leads/MoveLeadsDialog';
+import { DeleteLeadsDialog } from '@/components/leads/DeleteLeadsDialog';
 import { 
   Search, 
   Phone, 
@@ -28,13 +33,16 @@ import {
   Eye,
   MapPin,
   Building2,
+  Trash2,
+  FolderInput,
 } from 'lucide-react';
-import { Lead } from '@/types';
+import { Lead, LeadFilters as LeadFiltersType } from '@/types';
 import { useNavigate } from 'react-router-dom';
 
 export default function Leads() {
   const { currentWorkspace } = useAuth();
-  const { leads, isLoading, refetchLeads } = useLeads();
+  const { leads, isLoading, refetchLeads, deleteLeads, moveLeads } = useLeads();
+  const { lists, createList, refetchLists } = useLeadLists();
   const { credits, refetchCredits } = useCredits();
   const { toast } = useToast();
   const navigate = useNavigate();
@@ -48,6 +56,7 @@ export default function Leads() {
   const [onlyWithEmail, setOnlyWithEmail] = useState(true);
   const [searching, setSearching] = useState(false);
   const [pollingRunId, setPollingRunId] = useState<string | null>(null);
+  const [currentListId, setCurrentListId] = useState<string | null>(null);
 
   // Progress state for partial results
   const [searchProgress, setSearchProgress] = useState({
@@ -64,7 +73,73 @@ export default function Leads() {
   const [selectedLead, setSelectedLead] = useState<Lead | null>(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
 
-  async function handleSearch() {
+  // Filter state
+  const [filters, setFilters] = useState<LeadFiltersType>({
+    company: '',
+    jobTitle: '',
+    industry: '',
+    country: '',
+    listId: null,
+  });
+
+  // Dialog states
+  const [createListOpen, setCreateListOpen] = useState(false);
+  const [moveDialogOpen, setMoveDialogOpen] = useState(false);
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [isCreatingList, setIsCreatingList] = useState(false);
+  const [isMoving, setIsMoving] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
+
+  // Filtered leads based on filter state
+  const filteredLeads = useMemo(() => {
+    return leads.filter(lead => {
+      if (filters.company && !lead.company?.toLowerCase().includes(filters.company.toLowerCase())) {
+        return false;
+      }
+      if (filters.jobTitle && !lead.job_title?.toLowerCase().includes(filters.jobTitle.toLowerCase())) {
+        return false;
+      }
+      if (filters.industry && lead.industry !== filters.industry) {
+        return false;
+      }
+      if (filters.country && lead.country !== filters.country) {
+        return false;
+      }
+      if (filters.listId === 'no-list' && lead.list_id !== null) {
+        return false;
+      }
+      if (filters.listId && filters.listId !== 'no-list' && lead.list_id !== filters.listId) {
+        return false;
+      }
+      return true;
+    });
+  }, [leads, filters]);
+
+  function handleSearchClick() {
+    setCreateListOpen(true);
+  }
+
+  async function handleCreateListAndSearch(name: string, description?: string) {
+    if (!currentWorkspace) return;
+    
+    setIsCreatingList(true);
+    try {
+      const newList = await createList({ name, description });
+      setCreateListOpen(false);
+      setCurrentListId(newList.id);
+      await startSearch(newList.id);
+    } catch (error: any) {
+      toast({
+        title: 'Erro ao criar lista',
+        description: error.message,
+        variant: 'destructive',
+      });
+    } finally {
+      setIsCreatingList(false);
+    }
+  }
+
+  async function startSearch(listId: string) {
     if (!currentWorkspace) return;
     
     setSearching(true);
@@ -83,12 +158,12 @@ export default function Leads() {
           },
           fetch_count: fetchCount,
           onlyWithEmail,
+          listId,
         },
       });
 
       if (error) throw error;
 
-      // Check for 402 insufficient credits
       if (data.error?.includes('Insufficient') || data.error?.includes('créditos')) {
         toast({
           title: 'Créditos insuficientes',
@@ -105,12 +180,11 @@ export default function Leads() {
           title: 'Busca iniciada',
           description: 'Aguarde enquanto buscamos os leads...',
         });
-        pollForResults(data.runId);
+        pollForResults(data.runId, listId);
       } else {
         throw new Error(data.message || data.error || 'Erro ao iniciar busca');
       }
     } catch (error: any) {
-      // Handle 402 from edge function
       if (error.message?.includes('402') || error.message?.includes('créditos')) {
         toast({
           title: 'Créditos insuficientes',
@@ -128,9 +202,9 @@ export default function Leads() {
     }
   }
 
-  async function pollForResults(runId: string) {
+  async function pollForResults(runId: string, listId: string) {
     let attempts = 0;
-    const maxAttempts = 60; // 5 minutes with 5 second intervals
+    const maxAttempts = 60;
     
     const poll = async () => {
       if (attempts >= maxAttempts) {
@@ -152,13 +226,13 @@ export default function Leads() {
             workspaceId: currentWorkspace?.id,
             runId,
             onlyWithEmail,
-            fetchCount, // Pass limit to backend
+            fetchCount,
+            listId,
           },
         });
 
         if (error) throw error;
 
-        // Update progress from response
         if (data.progress) {
           setSearchProgress({
             totalItems: data.progress.totalItems || 0,
@@ -166,20 +240,20 @@ export default function Leads() {
           });
         }
 
-        // Update partial count and refetch if leads available
         if (data.leadsCount > 0) {
           setPartialCount(data.leadsCount);
           refetchLeads();
+          refetchLists();
         }
 
         if (data.status === 'SUCCEEDED') {
-          // Search completed - stop polling
           setSearching(false);
           setPollingRunId(null);
           setSearchProgress({ itemsProcessed: 0, totalItems: 0 });
           setPartialCount(0);
           refetchLeads();
           refetchCredits();
+          refetchLists();
           toast({
             title: 'Busca concluída',
             description: `${data.leadsCount || 0} leads encontrados`,
@@ -187,19 +261,18 @@ export default function Leads() {
         } else if (data.status === 'FAILED' || data.status === 'ABORTED') {
           throw new Error('A busca falhou');
         } else if (data.leadsCount >= fetchCount) {
-          // Reached requested limit - stop even if RUNNING
           setSearching(false);
           setPollingRunId(null);
           setSearchProgress({ itemsProcessed: 0, totalItems: 0 });
           setPartialCount(0);
           refetchLeads();
           refetchCredits();
+          refetchLists();
           toast({
             title: 'Busca concluída',
             description: `${data.leadsCount} leads encontrados (limite atingido)`,
           });
         } else {
-          // Still running - continue polling
           attempts++;
           setTimeout(poll, 5000);
         }
@@ -235,7 +308,6 @@ export default function Leads() {
 
       if (error) throw error;
 
-      // Check for 402 insufficient credits
       if (data.error?.includes('Insufficient') || data.error?.includes('créditos')) {
         toast({
           title: 'Créditos insuficientes',
@@ -277,10 +349,10 @@ export default function Leads() {
   }
 
   function toggleSelectAll() {
-    if (selectedLeads.size === leads.length) {
+    if (selectedLeads.size === filteredLeads.length) {
       setSelectedLeads(new Set());
     } else {
-      setSelectedLeads(new Set(leads.map(l => l.id)));
+      setSelectedLeads(new Set(filteredLeads.map(l => l.id)));
     }
   }
 
@@ -336,9 +408,50 @@ export default function Leads() {
   }
 
   function handleCreateCampaign() {
-    // Navigate to campaigns with selected leads
     const selectedIds = Array.from(selectedLeads);
     navigate('/campaigns', { state: { selectedLeadIds: selectedIds } });
+  }
+
+  async function handleDeleteLeads() {
+    setIsDeleting(true);
+    try {
+      await deleteLeads(Array.from(selectedLeads));
+      setSelectedLeads(new Set());
+      setDeleteDialogOpen(false);
+      toast({
+        title: 'Leads apagados',
+        description: `${selectedLeads.size} leads foram apagados com sucesso.`,
+      });
+    } catch (error: any) {
+      toast({
+        title: 'Erro ao apagar',
+        description: error.message,
+        variant: 'destructive',
+      });
+    } finally {
+      setIsDeleting(false);
+    }
+  }
+
+  async function handleMoveLeads(listId: string | null) {
+    setIsMoving(true);
+    try {
+      await moveLeads({ leadIds: Array.from(selectedLeads), listId });
+      setSelectedLeads(new Set());
+      setMoveDialogOpen(false);
+      toast({
+        title: 'Leads movidos',
+        description: `${selectedLeads.size} leads foram movidos com sucesso.`,
+      });
+    } catch (error: any) {
+      toast({
+        title: 'Erro ao mover',
+        description: error.message,
+        variant: 'destructive',
+      });
+    } finally {
+      setIsMoving(false);
+    }
   }
 
   function openLeadDetails(lead: Lead) {
@@ -495,7 +608,7 @@ export default function Leads() {
                   Apenas com email válido
                 </Label>
               </div>
-              <Button onClick={handleSearch} disabled={searching}>
+              <Button onClick={handleSearchClick} disabled={searching}>
                 {searching ? (
                   <>
                     <Loader2 className="mr-2 h-4 w-4 animate-spin" />
@@ -512,17 +625,45 @@ export default function Leads() {
           </CardContent>
         </Card>
 
+        {/* Lead Filters */}
+        <LeadFilters
+          filters={filters}
+          onFiltersChange={setFilters}
+          leads={leads}
+          lists={lists}
+        />
+
         {/* Leads Table */}
         <Card>
           <CardHeader>
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-3">
                 <CardTitle>Seus Leads</CardTitle>
-                <Badge variant="secondary">{leads.length} leads</Badge>
+                <Badge variant="secondary">{filteredLeads.length} leads</Badge>
+                {filteredLeads.length !== leads.length && (
+                  <Badge variant="outline">{leads.length} total</Badge>
+                )}
               </div>
               <div className="flex gap-2">
                 {selectedLeads.size > 0 && (
                   <>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setDeleteDialogOpen(true)}
+                      className="text-destructive hover:text-destructive"
+                    >
+                      <Trash2 className="mr-2 h-4 w-4" />
+                      Apagar ({selectedLeads.size})
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setMoveDialogOpen(true)}
+                    >
+                      <FolderInput className="mr-2 h-4 w-4" />
+                      Mover
+                    </Button>
                     <Button variant="outline" size="sm" onClick={exportCSV}>
                       <Download className="mr-2 h-4 w-4" />
                       Exportar ({selectedLeads.size})
@@ -546,11 +687,15 @@ export default function Leads() {
                   <Skeleton key={i} className="h-12 w-full" />
                 ))}
               </div>
-            ) : leads.length === 0 ? (
+            ) : filteredLeads.length === 0 ? (
               <div className="text-center py-12 text-muted-foreground">
                 <Users className="h-12 w-12 mx-auto mb-4 opacity-50" />
                 <p>Nenhum lead encontrado.</p>
-                <p className="text-sm">Use o formulário acima para buscar leads.</p>
+                <p className="text-sm">
+                  {leads.length > 0
+                    ? 'Tente ajustar os filtros.'
+                    : 'Use o formulário acima para buscar leads.'}
+                </p>
               </div>
             ) : (
               <div className="overflow-x-auto">
@@ -559,7 +704,7 @@ export default function Leads() {
                     <TableRow>
                       <TableHead className="w-12">
                         <Checkbox
-                          checked={selectedLeads.size === leads.length && leads.length > 0}
+                          checked={selectedLeads.size === filteredLeads.length && filteredLeads.length > 0}
                           onCheckedChange={toggleSelectAll}
                         />
                       </TableHead>
@@ -574,7 +719,7 @@ export default function Leads() {
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {leads.map((lead) => (
+                    {filteredLeads.map((lead) => (
                       <TableRow key={lead.id} className="group">
                         <TableCell>
                           <Checkbox
@@ -706,6 +851,33 @@ export default function Leads() {
         lead={selectedLead}
         open={drawerOpen}
         onOpenChange={setDrawerOpen}
+      />
+
+      {/* Create List Dialog */}
+      <CreateListDialog
+        open={createListOpen}
+        onOpenChange={setCreateListOpen}
+        onConfirm={handleCreateListAndSearch}
+        isLoading={isCreatingList}
+      />
+
+      {/* Move Leads Dialog */}
+      <MoveLeadsDialog
+        open={moveDialogOpen}
+        onOpenChange={setMoveDialogOpen}
+        onConfirm={handleMoveLeads}
+        lists={lists}
+        selectedCount={selectedLeads.size}
+        isLoading={isMoving}
+      />
+
+      {/* Delete Leads Dialog */}
+      <DeleteLeadsDialog
+        open={deleteDialogOpen}
+        onOpenChange={setDeleteDialogOpen}
+        onConfirm={handleDeleteLeads}
+        selectedCount={selectedLeads.size}
+        isLoading={isDeleting}
       />
     </AppLayout>
   );

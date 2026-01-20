@@ -43,7 +43,7 @@ serve(async (req) => {
 
     const body = await req.json();
     workspaceId = body.workspaceId;
-    const { filters, onlyWithEmail } = body;
+    const { filters, onlyWithEmail, listId } = body;
     fetchCount = body.fetch_count || 10;
 
     if (!workspaceId) {
@@ -170,7 +170,8 @@ serve(async (req) => {
     return new Response(JSON.stringify({
       success: true,
       runId,
-      requestId, // Return requestId for client reference
+      requestId,
+      listId: listId || null,
       message: 'Lead search started',
     }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
 

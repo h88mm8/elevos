@@ -162,6 +162,41 @@ export type Database = {
           },
         ]
       }
+      contact_profiles_cache: {
+        Row: {
+          cached_at: string
+          display_name: string | null
+          id: string
+          phone_identifier: string
+          profile_picture: string | null
+          workspace_id: string
+        }
+        Insert: {
+          cached_at?: string
+          display_name?: string | null
+          id?: string
+          phone_identifier: string
+          profile_picture?: string | null
+          workspace_id: string
+        }
+        Update: {
+          cached_at?: string
+          display_name?: string | null
+          id?: string
+          phone_identifier?: string
+          profile_picture?: string | null
+          workspace_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "contact_profiles_cache_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       credit_history: {
         Row: {
           amount: number

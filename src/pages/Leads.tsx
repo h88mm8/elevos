@@ -19,6 +19,7 @@ import { CountrySelect } from '@/components/leads/CountrySelect';
 import { LeadDetailsDrawer } from '@/components/leads/LeadDetailsDrawer';
 import { LeadFilters } from '@/components/leads/LeadFilters';
 import { CreateListDialog } from '@/components/leads/CreateListDialog';
+import { SearchListDialog } from '@/components/leads/SearchListDialog';
 import { MoveLeadsDialog } from '@/components/leads/MoveLeadsDialog';
 import { DeleteLeadsDialog } from '@/components/leads/DeleteLeadsDialog';
 import { 
@@ -83,10 +84,10 @@ export default function Leads() {
   });
 
   // Dialog states
-  const [createListOpen, setCreateListOpen] = useState(false);
+  const [searchListOpen, setSearchListOpen] = useState(false);
   const [moveDialogOpen, setMoveDialogOpen] = useState(false);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
-  const [isCreatingList, setIsCreatingList] = useState(false);
+  const [isSearchingList, setIsSearchingList] = useState(false);
   const [isMoving, setIsMoving] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
 
@@ -116,27 +117,38 @@ export default function Leads() {
   }, [leads, filters]);
 
   function handleSearchClick() {
-    setCreateListOpen(true);
+    setSearchListOpen(true);
   }
 
-  async function handleCreateListAndSearch(name: string, description?: string) {
+  async function handleSearchWithList(listId: string | null, newListName?: string, newListDescription?: string) {
     if (!currentWorkspace) return;
     
-    setIsCreatingList(true);
+    setIsSearchingList(true);
     try {
-      const newList = await createList({ name, description });
-      setCreateListOpen(false);
-      setCurrentListId(newList.id);
-      await startSearch(newList.id);
+      let targetListId = listId;
+      
+      // If creating a new list
+      if (!listId && newListName) {
+        const newList = await createList({ name: newListName, description: newListDescription });
+        targetListId = newList.id;
+      }
+      
+      if (!targetListId) {
+        throw new Error('Lista não selecionada');
+      }
+      
+      setSearchListOpen(false);
+      setCurrentListId(targetListId);
+      await startSearch(targetListId);
     } catch (error: any) {
       toast({
-        title: 'Erro ao criar lista',
+        title: 'Erro',
         description: error.message,
         variant: 'destructive',
       });
-    } finally {
-      setIsCreatingList(false);
+      setIsSearchingList(false);
     }
+    setIsSearchingList(false);
   }
 
   async function startSearch(listId: string) {
@@ -860,12 +872,13 @@ export default function Leads() {
         onOpenChange={setDrawerOpen}
       />
 
-      {/* Create List Dialog */}
-      <CreateListDialog
-        open={createListOpen}
-        onOpenChange={setCreateListOpen}
-        onConfirm={handleCreateListAndSearch}
-        isLoading={isCreatingList}
+      {/* Search List Dialog */}
+      <SearchListDialog
+        open={searchListOpen}
+        onOpenChange={setSearchListOpen}
+        onConfirm={handleSearchWithList}
+        lists={lists}
+        isLoading={isSearchingList}
       />
 
       {/* Move Leads Dialog */}

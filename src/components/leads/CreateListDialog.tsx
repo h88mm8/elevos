@@ -56,9 +56,9 @@ export function CreateListDialog({
               <FolderPlus className="h-5 w-5" />
               Criar Nova Lista
             </DialogTitle>
-            <DialogDescription>
-              Dê um nome para esta busca. Os leads encontrados serão salvos nesta lista.
-            </DialogDescription>
+          <DialogDescription>
+            Crie uma lista para organizar seus leads.
+          </DialogDescription>
           </DialogHeader>
           <div className="grid gap-4 py-4">
             <div className="space-y-2">
@@ -100,7 +100,7 @@ export function CreateListDialog({
                   Criando...
                 </>
               ) : (
-                'Criar e Buscar'
+                'Criar Lista'
               )}
             </Button>
           </DialogFooter>

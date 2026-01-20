@@ -631,6 +631,13 @@ export default function Leads() {
           onFiltersChange={setFilters}
           leads={leads}
           lists={lists}
+          onCreateList={async (name, description) => {
+            await createList({ name, description });
+            toast({
+              title: 'Lista criada',
+              description: `Lista "${name}" criada com sucesso.`,
+            });
+          }}
         />
 
         {/* Leads Table */}

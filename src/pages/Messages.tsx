@@ -249,7 +249,21 @@ export default function Messages() {
                         )}
                       >
                         <div className="flex items-start gap-3">
-                          <div className="h-10 w-10 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
+                          {chat.attendee_picture ? (
+                            <img 
+                              src={chat.attendee_picture} 
+                              alt={chat.attendee_name}
+                              className="h-10 w-10 rounded-full object-cover shrink-0"
+                              onError={(e) => {
+                                e.currentTarget.style.display = 'none';
+                                e.currentTarget.nextElementSibling?.classList.remove('hidden');
+                              }}
+                            />
+                          ) : null}
+                          <div className={cn(
+                            "h-10 w-10 rounded-full bg-primary/10 flex items-center justify-center shrink-0",
+                            chat.attendee_picture && "hidden"
+                          )}>
                             <User className="h-5 w-5 text-primary" />
                           </div>
                           <div className="flex-1 min-w-0">
@@ -289,7 +303,21 @@ export default function Messages() {
               <>
                 <CardHeader className="pb-3 border-b">
                   <div className="flex items-center gap-3">
-                    <div className="h-10 w-10 rounded-full bg-primary/10 flex items-center justify-center">
+                    {selectedChat.attendee_picture ? (
+                      <img 
+                        src={selectedChat.attendee_picture} 
+                        alt={selectedChat.attendee_name}
+                        className="h-10 w-10 rounded-full object-cover"
+                        onError={(e) => {
+                          e.currentTarget.style.display = 'none';
+                          e.currentTarget.nextElementSibling?.classList.remove('hidden');
+                        }}
+                      />
+                    ) : null}
+                    <div className={cn(
+                      "h-10 w-10 rounded-full bg-primary/10 flex items-center justify-center",
+                      selectedChat.attendee_picture && "hidden"
+                    )}>
                       <User className="h-5 w-5 text-primary" />
                     </div>
                     <div>

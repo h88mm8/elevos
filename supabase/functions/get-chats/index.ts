@@ -116,37 +116,81 @@ serve(async (req) => {
 
     const providerData = await providerResponse.json();
     console.log(`Retrieved ${providerData.items?.length || 0} chats from provider`);
-    
-    // Log sample structure for debugging
-    if (providerData.items?.length > 0) {
-      console.log('Sample chat structure:', JSON.stringify(providerData.items[0]).slice(0, 500));
+
+    // ============================================
+    // FETCH ATTENDEE PROFILES: Get names for contacts
+    // ============================================
+    const fetchAttendeeProfile = async (chat: any): Promise<{ displayName: string | null; profilePicture: string | null }> => {
+      try {
+        const identifier = chat.attendee_public_identifier || chat.attendee_provider_id;
+        if (!identifier || !chat.account_id) {
+          return { displayName: null, profilePicture: null };
+        }
+
+        const profileUrl = `https://${PROVIDER_DSN}/api/v1/users/${encodeURIComponent(identifier)}?account_id=${chat.account_id}`;
+        const profileResponse = await fetch(profileUrl, {
+          method: 'GET',
+          headers: {
+            'X-API-KEY': PROVIDER_API_KEY,
+            'accept': 'application/json',
+          },
+        });
+
+        if (!profileResponse.ok) {
+          console.log(`Could not fetch profile for ${identifier}: ${profileResponse.status}`);
+          return { displayName: null, profilePicture: null };
+        }
+
+        const profile = await profileResponse.json();
+        const displayName = profile.display_name || profile.name || 
+                           (profile.first_name && profile.last_name ? `${profile.first_name} ${profile.last_name}` : null) ||
+                           profile.first_name || null;
+        return { 
+          displayName, 
+          profilePicture: profile.profile_picture_url || profile.profile_picture || null 
+        };
+      } catch (err) {
+        console.log(`Error fetching profile: ${err}`);
+        return { displayName: null, profilePicture: null };
+      }
+    };
+
+    // Fetch profiles in parallel (limit concurrent requests to avoid rate limiting)
+    const chatItems = providerData.items || [];
+    const batchSize = 10;
+    const profiles: Map<string, { displayName: string | null; profilePicture: string | null }> = new Map();
+
+    for (let i = 0; i < chatItems.length; i += batchSize) {
+      const batch = chatItems.slice(i, i + batchSize);
+      const results = await Promise.all(
+        batch.map(async (chat: any) => ({
+          chatId: chat.id,
+          profile: await fetchAttendeeProfile(chat),
+        }))
+      );
+      results.forEach(r => profiles.set(r.chatId, r.profile));
     }
 
-    // Map provider response to our Chat interface
-    // Based on actual Unipile response structure from logs:
-    // {"object":"Chat","name":null,"type":0,"folder":["INBOX"],"pinned":0,"unread":0,
-    //  "archived":0,"read_only":0,"timestamp":"2026-01-20T23:00:44.000Z",
-    //  "account_id":"...","muted_until":null,"provider_id":"...",
-    //  "account_type":"WHATSAPP","unread_count":0,
-    //  "attendee_provider_id":"...","attendee_public_identifier":"556796637769@s.whatsapp.net",
-    //  "id":"nQpbh5msWOm2S11fyOe_uA"}
-    const mappedChats = (providerData.items || []).map((chat: any) => {
-      // Try to get a readable name from various fields
+    // Map provider response to our Chat interface with fetched names
+    const mappedChats = chatItems.map((chat: any) => {
+      const profile = profiles.get(chat.id);
       const attendeeIdentifier = chat.attendee_public_identifier || chat.attendee_provider_id || '';
-      // Extract phone number from WhatsApp identifier (e.g., "556796637769@s.whatsapp.net" -> "556796637769")
       const phoneNumber = attendeeIdentifier.split('@')[0] || '';
       const formattedPhone = phoneNumber ? `+${phoneNumber.slice(0, 2)} ${phoneNumber.slice(2)}` : '';
       
       return {
         id: chat.id || chat.chat_id,
         account_id: chat.account_id,
-        attendee_name: chat.name || formattedPhone || 'Contato',
+        attendee_name: profile?.displayName || chat.name || formattedPhone || 'Contato',
         attendee_email: null,
+        attendee_picture: profile?.profilePicture || null,
         last_message: chat.last_message?.text || chat.snippet || '',
         last_message_at: chat.timestamp || chat.last_message?.date || null,
         unread_count: chat.unread_count || chat.unread || 0,
       };
     });
+
+    console.log(`Mapped ${mappedChats.length} chats with profiles`);
 
     return new Response(JSON.stringify({
       success: true,

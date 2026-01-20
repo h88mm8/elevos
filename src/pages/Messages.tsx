@@ -7,6 +7,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Skeleton } from '@/components/ui/skeleton';
 import { useToast } from '@/hooks/use-toast';
+import { useNotificationSettings } from '@/hooks/useNotificationSettings';
 import { supabase } from '@/integrations/supabase/client';
 import { 
   MessageSquare, 
@@ -80,6 +81,7 @@ function highlightText(text: string, query: string): React.ReactNode {
 export default function Messages() {
   const { currentWorkspace, session } = useAuth();
   const { toast } = useToast();
+  const { soundEnabled } = useNotificationSettings();
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const messagesTopRef = useRef<HTMLDivElement>(null);
   const scrollAreaRef = useRef<HTMLDivElement>(null);
@@ -244,7 +246,10 @@ export default function Messages() {
             const senderName = chat?.attendee_name || 'Novo contato';
             
             // Play notification sound
-            playNotificationSound();
+            // Play notification sound if enabled
+            if (soundEnabled) {
+              playNotificationSound();
+            }
             
             // Show toast notification
             toast({
@@ -293,7 +298,7 @@ export default function Messages() {
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [currentWorkspace, chats, selectedChat, toast, isScrolledToBottom, playNotificationSound]);
+  }, [currentWorkspace, chats, selectedChat, toast, isScrolledToBottom, playNotificationSound, soundEnabled]);
 
   useEffect(() => {
     if (currentWorkspace) {

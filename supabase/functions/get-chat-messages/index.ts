@@ -119,12 +119,30 @@ serve(async (req) => {
         // If parsing fails, default to false
       }
       
+      // Determine message status based on provider fields
+      // seen: 0 = not seen, 1 = seen
+      // For sent messages (fromMe), we track delivery status
+      let status: 'sent' | 'delivered' | 'read' = 'sent';
+      if (isSender) {
+        // Check if message was read (seen > 0 or seen_by has entries)
+        const seenByCount = msg.seen_by ? Object.keys(msg.seen_by).length : 0;
+        if (msg.seen === 1 || seenByCount > 0) {
+          status = 'read';
+        } else if (msg.delivered === 1 || msg.ack >= 2) {
+          // ack levels: 0=pending, 1=sent, 2=delivered, 3=read (WhatsApp specific)
+          status = 'delivered';
+        } else if (msg.ack === 3) {
+          status = 'read';
+        }
+      }
+      
       return {
         id: msg.id || msg.message_id,
         chat_id: chatId,
         sender: isSender ? 'me' : 'them',
         text: msg.text || msg.body || msg.content || '',
         timestamp: msg.date || msg.timestamp || msg.created_at || null,
+        status: isSender ? status : undefined,
       };
     });
 

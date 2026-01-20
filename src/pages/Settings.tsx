@@ -44,7 +44,7 @@ export default function Settings() {
   const { profile, workspaces, currentWorkspace, setCurrentWorkspace, user } = useAuth();
   const { credits, creditHistory, isLoading: creditsLoading } = useCredits();
   const { members, isLoading: membersLoading, removeMember, updateRole } = useWorkspaceMembers();
-  const { accounts, isLoading: accountsLoading, syncAccounts, isSyncing, refetchAccounts } = useAccounts();
+  const { accounts, isLoading: accountsLoading, syncAccounts, isSyncing, refetchAccounts, deleteAccount, isDeleting } = useAccounts();
   const { soundEnabled, setSoundEnabled } = useNotificationSettings();
   const { toast } = useToast();
 
@@ -56,6 +56,8 @@ export default function Settings() {
   const [inviting, setInviting] = useState(false);
   const [connectingWhatsApp, setConnectingWhatsApp] = useState(false);
   const [waitingForConnection, setWaitingForConnection] = useState(false);
+  const [deleteAccountOpen, setDeleteAccountOpen] = useState(false);
+  const [accountToDelete, setAccountToDelete] = useState<{ id: string; name: string } | null>(null);
 
   const currentMember = members.find(m => m.user_id === user?.id);
   const isAdmin = currentMember?.role === 'admin';
@@ -279,6 +281,26 @@ export default function Settings() {
     } catch (error: any) {
       toast({
         title: 'Erro ao remover',
+        description: error.message,
+        variant: 'destructive',
+      });
+    }
+  }
+
+  async function handleDeleteAccount() {
+    if (!accountToDelete) return;
+    
+    try {
+      await deleteAccount(accountToDelete.id);
+      toast({
+        title: 'Conta removida',
+        description: 'A conta foi desconectada com sucesso.',
+      });
+      setDeleteAccountOpen(false);
+      setAccountToDelete(null);
+    } catch (error: any) {
+      toast({
+        title: 'Erro ao remover conta',
         description: error.message,
         variant: 'destructive',
       });
@@ -632,7 +654,8 @@ export default function Settings() {
                         <TableHead>Nome</TableHead>
                         <TableHead>Canal</TableHead>
                         <TableHead>Status</TableHead>
-                        <TableHead className="text-right">Atualizado</TableHead>
+                        <TableHead>Atualizado</TableHead>
+                        {isAdmin && <TableHead className="text-right">Ações</TableHead>}
                       </TableRow>
                     </TableHeader>
                     <TableBody>
@@ -662,15 +685,65 @@ export default function Settings() {
                                 {account.status === 'connected' ? 'Conectado' : 'Desconectado'}
                               </Badge>
                             </TableCell>
-                            <TableCell className="text-right">
+                            <TableCell>
                               {format(new Date(account.updated_at), 'dd/MM/yyyy HH:mm', { locale: ptBR })}
                             </TableCell>
+                            {isAdmin && (
+                              <TableCell className="text-right">
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  className="text-destructive hover:text-destructive hover:bg-destructive/10"
+                                  onClick={() => {
+                                    setAccountToDelete({
+                                      id: account.id,
+                                      name: account.name || account.account_id.slice(0, 12),
+                                    });
+                                    setDeleteAccountOpen(true);
+                                  }}
+                                >
+                                  <Trash2 className="h-4 w-4" />
+                                </Button>
+                              </TableCell>
+                            )}
                           </TableRow>
                         );
                       })}
                     </TableBody>
                   </Table>
                 )}
+
+                {/* Delete Account Confirmation Dialog */}
+                <Dialog open={deleteAccountOpen} onOpenChange={setDeleteAccountOpen}>
+                  <DialogContent>
+                    <DialogHeader>
+                      <DialogTitle>Remover Conta</DialogTitle>
+                      <DialogDescription>
+                        Tem certeza que deseja remover a conta "{accountToDelete?.name}"? 
+                        Esta ação não pode ser desfeita.
+                      </DialogDescription>
+                    </DialogHeader>
+                    <DialogFooter>
+                      <Button variant="outline" onClick={() => setDeleteAccountOpen(false)}>
+                        Cancelar
+                      </Button>
+                      <Button 
+                        variant="destructive" 
+                        onClick={handleDeleteAccount}
+                        disabled={isDeleting}
+                      >
+                        {isDeleting ? (
+                          <>
+                            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                            Removendo...
+                          </>
+                        ) : (
+                          'Remover'
+                        )}
+                      </Button>
+                    </DialogFooter>
+                  </DialogContent>
+                </Dialog>
               </CardContent>
             </Card>
           </TabsContent>

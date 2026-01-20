@@ -56,6 +56,24 @@ export function useAccounts(channel?: string) {
     },
   });
 
+  const deleteAccountMutation = useMutation({
+    mutationFn: async (accountId: string) => {
+      if (!currentWorkspace) throw new Error('No workspace selected');
+      
+      const { data, error } = await supabase.functions.invoke('delete-account', {
+        body: { workspaceId: currentWorkspace.id, accountId },
+      });
+      
+      if (error) throw error;
+      if (data.error) throw new Error(data.error);
+      
+      return data;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['accounts', currentWorkspace?.id] });
+    },
+  });
+
   return {
     accounts: accountsQuery.data ?? [],
     isLoading: accountsQuery.isLoading,
@@ -63,6 +81,8 @@ export function useAccounts(channel?: string) {
     error: accountsQuery.error,
     syncAccounts: syncAccountsMutation.mutateAsync,
     isSyncing: syncAccountsMutation.isPending,
+    deleteAccount: deleteAccountMutation.mutateAsync,
+    isDeleting: deleteAccountMutation.isPending,
     refetchAccounts: () => queryClient.invalidateQueries({ queryKey: ['accounts', currentWorkspace?.id] }),
   };
 }

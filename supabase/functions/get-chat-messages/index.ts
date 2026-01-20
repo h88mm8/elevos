@@ -94,10 +94,24 @@ serve(async (req) => {
 
     const providerData = await providerResponse.json();
     console.log(`Retrieved ${providerData.items?.length || 0} messages from chat ${chatId}`);
+    
+    // Log sample structure for debugging
+    if (providerData.items?.length > 0) {
+      console.log('Sample message structure:', JSON.stringify(providerData.items[0]).slice(0, 500));
+    }
+
+    // Map provider response to our Message interface
+    const mappedMessages = (providerData.items || []).map((msg: any) => ({
+      id: msg.id || msg.message_id,
+      chat_id: chatId,
+      sender: msg.is_sender || msg.sender_id === 'me' ? 'me' : 'them',
+      text: msg.text || msg.body || msg.content || '',
+      timestamp: msg.date || msg.timestamp || msg.created_at || null,
+    }));
 
     return new Response(JSON.stringify({
       success: true,
-      messages: providerData.items || [],
+      messages: mappedMessages,
       cursor: providerData.cursor,
     }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
 

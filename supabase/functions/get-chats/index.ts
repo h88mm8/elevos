@@ -116,10 +116,31 @@ serve(async (req) => {
 
     const providerData = await providerResponse.json();
     console.log(`Retrieved ${providerData.items?.length || 0} chats from provider`);
+    
+    // Log sample structure for debugging
+    if (providerData.items?.length > 0) {
+      console.log('Sample chat structure:', JSON.stringify(providerData.items[0]).slice(0, 500));
+    }
+
+    // Map provider response to our Chat interface
+    const mappedChats = (providerData.items || []).map((chat: any) => {
+      // Unipile returns attendees as an array, get the first non-self attendee
+      const attendee = chat.attendees?.find((a: any) => a.is_self !== true) || chat.attendees?.[0] || {};
+      
+      return {
+        id: chat.id || chat.chat_id,
+        account_id: chat.account_id,
+        attendee_name: attendee.display_name || attendee.name || chat.name || 'Sem nome',
+        attendee_email: attendee.email || null,
+        last_message: chat.last_message?.text || chat.last_message_text || '',
+        last_message_at: chat.last_message?.date || chat.last_message_date || chat.updated_at || null,
+        unread_count: chat.unread_count || 0,
+      };
+    });
 
     return new Response(JSON.stringify({
       success: true,
-      chats: providerData.items || [],
+      chats: mappedChats,
       cursor: providerData.cursor,
     }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
 

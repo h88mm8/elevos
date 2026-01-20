@@ -14,6 +14,50 @@ export type Database = {
   }
   public: {
     Tables: {
+      accounts: {
+        Row: {
+          account_id: string
+          channel: string
+          created_at: string
+          id: string
+          name: string | null
+          provider: string
+          status: string
+          updated_at: string
+          workspace_id: string
+        }
+        Insert: {
+          account_id: string
+          channel: string
+          created_at?: string
+          id?: string
+          name?: string | null
+          provider?: string
+          status?: string
+          updated_at?: string
+          workspace_id: string
+        }
+        Update: {
+          account_id?: string
+          channel?: string
+          created_at?: string
+          id?: string
+          name?: string | null
+          provider?: string
+          status?: string
+          updated_at?: string
+          workspace_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "accounts_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       campaign_leads: {
         Row: {
           campaign_id: string
@@ -345,6 +389,60 @@ export type Database = {
           },
           {
             foreignKeyName: "leads_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      messages: {
+        Row: {
+          account_id: string | null
+          attachments: Json | null
+          chat_id: string
+          created_at: string
+          external_id: string | null
+          id: string
+          sender: string
+          text: string | null
+          timestamp: string
+          workspace_id: string
+        }
+        Insert: {
+          account_id?: string | null
+          attachments?: Json | null
+          chat_id: string
+          created_at?: string
+          external_id?: string | null
+          id?: string
+          sender: string
+          text?: string | null
+          timestamp?: string
+          workspace_id: string
+        }
+        Update: {
+          account_id?: string | null
+          attachments?: Json | null
+          chat_id?: string
+          created_at?: string
+          external_id?: string | null
+          id?: string
+          sender?: string
+          text?: string | null
+          timestamp?: string
+          workspace_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "messages_account_id_fkey"
+            columns: ["account_id"]
+            isOneToOne: false
+            referencedRelation: "accounts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "messages_workspace_id_fkey"
             columns: ["workspace_id"]
             isOneToOne: false
             referencedRelation: "workspaces"

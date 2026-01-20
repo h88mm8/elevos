@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import { useCredits } from '@/hooks/useCredits';
 import { useWorkspaceMembers } from '@/hooks/useWorkspaceMembers';
+import { useAccounts } from '@/hooks/useAccounts';
 import AppLayout from '@/components/layout/AppLayout';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -22,7 +23,13 @@ import {
   Plus,
   Loader2,
   Trash2,
-  Crown
+  Crown,
+  RefreshCw,
+  MessageCircle,
+  Linkedin,
+  Mail,
+  CheckCircle2,
+  XCircle
 } from 'lucide-react';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
@@ -31,6 +38,7 @@ export default function Settings() {
   const { profile, workspaces, currentWorkspace, setCurrentWorkspace, user } = useAuth();
   const { credits, creditHistory, isLoading: creditsLoading } = useCredits();
   const { members, isLoading: membersLoading, removeMember, updateRole } = useWorkspaceMembers();
+  const { accounts, isLoading: accountsLoading, syncAccounts, isSyncing } = useAccounts();
   const { toast } = useToast();
 
   const [createWorkspaceOpen, setCreateWorkspaceOpen] = useState(false);
@@ -42,6 +50,34 @@ export default function Settings() {
 
   const currentMember = members.find(m => m.user_id === user?.id);
   const isAdmin = currentMember?.role === 'admin';
+
+  const channelIcons: Record<string, React.ElementType> = {
+    whatsapp: MessageCircle,
+    linkedin: Linkedin,
+    email: Mail,
+  };
+
+  const channelLabels: Record<string, string> = {
+    whatsapp: 'WhatsApp',
+    linkedin: 'LinkedIn',
+    email: 'Email',
+  };
+
+  async function handleSyncAccounts() {
+    try {
+      const result = await syncAccounts();
+      toast({
+        title: 'Contas sincronizadas',
+        description: `${result.synced} conta(s) atualizada(s).`,
+      });
+    } catch (error: any) {
+      toast({
+        title: 'Erro ao sincronizar',
+        description: error.message,
+        variant: 'destructive',
+      });
+    }
+  }
 
   async function handleCreateWorkspace() {
     if (!newWorkspaceName.trim()) return;
@@ -397,17 +433,97 @@ export default function Settings() {
           <TabsContent value="integrations" className="space-y-4">
             <Card>
               <CardHeader>
-                <CardTitle>Integrações</CardTitle>
-                <CardDescription>
-                  Contas conectadas para envio de mensagens
-                </CardDescription>
+                <div className="flex items-center justify-between">
+                  <div>
+                    <CardTitle>Contas Conectadas</CardTitle>
+                    <CardDescription>
+                      Contas de mensageria para envio de campanhas
+                    </CardDescription>
+                  </div>
+                  {isAdmin && (
+                    <Button 
+                      size="sm" 
+                      onClick={handleSyncAccounts}
+                      disabled={isSyncing}
+                    >
+                      {isSyncing ? (
+                        <>
+                          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                          Sincronizando...
+                        </>
+                      ) : (
+                        <>
+                          <RefreshCw className="mr-2 h-4 w-4" />
+                          Sincronizar Contas
+                        </>
+                      )}
+                    </Button>
+                  )}
+                </div>
               </CardHeader>
               <CardContent>
-                <div className="text-center py-12 text-muted-foreground">
-                  <Link2 className="h-12 w-12 mx-auto mb-4 opacity-50" />
-                  <p>Nenhuma integração configurada.</p>
-                  <p className="text-sm">As contas Unipile serão exibidas aqui.</p>
-                </div>
+                {accountsLoading ? (
+                  <div className="space-y-2">
+                    {[1, 2, 3].map((i) => (
+                      <Skeleton key={i} className="h-12 w-full" />
+                    ))}
+                  </div>
+                ) : accounts.length === 0 ? (
+                  <div className="text-center py-12 text-muted-foreground">
+                    <Link2 className="h-12 w-12 mx-auto mb-4 opacity-50" />
+                    <p>Nenhuma conta conectada.</p>
+                    <p className="text-sm">
+                      {isAdmin 
+                        ? 'Clique em "Sincronizar Contas" para buscar contas do painel de mensageria.' 
+                        : 'Peça a um admin para sincronizar as contas.'}
+                    </p>
+                  </div>
+                ) : (
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Nome</TableHead>
+                        <TableHead>Canal</TableHead>
+                        <TableHead>Status</TableHead>
+                        <TableHead className="text-right">Atualizado</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {accounts.map((account) => {
+                        const ChannelIcon = channelIcons[account.channel] || Link2;
+                        return (
+                          <TableRow key={account.id}>
+                            <TableCell className="font-medium">
+                              {account.name || account.account_id.slice(0, 12)}
+                            </TableCell>
+                            <TableCell>
+                              <div className="flex items-center gap-2">
+                                <ChannelIcon className="h-4 w-4" />
+                                {channelLabels[account.channel] || account.channel}
+                              </div>
+                            </TableCell>
+                            <TableCell>
+                              <Badge 
+                                variant={account.status === 'connected' ? 'default' : 'destructive'}
+                                className="gap-1"
+                              >
+                                {account.status === 'connected' ? (
+                                  <CheckCircle2 className="h-3 w-3" />
+                                ) : (
+                                  <XCircle className="h-3 w-3" />
+                                )}
+                                {account.status === 'connected' ? 'Conectado' : 'Desconectado'}
+                              </Badge>
+                            </TableCell>
+                            <TableCell className="text-right">
+                              {format(new Date(account.updated_at), 'dd/MM/yyyy HH:mm', { locale: ptBR })}
+                            </TableCell>
+                          </TableRow>
+                        );
+                      })}
+                    </TableBody>
+                  </Table>
+                )}
               </CardContent>
             </Card>
           </TabsContent>

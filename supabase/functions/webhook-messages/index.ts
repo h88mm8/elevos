@@ -1,0 +1,159 @@
+import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+
+const corsHeaders = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, x-webhook-signature',
+};
+
+interface WebhookEvent {
+  event: string;
+  data: {
+    id?: string;
+    chat_id?: string;
+    account_id?: string;
+    text?: string;
+    sender_id?: string;
+    timestamp?: string;
+    attachments?: unknown[];
+    // Account status events
+    status?: string;
+  };
+}
+
+serve(async (req) => {
+  if (req.method === 'OPTIONS') {
+    return new Response(null, { headers: corsHeaders });
+  }
+
+  // Only accept POST requests
+  if (req.method !== 'POST') {
+    return new Response(JSON.stringify({ error: 'Method not allowed' }), { 
+      status: 405, 
+      headers: corsHeaders 
+    });
+  }
+
+  try {
+    // Use service role for webhook operations (no user auth)
+    const supabase = createClient(
+      Deno.env.get('SUPABASE_URL')!,
+      Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
+    );
+
+    // Optional: Validate webhook signature
+    const signature = req.headers.get('x-webhook-signature');
+    // TODO: Implement signature validation if provider supports it
+    // const expectedSignature = computeHmac(body, secret);
+    // if (signature !== expectedSignature) { return 401 }
+
+    const body = await req.json();
+    console.log('Webhook received:', JSON.stringify(body).slice(0, 500));
+
+    // Handle different event formats
+    const events: WebhookEvent[] = Array.isArray(body) ? body : [body];
+
+    let processedCount = 0;
+    let errorCount = 0;
+
+    for (const event of events) {
+      try {
+        const eventType = event.event || 'unknown';
+        const data = event.data || event;
+
+        console.log(`Processing event: ${eventType}`);
+
+        switch (eventType) {
+          case 'message.received':
+          case 'message.sent':
+          case 'message': {
+            // Find account by provider account_id
+            const { data: account } = await supabase
+              .from('accounts')
+              .select('id, workspace_id')
+              .eq('account_id', data.account_id)
+              .maybeSingle();
+
+            if (!account) {
+              console.warn(`Account not found for account_id: ${data.account_id}`);
+              continue;
+            }
+
+            // Insert message
+            const { error: insertError } = await supabase
+              .from('messages')
+              .insert({
+                workspace_id: account.workspace_id,
+                account_id: account.id,
+                chat_id: data.chat_id || 'unknown',
+                external_id: data.id,
+                sender: data.sender_id === data.account_id ? 'me' : 'them',
+                text: data.text,
+                attachments: data.attachments,
+                timestamp: data.timestamp || new Date().toISOString(),
+              });
+
+            if (insertError) {
+              console.error('Error inserting message:', insertError);
+              errorCount++;
+            } else {
+              processedCount++;
+            }
+            break;
+          }
+
+          case 'account.status':
+          case 'account.updated': {
+            // Update account status
+            const newStatus = data.status === 'OK' || data.status === 'CONNECTED' 
+              ? 'connected' 
+              : 'disconnected';
+
+            const { error: updateError } = await supabase
+              .from('accounts')
+              .update({ status: newStatus, updated_at: new Date().toISOString() })
+              .eq('account_id', data.id);
+
+            if (updateError) {
+              console.error('Error updating account status:', updateError);
+              errorCount++;
+            } else {
+              processedCount++;
+              console.log(`Account ${data.id} status updated to ${newStatus}`);
+            }
+            break;
+          }
+
+          default:
+            console.log(`Unhandled event type: ${eventType}`);
+        }
+      } catch (eventError) {
+        console.error('Error processing event:', eventError);
+        errorCount++;
+      }
+    }
+
+    console.log(`Webhook processed: ${processedCount} success, ${errorCount} errors`);
+
+    return new Response(JSON.stringify({
+      success: true,
+      processed: processedCount,
+      errors: errorCount,
+    }), { 
+      status: 200, 
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
+    });
+
+  } catch (err) {
+    const error = err as Error;
+    console.error('Error in webhook-messages:', error);
+    // Always return 200 for webhooks to prevent retries
+    return new Response(JSON.stringify({ 
+      success: false, 
+      error: error.message 
+    }), { 
+      status: 200, 
+      headers: corsHeaders 
+    });
+  }
+});

@@ -61,6 +61,49 @@ serve(async (req) => {
     }
 
     // ============================================
+    // VALIDATE ACCOUNT: If accountId provided, verify it belongs to workspace
+    // ============================================
+    if (accountId) {
+      const { data: account, error: accountError } = await supabase
+        .from('accounts')
+        .select('id, channel, status')
+        .eq('id', accountId)
+        .eq('workspace_id', workspaceId)
+        .maybeSingle();
+
+      if (accountError || !account) {
+        return new Response(JSON.stringify({ 
+          error: 'Invalid account: account not found or does not belong to this workspace' 
+        }), { status: 400, headers: corsHeaders });
+      }
+
+      if (account.status !== 'connected') {
+        return new Response(JSON.stringify({ 
+          error: 'Account is not connected. Please reconnect the account.' 
+        }), { status: 400, headers: corsHeaders });
+      }
+
+      // Validate channel matches campaign type
+      if (type === 'whatsapp' && account.channel !== 'whatsapp') {
+        return new Response(JSON.stringify({ 
+          error: 'Selected account is not a WhatsApp account' 
+        }), { status: 400, headers: corsHeaders });
+      }
+      if (type === 'linkedin' && account.channel !== 'linkedin') {
+        return new Response(JSON.stringify({ 
+          error: 'Selected account is not a LinkedIn account' 
+        }), { status: 400, headers: corsHeaders });
+      }
+    }
+
+    // Require accountId for WhatsApp and LinkedIn campaigns
+    if ((type === 'whatsapp' || type === 'linkedin') && !accountId) {
+      return new Response(JSON.stringify({ 
+        error: `accountId is required for ${type} campaigns` 
+      }), { status: 400, headers: corsHeaders });
+    }
+
+    // ============================================
     // FILTER LEADS: Only include valid leads for campaign type
     // ============================================
     const validLeads = (leads as LeadInput[]).filter((lead: LeadInput) => {

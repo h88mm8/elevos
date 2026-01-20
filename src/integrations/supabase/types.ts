@@ -480,10 +480,38 @@ export type Database = {
         }
         Relationships: []
       }
+      qr_session_logs: {
+        Row: {
+          created_at: string
+          error: string | null
+          id: string
+          metadata: Json | null
+          session_id: string
+          status: string
+        }
+        Insert: {
+          created_at?: string
+          error?: string | null
+          id?: string
+          metadata?: Json | null
+          session_id: string
+          status: string
+        }
+        Update: {
+          created_at?: string
+          error?: string | null
+          id?: string
+          metadata?: Json | null
+          session_id?: string
+          status?: string
+        }
+        Relationships: []
+      }
       qr_sessions: {
         Row: {
           account_id: string | null
           account_name: string | null
+          attempts: number
           channel: string
           created_at: string
           error: string | null
@@ -498,6 +526,7 @@ export type Database = {
         Insert: {
           account_id?: string | null
           account_name?: string | null
+          attempts?: number
           channel?: string
           created_at?: string
           error?: string | null
@@ -512,6 +541,7 @@ export type Database = {
         Update: {
           account_id?: string | null
           account_name?: string | null
+          attempts?: number
           channel?: string
           created_at?: string
           error?: string | null

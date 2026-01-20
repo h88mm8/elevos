@@ -48,5 +48,5 @@ verify_jwt = false
 [functions.save-account]
 verify_jwt = false
 
-[functions.webhook-qr-status]
+[functions.webhook-account-status]
 verify_jwt = false

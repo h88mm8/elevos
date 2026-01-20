@@ -169,6 +169,72 @@ export default function Messages() {
     };
   }, [currentWorkspace]);
 
+  // Subscribe to new messages via Supabase Realtime
+  useEffect(() => {
+    if (!currentWorkspace) return;
+
+    const channel = supabase.channel(`messages:${currentWorkspace.id}`)
+      .on(
+        'postgres_changes',
+        {
+          event: 'INSERT',
+          schema: 'public',
+          table: 'messages',
+          filter: `workspace_id=eq.${currentWorkspace.id}`,
+        },
+        (payload) => {
+          const newMessage = payload.new as any;
+          
+          // Only notify for messages from others (not our own sends)
+          if (newMessage.sender !== 'me') {
+            // Find the chat for this message
+            const chat = chats.find(c => c.id === newMessage.chat_id);
+            const senderName = chat?.attendee_name || 'Novo contato';
+            
+            // Show toast notification
+            toast({
+              title: senderName,
+              description: newMessage.text?.slice(0, 100) || '📎 Anexo recebido',
+            });
+            
+            // Update unread count in chat list
+            setChats(prev => prev.map(c => 
+              c.id === newMessage.chat_id 
+                ? { 
+                    ...c, 
+                    unread_count: (c.unread_count || 0) + 1,
+                    last_message: newMessage.text || '📎 Anexo',
+                    last_message_at: newMessage.timestamp || new Date().toISOString(),
+                  }
+                : c
+            ));
+            
+            // If viewing this chat, add message to the list
+            if (selectedChat?.id === newMessage.chat_id) {
+              const mappedMessage: Message = {
+                id: newMessage.id,
+                chat_id: newMessage.chat_id,
+                sender: 'them',
+                text: newMessage.text || '',
+                timestamp: newMessage.timestamp || newMessage.created_at,
+              };
+              
+              setMessages(prev => {
+                // Avoid duplicates
+                if (prev.some(m => m.id === mappedMessage.id)) return prev;
+                return [...prev, mappedMessage];
+              });
+            }
+          }
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [currentWorkspace, chats, selectedChat, toast]);
+
   useEffect(() => {
     if (currentWorkspace) {
       fetchChats();

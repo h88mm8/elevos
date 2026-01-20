@@ -201,7 +201,9 @@ export default function Messages() {
                               {chat.last_message}
                             </p>
                             <p className="text-xs text-muted-foreground mt-1">
-                              {format(new Date(chat.last_message_at), 'dd/MM HH:mm', { locale: ptBR })}
+                              {chat.last_message_at && !isNaN(new Date(chat.last_message_at).getTime()) 
+                                ? format(new Date(chat.last_message_at), 'dd/MM HH:mm', { locale: ptBR })
+                                : '—'}
                             </p>
                           </div>
                         </div>
@@ -265,7 +267,9 @@ export default function Messages() {
                                 'text-xs mt-1',
                                 msg.sender === 'me' ? 'text-primary-foreground/70' : 'text-muted-foreground'
                               )}>
-                                {format(new Date(msg.timestamp), 'HH:mm', { locale: ptBR })}
+                                {msg.timestamp && !isNaN(new Date(msg.timestamp).getTime())
+                                  ? format(new Date(msg.timestamp), 'HH:mm', { locale: ptBR })
+                                  : '—'}
                               </p>
                             </div>
                           </div>

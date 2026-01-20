@@ -406,6 +406,22 @@ export default function Messages() {
     setMessageSearchQuery('');
     setMessageSearchActive(false);
     setCurrentMatchIndex(0);
+    
+    // Mark chat as read (reset unread count in UI immediately)
+    if (chat.unread_count > 0) {
+      setChats(prev => prev.map(c => 
+        c.id === chat.id ? { ...c, unread_count: 0 } : c
+      ));
+      
+      // Call backend to mark as read (fire and forget)
+      invokeAuthedFunction('mark-chat-read', {
+        workspaceId: currentWorkspace?.id,
+        chatId: chat.id,
+        accountId: chat.account_id,
+      }).catch(err => {
+        console.warn('Failed to mark chat as read:', err);
+      });
+    }
   }
 
   function handleFileSelect(e: React.ChangeEvent<HTMLInputElement>) {

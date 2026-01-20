@@ -1,10 +1,11 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
-import { Loader2, CheckCircle2, XCircle, QrCode, RefreshCw, Clock } from 'lucide-react';
+import { Loader2, CheckCircle2, XCircle, QrCode as QrCodeIcon, RefreshCw, Clock } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
 import { useToast } from '@/hooks/use-toast';
+import { QRCodeSVG } from 'qrcode.react';
 import type { RealtimeChannel } from '@supabase/supabase-js';
 
 interface ConnectWhatsAppModalProps {
@@ -224,6 +225,62 @@ export default function ConnectWhatsAppModal({
     return `${mins}:${secs.toString().padStart(2, '0')}`;
   };
 
+  // Detect if QR code is base64 image or raw text
+  const isBase64Image = (str: string) => {
+    return str.startsWith('data:image') || 
+           /^[A-Za-z0-9+/=]+$/.test(str) && str.length > 200 && !str.includes('@');
+  };
+
+  const renderQrCode = () => {
+    if (!qrCode) {
+      return (
+        <div className="flex flex-col items-center gap-4 py-8">
+          <QrCodeIcon className="h-16 w-16 text-muted-foreground animate-pulse" />
+          <p className="text-sm text-muted-foreground">Aguardando QR Code...</p>
+          <Loader2 className="h-5 w-5 animate-spin text-primary" />
+        </div>
+      );
+    }
+
+    console.log('QR Code format received:', {
+      length: qrCode.length,
+      startsWithData: qrCode.startsWith('data:'),
+      isBase64: isBase64Image(qrCode),
+      preview: qrCode.substring(0, 50) + '...',
+    });
+
+    // If it's a base64 image
+    if (isBase64Image(qrCode)) {
+      const imgSrc = qrCode.startsWith('data:') ? qrCode : `data:image/png;base64,${qrCode}`;
+      return (
+        <div className="bg-white p-4 rounded-lg shadow-sm">
+          <img 
+            src={imgSrc}
+            alt="QR Code"
+            className="w-64 h-64"
+            onError={(e) => {
+              console.error('Failed to load QR image, trying as raw text');
+              // If image fails to load, the isBase64Image check was wrong
+            }}
+          />
+        </div>
+      );
+    }
+
+    // Otherwise, render raw text as QR code using qrcode.react
+    console.log('Rendering QR code from raw text');
+    return (
+      <div className="bg-white p-4 rounded-lg shadow-sm">
+        <QRCodeSVG 
+          value={qrCode}
+          size={256}
+          level="M"
+          includeMargin={true}
+        />
+      </div>
+    );
+  };
+
   const renderContent = () => {
     switch (status) {
       case 'loading':
@@ -237,15 +294,9 @@ export default function ConnectWhatsAppModal({
       case 'pending':
         return (
           <div className="flex flex-col items-center justify-center py-6 gap-6">
-            {qrCode ? (
+            {renderQrCode()}
+            {qrCode && (
               <>
-                <div className="bg-white p-4 rounded-lg shadow-sm">
-                  <img 
-                    src={qrCode.startsWith('data:') ? qrCode : `data:image/png;base64,${qrCode}`}
-                    alt="QR Code"
-                    className="w-64 h-64"
-                  />
-                </div>
                 <div className="text-center space-y-2">
                   <p className="font-medium">Escaneie o QR Code</p>
                   <p className="text-sm text-muted-foreground">
@@ -262,12 +313,6 @@ export default function ConnectWhatsAppModal({
                   </p>
                 )}
               </>
-            ) : (
-              <div className="flex flex-col items-center gap-4 py-8">
-                <QrCode className="h-16 w-16 text-muted-foreground animate-pulse" />
-                <p className="text-sm text-muted-foreground">Carregando QR Code...</p>
-                <Loader2 className="h-5 w-5 animate-spin text-primary" />
-              </div>
             )}
           </div>
         );
@@ -341,7 +386,7 @@ export default function ConnectWhatsAppModal({
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
-            <QrCode className="h-5 w-5" />
+            <QrCodeIcon className="h-5 w-5" />
             Conectar Conta de Mensagens
           </DialogTitle>
           <DialogDescription>

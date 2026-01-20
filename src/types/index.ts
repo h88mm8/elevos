@@ -192,6 +192,7 @@ export interface Chat {
   account_id: string;
   attendee_name: string;
   attendee_email?: string;
+  attendee_picture?: string | null;
   last_message: string;
   last_message_at: string;
   unread_count: number;

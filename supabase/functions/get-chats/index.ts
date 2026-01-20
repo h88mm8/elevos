@@ -70,8 +70,8 @@ serve(async (req) => {
     // ============================================
     // CALL MESSAGING PROVIDER API: Get chats
     // ============================================
-    const PROVIDER_DSN = Deno.env.get('MESSAGING_DSN');
-    const PROVIDER_API_KEY = Deno.env.get('MESSAGING_API_KEY');
+    const PROVIDER_DSN = Deno.env.get('UNIPILE_DSN');
+    const PROVIDER_API_KEY = Deno.env.get('UNIPILE_API_KEY');
 
     if (!PROVIDER_DSN || !PROVIDER_API_KEY) {
       console.log('Messaging provider not configured, returning empty chats');

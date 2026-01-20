@@ -6,6 +6,9 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
+// Cache duration in hours
+const CACHE_DURATION_HOURS = 24;
+
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
@@ -21,6 +24,12 @@ serve(async (req) => {
       Deno.env.get('SUPABASE_URL')!,
       Deno.env.get('SUPABASE_ANON_KEY')!,
       { global: { headers: { Authorization: authHeader } } }
+    );
+
+    // Service role client for cache operations (bypasses RLS for inserts)
+    const supabaseAdmin = createClient(
+      Deno.env.get('SUPABASE_URL')!,
+      Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
     );
 
     const token = authHeader.replace('Bearer ', '');
@@ -102,7 +111,6 @@ serve(async (req) => {
       const errorText = await providerResponse.text();
       console.error('Provider API error:', providerResponse.status, errorText);
       
-      // Return empty array instead of failing
       if (providerResponse.status === 401 || providerResponse.status === 403) {
         return new Response(JSON.stringify({
           success: false,
@@ -115,16 +123,56 @@ serve(async (req) => {
     }
 
     const providerData = await providerResponse.json();
-    console.log(`Retrieved ${providerData.items?.length || 0} chats from provider`);
+    const chatItems = providerData.items || [];
+    console.log(`Retrieved ${chatItems.length} chats from provider`);
 
     // ============================================
-    // FETCH ATTENDEE PROFILES: Get names for contacts
+    // LOAD CACHED PROFILES: Check what we already have
     // ============================================
-    const fetchAttendeeProfile = async (chat: any): Promise<{ displayName: string | null; profilePicture: string | null }> => {
+    const phoneIdentifiers = chatItems
+      .map((chat: any) => {
+        const identifier = chat.attendee_public_identifier || chat.attendee_provider_id || '';
+        return identifier.split('@')[0] || '';
+      })
+      .filter((id: string) => id.length > 0);
+
+    const cacheExpiry = new Date(Date.now() - CACHE_DURATION_HOURS * 60 * 60 * 1000).toISOString();
+    
+    const { data: cachedProfiles } = await supabase
+      .from('contact_profiles_cache')
+      .select('phone_identifier, display_name, profile_picture')
+      .eq('workspace_id', workspaceId)
+      .in('phone_identifier', phoneIdentifiers)
+      .gte('cached_at', cacheExpiry);
+
+    const cachedMap = new Map<string, { displayName: string | null; profilePicture: string | null }>();
+    (cachedProfiles || []).forEach((p: any) => {
+      cachedMap.set(p.phone_identifier, {
+        displayName: p.display_name,
+        profilePicture: p.profile_picture,
+      });
+    });
+
+    console.log(`Found ${cachedMap.size} cached profiles out of ${phoneIdentifiers.length} contacts`);
+
+    // ============================================
+    // FETCH MISSING PROFILES: Only fetch what's not cached
+    // ============================================
+    const chatsNeedingFetch = chatItems.filter((chat: any) => {
+      const identifier = chat.attendee_public_identifier || chat.attendee_provider_id || '';
+      const phoneNumber = identifier.split('@')[0] || '';
+      return phoneNumber && !cachedMap.has(phoneNumber);
+    });
+
+    console.log(`Fetching ${chatsNeedingFetch.length} profiles from provider API`);
+
+    const fetchAttendeeProfile = async (chat: any): Promise<{ phoneNumber: string; displayName: string | null; profilePicture: string | null }> => {
+      const identifier = chat.attendee_public_identifier || chat.attendee_provider_id || '';
+      const phoneNumber = identifier.split('@')[0] || '';
+      
       try {
-        const identifier = chat.attendee_public_identifier || chat.attendee_provider_id;
         if (!identifier || !chat.account_id) {
-          return { displayName: null, profilePicture: null };
+          return { phoneNumber, displayName: null, profilePicture: null };
         }
 
         const profileUrl = `https://${PROVIDER_DSN}/api/v1/users/${encodeURIComponent(identifier)}?account_id=${chat.account_id}`;
@@ -138,7 +186,7 @@ serve(async (req) => {
 
         if (!profileResponse.ok) {
           console.log(`Could not fetch profile for ${identifier}: ${profileResponse.status}`);
-          return { displayName: null, profilePicture: null };
+          return { phoneNumber, displayName: null, profilePicture: null };
         }
 
         const profile = await profileResponse.json();
@@ -146,37 +194,72 @@ serve(async (req) => {
                            (profile.first_name && profile.last_name ? `${profile.first_name} ${profile.last_name}` : null) ||
                            profile.first_name || null;
         return { 
+          phoneNumber,
           displayName, 
           profilePicture: profile.profile_picture_url || profile.profile_picture || null 
         };
       } catch (err) {
         console.log(`Error fetching profile: ${err}`);
-        return { displayName: null, profilePicture: null };
+        return { phoneNumber, displayName: null, profilePicture: null };
       }
     };
 
     // Fetch profiles in parallel (limit concurrent requests to avoid rate limiting)
-    const chatItems = providerData.items || [];
     const batchSize = 10;
-    const profiles: Map<string, { displayName: string | null; profilePicture: string | null }> = new Map();
+    const newProfiles: Array<{ phoneNumber: string; displayName: string | null; profilePicture: string | null }> = [];
 
-    for (let i = 0; i < chatItems.length; i += batchSize) {
-      const batch = chatItems.slice(i, i + batchSize);
-      const results = await Promise.all(
-        batch.map(async (chat: any) => ({
-          chatId: chat.id,
-          profile: await fetchAttendeeProfile(chat),
-        }))
-      );
-      results.forEach(r => profiles.set(r.chatId, r.profile));
+    for (let i = 0; i < chatsNeedingFetch.length; i += batchSize) {
+      const batch = chatsNeedingFetch.slice(i, i + batchSize);
+      const results = await Promise.all(batch.map(fetchAttendeeProfile));
+      newProfiles.push(...results);
     }
 
-    // Map provider response to our Chat interface with fetched names
+    // ============================================
+    // SAVE NEW PROFILES TO CACHE
+    // ============================================
+    if (newProfiles.length > 0) {
+      const cacheInserts = newProfiles
+        .filter(p => p.phoneNumber && (p.displayName || p.profilePicture))
+        .map(p => ({
+          workspace_id: workspaceId,
+          phone_identifier: p.phoneNumber,
+          display_name: p.displayName,
+          profile_picture: p.profilePicture,
+          cached_at: new Date().toISOString(),
+        }));
+
+      if (cacheInserts.length > 0) {
+        const { error: cacheError } = await supabaseAdmin
+          .from('contact_profiles_cache')
+          .upsert(cacheInserts, { 
+            onConflict: 'workspace_id,phone_identifier',
+            ignoreDuplicates: false 
+          });
+
+        if (cacheError) {
+          console.log('Error caching profiles:', cacheError.message);
+        } else {
+          console.log(`Cached ${cacheInserts.length} new profiles`);
+        }
+      }
+    }
+
+    // Add new profiles to the map
+    newProfiles.forEach(p => {
+      cachedMap.set(p.phoneNumber, {
+        displayName: p.displayName,
+        profilePicture: p.profilePicture,
+      });
+    });
+
+    // ============================================
+    // MAP CHATS WITH PROFILES
+    // ============================================
     const mappedChats = chatItems.map((chat: any) => {
-      const profile = profiles.get(chat.id);
       const attendeeIdentifier = chat.attendee_public_identifier || chat.attendee_provider_id || '';
       const phoneNumber = attendeeIdentifier.split('@')[0] || '';
       const formattedPhone = phoneNumber ? `+${phoneNumber.slice(0, 2)} ${phoneNumber.slice(2)}` : '';
+      const profile = cachedMap.get(phoneNumber);
       
       return {
         id: chat.id || chat.chat_id,
@@ -190,7 +273,7 @@ serve(async (req) => {
       };
     });
 
-    console.log(`Mapped ${mappedChats.length} chats with profiles`);
+    console.log(`Mapped ${mappedChats.length} chats with profiles (${cachedMap.size} from cache)`);
 
     return new Response(JSON.stringify({
       success: true,

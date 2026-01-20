@@ -14,6 +14,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { Switch } from '@/components/ui/switch';
 import { useToast } from '@/hooks/use-toast';
 import { supabase } from '@/integrations/supabase/client';
+import { CountrySelect } from '@/components/leads/CountrySelect';
 import { 
   Search, 
   Phone, 
@@ -417,11 +418,9 @@ export default function Leads() {
               </div>
               <div className="space-y-2">
                 <Label htmlFor="country">País</Label>
-                <Input
-                  id="country"
-                  placeholder="Ex: Brazil"
+                <CountrySelect
                   value={country}
-                  onChange={(e) => setCountry(e.target.value)}
+                  onChange={setCountry}
                   disabled={searching}
                 />
               </div>

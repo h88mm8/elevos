@@ -124,7 +124,7 @@ serve(async (req) => {
     const requestBody = {
       type: 'create',
       providers: [providerChannel],
-      api_url: providerDsn,
+      api_url: `https://${providerDsn}`,
       expiresOn: expiresAt,
       notify_url: webhookUrl,
       name: workspaceId, // Used to correlate in webhook

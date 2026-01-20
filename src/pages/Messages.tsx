@@ -14,12 +14,31 @@ import {
   Loader2,
   User,
   Search,
-  ChevronUp
+  ChevronUp,
+  Paperclip,
+  X,
+  Image,
+  FileText,
+  Film,
+  Music
 } from 'lucide-react';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import { cn } from '@/lib/utils';
 import { Chat, Message } from '@/types';
+
+const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
+const ALLOWED_TYPES = [
+  'image/jpeg', 'image/png', 'image/gif', 'image/webp',
+  'application/pdf', 'video/mp4', 'audio/mpeg', 'audio/ogg'
+];
+
+function getFileIcon(mimeType: string) {
+  if (mimeType.startsWith('image/')) return Image;
+  if (mimeType.startsWith('video/')) return Film;
+  if (mimeType.startsWith('audio/')) return Music;
+  return FileText;
+}
 
 export default function Messages() {
   const { currentWorkspace } = useAuth();
@@ -27,6 +46,7 @@ export default function Messages() {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const messagesTopRef = useRef<HTMLDivElement>(null);
   const scrollAreaRef = useRef<HTMLDivElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const [chats, setChats] = useState<Chat[]>([]);
   const [selectedChat, setSelectedChat] = useState<Chat | null>(null);
@@ -41,6 +61,11 @@ export default function Messages() {
   const [cursor, setCursor] = useState<string | null>(null);
   const [hasMore, setHasMore] = useState(true);
   const [typingChats, setTypingChats] = useState<Record<string, boolean>>({});
+  
+  // Attachment state
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [filePreview, setFilePreview] = useState<string | null>(null);
+  const [uploading, setUploading] = useState(false);
 
   // Subscribe to typing events
   useEffect(() => {
@@ -80,6 +105,15 @@ export default function Messages() {
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages.length > 0 && messages[messages.length - 1]?.id]);
+
+  // Cleanup file preview URL
+  useEffect(() => {
+    return () => {
+      if (filePreview) {
+        URL.revokeObjectURL(filePreview);
+      }
+    };
+  }, [filePreview]);
 
   async function fetchChats() {
     setLoadingChats(true);
@@ -151,10 +185,58 @@ export default function Messages() {
   function handleSelectChat(chat: Chat) {
     setSelectedChat(chat);
     fetchMessages(chat.id);
+    // Clear any selected file when changing chats
+    clearSelectedFile();
+  }
+
+  function handleFileSelect(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    // Validate file type
+    if (!ALLOWED_TYPES.includes(file.type)) {
+      toast({
+        title: 'Tipo de arquivo não suportado',
+        description: 'Apenas imagens (JPEG, PNG, GIF, WebP), PDFs, vídeos (MP4) e áudios (MP3, OGG) são permitidos.',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    // Validate file size
+    if (file.size > MAX_FILE_SIZE) {
+      toast({
+        title: 'Arquivo muito grande',
+        description: 'O tamanho máximo é 10MB.',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    setSelectedFile(file);
+    
+    // Create preview for images
+    if (file.type.startsWith('image/')) {
+      const url = URL.createObjectURL(file);
+      setFilePreview(url);
+    } else {
+      setFilePreview(null);
+    }
+  }
+
+  function clearSelectedFile() {
+    if (filePreview) {
+      URL.revokeObjectURL(filePreview);
+    }
+    setSelectedFile(null);
+    setFilePreview(null);
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
+    }
   }
 
   async function handleSendMessage() {
-    if (!newMessage.trim() || !selectedChat) return;
+    if ((!newMessage.trim() && !selectedFile) || !selectedChat) return;
 
     const messageText = newMessage;
     setNewMessage('');
@@ -165,17 +247,53 @@ export default function Messages() {
       id: 'temp-' + Date.now(),
       chat_id: selectedChat.id,
       sender: 'me',
-      text: messageText,
+      text: messageText || (selectedFile ? `📎 ${selectedFile.name}` : ''),
       timestamp: new Date().toISOString(),
     };
     setMessages(prev => [...prev, tempMessage]);
 
     try {
+      let attachmentUrl: string | undefined;
+      let attachmentType: string | undefined;
+      let attachmentName: string | undefined;
+
+      // Upload file if selected
+      if (selectedFile && currentWorkspace) {
+        setUploading(true);
+        
+        const fileExt = selectedFile.name.split('.').pop();
+        const fileName = `${crypto.randomUUID()}.${fileExt}`;
+        const filePath = `${currentWorkspace.id}/${selectedChat.id}/${fileName}`;
+
+        const { error: uploadError } = await supabase.storage
+          .from('message-attachments')
+          .upload(filePath, selectedFile);
+
+        if (uploadError) throw uploadError;
+
+        // Get a signed URL for the file (valid for 1 hour)
+        const { data: signedUrlData, error: signedUrlError } = await supabase.storage
+          .from('message-attachments')
+          .createSignedUrl(filePath, 3600);
+
+        if (signedUrlError) throw signedUrlError;
+
+        attachmentUrl = signedUrlData.signedUrl;
+        attachmentType = selectedFile.type;
+        attachmentName = selectedFile.name;
+        
+        setUploading(false);
+        clearSelectedFile();
+      }
+
       const { data, error } = await supabase.functions.invoke('send-message', {
         body: {
           workspaceId: currentWorkspace?.id,
           chatId: selectedChat.id,
-          text: messageText,
+          text: messageText || undefined,
+          attachmentUrl,
+          attachmentType,
+          attachmentName,
         },
       });
 
@@ -195,6 +313,7 @@ export default function Messages() {
         description: error.message,
         variant: 'destructive',
       });
+      setUploading(false);
     } finally {
       setSending(false);
     }
@@ -204,6 +323,8 @@ export default function Messages() {
     (chat.attendee_name?.toLowerCase() || '').includes(searchQuery.toLowerCase()) ||
     (chat.attendee_email?.toLowerCase() || '').includes(searchQuery.toLowerCase())
   );
+
+  const FileIcon = selectedFile ? getFileIcon(selectedFile.type) : FileText;
 
   return (
     <AppLayout>
@@ -397,7 +518,39 @@ export default function Messages() {
                     )}
                   </ScrollArea>
                 </CardContent>
-                <div className="p-4 border-t">
+                <div className="p-4 border-t space-y-2">
+                  {/* File preview */}
+                  {selectedFile && (
+                    <div className="flex items-center gap-3 p-3 bg-muted rounded-lg">
+                      {filePreview ? (
+                        <img 
+                          src={filePreview} 
+                          alt="Preview" 
+                          className="h-16 w-16 object-cover rounded"
+                        />
+                      ) : (
+                        <div className="h-16 w-16 bg-background rounded flex items-center justify-center">
+                          <FileIcon className="h-8 w-8 text-muted-foreground" />
+                        </div>
+                      )}
+                      <div className="flex-1 min-w-0">
+                        <p className="font-medium truncate">{selectedFile.name}</p>
+                        <p className="text-sm text-muted-foreground">
+                          {(selectedFile.size / 1024).toFixed(1)} KB
+                        </p>
+                      </div>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        onClick={clearSelectedFile}
+                        disabled={sending}
+                      >
+                        <X className="h-4 w-4" />
+                      </Button>
+                    </div>
+                  )}
+                  
                   <form
                     onSubmit={(e) => {
                       e.preventDefault();
@@ -405,14 +558,30 @@ export default function Messages() {
                     }}
                     className="flex gap-2"
                   >
+                    <input
+                      ref={fileInputRef}
+                      type="file"
+                      accept={ALLOWED_TYPES.join(',')}
+                      onChange={handleFileSelect}
+                      className="hidden"
+                    />
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="icon"
+                      onClick={() => fileInputRef.current?.click()}
+                      disabled={sending || uploading}
+                    >
+                      <Paperclip className="h-4 w-4" />
+                    </Button>
                     <Input
                       placeholder="Digite sua mensagem..."
                       value={newMessage}
                       onChange={(e) => setNewMessage(e.target.value)}
                       disabled={sending}
                     />
-                    <Button type="submit" disabled={sending || !newMessage.trim()}>
-                      {sending ? (
+                    <Button type="submit" disabled={sending || uploading || (!newMessage.trim() && !selectedFile)}>
+                      {sending || uploading ? (
                         <Loader2 className="h-4 w-4 animate-spin" />
                       ) : (
                         <Send className="h-4 w-4" />

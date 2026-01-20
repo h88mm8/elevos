@@ -123,18 +123,16 @@ serve(async (req) => {
       apifyInput.company_domain = Array.isArray(domain) ? domain : [domain];
     }
 
-    // contact_location - for country/region (array)
+    // contact_location - for country/region (array) - MUST be lowercase
     if (filters?.country) {
-      apifyInput.contact_location = Array.isArray(filters.country) 
-        ? filters.country 
-        : [filters.country];
+      const countries = Array.isArray(filters.country) ? filters.country : [filters.country];
+      apifyInput.contact_location = countries.map((c: string) => c.toLowerCase().trim());
     }
 
-    // contact_city - for specific city (Localização field in UI)
+    // contact_city - for specific city (Localização field in UI) - lowercase for consistency
     if (filters?.location) {
-      apifyInput.contact_city = Array.isArray(filters.location) 
-        ? filters.location 
-        : [filters.location];
+      const cities = Array.isArray(filters.location) ? filters.location : [filters.location];
+      apifyInput.contact_city = cities.map((c: string) => c.toLowerCase().trim());
     }
 
     // Log the EXACT payload being sent

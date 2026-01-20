@@ -159,11 +159,15 @@ export default function Settings() {
           table: 'accounts',
           filter: `workspace_id=eq.${currentWorkspace.id}`,
         },
-        (payload) => {
+        async (payload) => {
           console.log('Account change detected:', payload);
-          refetchAccounts();
-          if (payload.eventType === 'INSERT' || (payload.eventType === 'UPDATE' && payload.new?.status === 'connected')) {
+          await refetchAccounts();
+          
+          // Check if the event is INSERT or UPDATE with connected status
+          if (payload.eventType === 'INSERT' || 
+              (payload.eventType === 'UPDATE' && (payload.new as any)?.status === 'connected')) {
             setWaitingForConnection(false);
+            setConnectingWhatsApp(false);
             toast({
               title: 'Conta conectada!',
               description: 'Uma nova conta foi adicionada com sucesso.',
@@ -177,6 +181,14 @@ export default function Settings() {
       supabase.removeChannel(channel);
     };
   }, [currentWorkspace?.id, refetchAccounts, toast]);
+
+  // Check if accounts have connected status and reset waiting state
+  useEffect(() => {
+    if (waitingForConnection && accounts.some(acc => acc.status === 'connected')) {
+      setWaitingForConnection(false);
+      setConnectingWhatsApp(false);
+    }
+  }, [accounts, waitingForConnection]);
 
   async function handleCreateWorkspace() {
     if (!newWorkspaceName.trim()) return;

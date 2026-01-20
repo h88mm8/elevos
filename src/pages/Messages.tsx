@@ -40,6 +40,36 @@ export default function Messages() {
   const [searchQuery, setSearchQuery] = useState('');
   const [cursor, setCursor] = useState<string | null>(null);
   const [hasMore, setHasMore] = useState(true);
+  const [typingChats, setTypingChats] = useState<Record<string, boolean>>({});
+
+  // Subscribe to typing events
+  useEffect(() => {
+    if (!currentWorkspace) return;
+
+    const channel = supabase.channel(`typing:${currentWorkspace.id}`)
+      .on('broadcast', { event: 'typing' }, (payload) => {
+        const { chat_id, is_typing } = payload.payload;
+        setTypingChats(prev => ({
+          ...prev,
+          [chat_id]: is_typing,
+        }));
+
+        // Auto-clear typing indicator after 5 seconds
+        if (is_typing) {
+          setTimeout(() => {
+            setTypingChats(prev => ({
+              ...prev,
+              [chat_id]: false,
+            }));
+          }, 5000);
+        }
+      })
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [currentWorkspace]);
 
   useEffect(() => {
     if (currentWorkspace) {
@@ -232,7 +262,11 @@ export default function Messages() {
                               )}
                             </div>
                             <p className="text-sm text-muted-foreground truncate">
-                              {chat.last_message}
+                              {typingChats[chat.id] ? (
+                                <span className="text-primary italic">digitando...</span>
+                              ) : (
+                                chat.last_message
+                              )}
                             </p>
                             <p className="text-xs text-muted-foreground mt-1">
                               {chat.last_message_at && !isNaN(new Date(chat.last_message_at).getTime()) 
@@ -260,9 +294,11 @@ export default function Messages() {
                     </div>
                     <div>
                       <CardTitle className="text-lg">{selectedChat.attendee_name}</CardTitle>
-                      {selectedChat.attendee_email && (
+                      {typingChats[selectedChat.id] ? (
+                        <p className="text-sm text-primary italic animate-pulse">digitando...</p>
+                      ) : selectedChat.attendee_email ? (
                         <p className="text-sm text-muted-foreground">{selectedChat.attendee_email}</p>
-                      )}
+                      ) : null}
                     </div>
                   </div>
                 </CardHeader>

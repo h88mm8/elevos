@@ -247,6 +247,7 @@ export default function Messages() {
 
   // Subscribe to new messages via Supabase Realtime
   // Using refs to avoid re-subscribing on every state change
+  // Process both 'me' and 'them' messages for real-time sync
   useEffect(() => {
     if (!currentWorkspace) return;
 
@@ -261,73 +262,96 @@ export default function Messages() {
         },
         (payload) => {
           const newMessage = payload.new as any;
+          const isSenderMe = newMessage.sender === 'me';
+          const isViewingThisChat = selectedChatRef.current?.id === newMessage.chat_id;
           
-          // Only notify for messages from others (not our own sends)
-          if (newMessage.sender !== 'me') {
+          console.log(`Realtime message: sender=${newMessage.sender}, chat=${newMessage.chat_id}, viewing=${isViewingThisChat}`);
+          
+          // Notify only for messages from others
+          if (!isSenderMe) {
             // Find the chat for this message using ref
             const chat = chatsRef.current.find(c => c.id === newMessage.chat_id);
             const senderName = chat?.attendee_name || 'Novo contato';
             
-            // Play notification sound if enabled (using ref)
-            if (soundEnabledRef.current) {
+            // Play notification sound if enabled (using ref) and not viewing this chat
+            if (soundEnabledRef.current && !isViewingThisChat) {
               playNotificationSound();
             }
             
-            // Show toast notification
-            toast({
-              title: senderName,
-              description: newMessage.text?.slice(0, 100) || '📎 Anexo recebido',
+            // Show toast notification only if not viewing this chat
+            if (!isViewingThisChat) {
+              toast({
+                title: senderName,
+                description: newMessage.text?.slice(0, 100) || '📎 Anexo recebido',
+              });
+            }
+          }
+          
+          // Update chat list for both sender types
+          setChats(prev => prev.map(c => 
+            c.id === newMessage.chat_id 
+              ? { 
+                  ...c, 
+                  // Only increment unread for 'them' messages and only if not viewing
+                  unread_count: (!isSenderMe && !isViewingThisChat) ? (c.unread_count || 0) + 1 : c.unread_count,
+                  last_message: newMessage.text || '📎 Anexo',
+                  last_message_at: newMessage.timestamp || new Date().toISOString(),
+                }
+              : c
+          ));
+          
+          // If viewing this chat, add message to the list (for both 'me' and 'them')
+          if (isViewingThisChat) {
+            // Parse attachments from the database payload
+            let attachments: Message['attachments'] = undefined;
+            if (newMessage.attachments) {
+              try {
+                const parsed = typeof newMessage.attachments === 'string' 
+                  ? JSON.parse(newMessage.attachments) 
+                  : newMessage.attachments;
+                if (Array.isArray(parsed) && parsed.length > 0) {
+                  attachments = parsed;
+                }
+              } catch (e) {
+                console.warn('Failed to parse attachments:', e);
+              }
+            }
+            
+            const mappedMessage: Message = {
+              id: newMessage.id,
+              chat_id: newMessage.chat_id,
+              sender: isSenderMe ? 'me' : 'them',
+              text: newMessage.text || '',
+              timestamp: newMessage.timestamp || newMessage.created_at,
+              attachments,
+              // For 'me' messages from webhook, mark as sent
+              status: isSenderMe ? 'sent' : undefined,
+            };
+            
+            setMessages(prev => {
+              // Avoid duplicates (check by id and external_id pattern)
+              if (prev.some(m => m.id === mappedMessage.id)) return prev;
+              // Also check if we have a temp message with similar content
+              const hasSimilarTempMessage = prev.some(m => 
+                m.id.startsWith('temp-') && 
+                m.sender === 'me' && 
+                m.text === mappedMessage.text &&
+                Math.abs(new Date(m.timestamp).getTime() - new Date(mappedMessage.timestamp).getTime()) < 5000
+              );
+              if (hasSimilarTempMessage && isSenderMe) {
+                // Replace temp message with real one
+                return prev.map(m => 
+                  m.id.startsWith('temp-') && m.sender === 'me' && m.text === mappedMessage.text
+                    ? { ...mappedMessage, status: 'sent' }
+                    : m
+                );
+              }
+              return [...prev, mappedMessage];
             });
             
-            // Update unread count in chat list (only if not viewing this chat)
-            const isViewingThisChat = selectedChatRef.current?.id === newMessage.chat_id;
-            setChats(prev => prev.map(c => 
-              c.id === newMessage.chat_id 
-                ? { 
-                    ...c, 
-                    unread_count: isViewingThisChat ? 0 : (c.unread_count || 0) + 1,
-                    last_message: newMessage.text || '📎 Anexo',
-                    last_message_at: newMessage.timestamp || new Date().toISOString(),
-                  }
-                : c
-            ));
-            
-            // If viewing this chat, add message to the list
-            if (isViewingThisChat) {
-              // Parse attachments from the database payload
-              let attachments: Message['attachments'] = undefined;
-              if (newMessage.attachments) {
-                try {
-                  const parsed = typeof newMessage.attachments === 'string' 
-                    ? JSON.parse(newMessage.attachments) 
-                    : newMessage.attachments;
-                  if (Array.isArray(parsed) && parsed.length > 0) {
-                    attachments = parsed;
-                  }
-                } catch (e) {
-                  console.warn('Failed to parse attachments:', e);
-                }
-              }
-              
-              const mappedMessage: Message = {
-                id: newMessage.id,
-                chat_id: newMessage.chat_id,
-                sender: 'them',
-                text: newMessage.text || '',
-                timestamp: newMessage.timestamp || newMessage.created_at,
-                attachments,
-              };
-              
-              setMessages(prev => {
-                // Avoid duplicates
-                if (prev.some(m => m.id === mappedMessage.id)) return prev;
-                return [...prev, mappedMessage];
-              });
-              
-              // Show new messages indicator if not scrolled to bottom (using ref)
-              if (!isScrolledToBottomRef.current) {
-                setHasNewMessages(true);
-              }
+            // Show new messages indicator if not scrolled to bottom (using ref)
+            if (!isScrolledToBottomRef.current && !isSenderMe) {
+              setHasNewMessages(true);
             }
           }
         }

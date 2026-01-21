@@ -54,10 +54,16 @@ export default function Settings() {
   const { settings, updateSettings, isUpdating: isUpdatingSettings } = useWorkspaceSettings();
   const { toast } = useToast();
 
-  // States for sending limits
+  // States for WhatsApp sending limits
   const [dailyLimit, setDailyLimit] = useState<number>(50);
   const [intervalSeconds, setIntervalSeconds] = useState<number>(15);
   const [maxRetries, setMaxRetries] = useState<number>(3);
+  
+  // States for LinkedIn sending limits
+  const [linkedinDailyMessageLimit, setLinkedinDailyMessageLimit] = useState<number>(50);
+  const [linkedinDailyInviteLimit, setLinkedinDailyInviteLimit] = useState<number>(25);
+  const [linkedinIntervalSeconds, setLinkedinIntervalSeconds] = useState<number>(30);
+  
   const [settingsChanged, setSettingsChanged] = useState(false);
 
   // Initialize settings from hook
@@ -66,18 +72,24 @@ export default function Settings() {
       setDailyLimit(settings.daily_message_limit);
       setIntervalSeconds(settings.message_interval_seconds);
       setMaxRetries(settings.max_retries ?? 3);
+      setLinkedinDailyMessageLimit(settings.linkedin_daily_message_limit ?? 50);
+      setLinkedinDailyInviteLimit(settings.linkedin_daily_invite_limit ?? 25);
+      setLinkedinIntervalSeconds(settings.linkedin_message_interval_seconds ?? 30);
     }
   }, [settings]);
 
   // Track settings changes
   useEffect(() => {
     if (settings) {
-      const changed = dailyLimit !== settings.daily_message_limit || 
-                      intervalSeconds !== settings.message_interval_seconds ||
-                      maxRetries !== (settings.max_retries ?? 3);
-      setSettingsChanged(changed);
+      const whatsappChanged = dailyLimit !== settings.daily_message_limit || 
+                              intervalSeconds !== settings.message_interval_seconds ||
+                              maxRetries !== (settings.max_retries ?? 3);
+      const linkedinChanged = linkedinDailyMessageLimit !== (settings.linkedin_daily_message_limit ?? 50) ||
+                              linkedinDailyInviteLimit !== (settings.linkedin_daily_invite_limit ?? 25) ||
+                              linkedinIntervalSeconds !== (settings.linkedin_message_interval_seconds ?? 30);
+      setSettingsChanged(whatsappChanged || linkedinChanged);
     }
-  }, [dailyLimit, intervalSeconds, maxRetries, settings]);
+  }, [dailyLimit, intervalSeconds, maxRetries, linkedinDailyMessageLimit, linkedinDailyInviteLimit, linkedinIntervalSeconds, settings]);
 
   async function handleSaveSettings() {
     try {
@@ -85,6 +97,9 @@ export default function Settings() {
         daily_message_limit: dailyLimit,
         message_interval_seconds: intervalSeconds,
         max_retries: maxRetries,
+        linkedin_daily_message_limit: linkedinDailyMessageLimit,
+        linkedin_daily_invite_limit: linkedinDailyInviteLimit,
+        linkedin_message_interval_seconds: linkedinIntervalSeconds,
       });
       toast({
         title: 'Configurações salvas',
@@ -1212,21 +1227,175 @@ export default function Settings() {
 
               {/* LinkedIn Preferences */}
               <TabsContent value="linkedin" className="space-y-4">
+                {/* Card de Limites de Envio LinkedIn */}
+                <Card>
+                  <CardHeader>
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <CardTitle className="flex items-center gap-2">
+                          <Clock className="h-5 w-5" />
+                          Limites de Envio LinkedIn
+                        </CardTitle>
+                        <CardDescription>
+                          Configure os limites diários para mensagens e convites de conexão
+                        </CardDescription>
+                      </div>
+                      {settingsChanged && (
+                        <Button onClick={handleSaveSettings} disabled={isUpdatingSettings}>
+                          {isUpdatingSettings ? (
+                            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                          ) : (
+                            <Save className="mr-2 h-4 w-4" />
+                          )}
+                          Salvar
+                        </Button>
+                      )}
+                    </div>
+                  </CardHeader>
+                  <CardContent className="space-y-6">
+                    <div className="grid gap-6 md:grid-cols-3">
+                      <div className="space-y-2">
+                        <Label htmlFor="linkedinDailyMessageLimit">Limite diário de mensagens</Label>
+                        <div className="flex items-center gap-2">
+                          <Input
+                            id="linkedinDailyMessageLimit"
+                            type="number"
+                            min={1}
+                            max={100}
+                            value={linkedinDailyMessageLimit}
+                            onChange={(e) => setLinkedinDailyMessageLimit(parseInt(e.target.value) || 50)}
+                            className="w-32"
+                          />
+                          <span className="text-sm text-muted-foreground">msg/dia</span>
+                        </div>
+                        <p className="text-xs text-muted-foreground">
+                          DMs para conexões e InMails (Premium).
+                        </p>
+                      </div>
+
+                      <div className="space-y-2">
+                        <Label htmlFor="linkedinDailyInviteLimit">Limite diário de convites</Label>
+                        <div className="flex items-center gap-2">
+                          <Input
+                            id="linkedinDailyInviteLimit"
+                            type="number"
+                            min={1}
+                            max={50}
+                            value={linkedinDailyInviteLimit}
+                            onChange={(e) => setLinkedinDailyInviteLimit(parseInt(e.target.value) || 25)}
+                            className="w-32"
+                          />
+                          <span className="text-sm text-muted-foreground">convites/dia</span>
+                        </div>
+                        <p className="text-xs text-muted-foreground">
+                          Solicitações de conexão com ou sem nota.
+                        </p>
+                      </div>
+
+                      <div className="space-y-2">
+                        <Label htmlFor="linkedinIntervalSeconds">Intervalo entre ações</Label>
+                        <div className="flex items-center gap-2">
+                          <Input
+                            id="linkedinIntervalSeconds"
+                            type="number"
+                            min={10}
+                            max={300}
+                            value={linkedinIntervalSeconds}
+                            onChange={(e) => setLinkedinIntervalSeconds(parseInt(e.target.value) || 30)}
+                            className="w-32"
+                          />
+                          <span className="text-sm text-muted-foreground">segundos</span>
+                        </div>
+                        <p className="text-xs text-muted-foreground">
+                          Mínimo recomendado: 30s para simular comportamento humano.
+                        </p>
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+
+                {/* Card de Boas Práticas LinkedIn */}
                 <Card>
                   <CardHeader>
                     <CardTitle className="flex items-center gap-2">
-                      <Linkedin className="h-5 w-5" />
-                      Configurações do LinkedIn
+                      <AlertTriangle className="h-5 w-5" />
+                      Boas Práticas do LinkedIn
                     </CardTitle>
                     <CardDescription>
-                      Configure as preferências para campanhas de LinkedIn
+                      Siga estas recomendações para evitar restrições na sua conta
                     </CardDescription>
                   </CardHeader>
                   <CardContent>
-                    <div className="text-center py-12 text-muted-foreground">
-                      <Linkedin className="h-12 w-12 mx-auto mb-4 opacity-50" />
-                      <p className="font-medium">Em breve</p>
-                      <p className="text-sm">As configurações de LinkedIn estarão disponíveis em breve.</p>
+                    <ul className="space-y-3 text-sm">
+                      <li className="flex items-start gap-3">
+                        <Users className="h-4 w-4 mt-0.5 text-muted-foreground shrink-0" />
+                        <div>
+                          <span className="font-medium">Limite ~100 ações/dia por conta</span>
+                          <p className="text-muted-foreground">Inclui mensagens, convites, visitas de perfil. Contas novas devem usar limites menores (20-30/dia).</p>
+                        </div>
+                      </li>
+                      <li className="flex items-start gap-3">
+                        <Clock className="h-4 w-4 mt-0.5 text-muted-foreground shrink-0" />
+                        <div>
+                          <span className="font-medium">Espaçar ações de forma aleatória</span>
+                          <p className="text-muted-foreground">Evite padrões previsíveis. O sistema adiciona variação automática ao intervalo configurado.</p>
+                        </div>
+                      </li>
+                      <li className="flex items-start gap-3">
+                        <Mail className="h-4 w-4 mt-0.5 text-muted-foreground shrink-0" />
+                        <div>
+                          <span className="font-medium">~800 InMails gratuitos/mês</span>
+                          <p className="text-muted-foreground">Contas Premium têm limite mensal de InMails. DMs para conexões são ilimitadas.</p>
+                        </div>
+                      </li>
+                      <li className="flex items-start gap-3">
+                        <AlertCircle className="h-4 w-4 mt-0.5 text-muted-foreground shrink-0" />
+                        <div>
+                          <span className="font-medium">Webhook de conexão aceita tem delay</span>
+                          <p className="text-muted-foreground">A notificação de convite aceito pode levar até 8 horas (não é tempo real).</p>
+                        </div>
+                      </li>
+                    </ul>
+                  </CardContent>
+                </Card>
+
+                {/* Card de Tipos de Conta LinkedIn */}
+                <Card>
+                  <CardHeader>
+                    <CardTitle>Tipos de Conta Suportados</CardTitle>
+                    <CardDescription>
+                      A Elevos suporta diferentes tipos de conta LinkedIn
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="grid gap-4 md:grid-cols-3">
+                      <div className="p-4 border rounded-lg">
+                        <div className="flex items-center gap-2 mb-2">
+                          <Linkedin className="h-5 w-5 text-blue-600" />
+                          <span className="font-medium">Classic</span>
+                        </div>
+                        <p className="text-sm text-muted-foreground">
+                          Conta pessoal padrão. DMs para conexões, convites com nota.
+                        </p>
+                      </div>
+                      <div className="p-4 border rounded-lg">
+                        <div className="flex items-center gap-2 mb-2">
+                          <Crown className="h-5 w-5 text-yellow-600" />
+                          <span className="font-medium">Sales Navigator</span>
+                        </div>
+                        <p className="text-sm text-muted-foreground">
+                          InMails inclusos, busca avançada, salvar leads em listas.
+                        </p>
+                      </div>
+                      <div className="p-4 border rounded-lg">
+                        <div className="flex items-center gap-2 mb-2">
+                          <Users className="h-5 w-5 text-purple-600" />
+                          <span className="font-medium">Recruiter</span>
+                        </div>
+                        <p className="text-sm text-muted-foreground">
+                          InMails de recrutamento, busca de candidatos, pipelines.
+                        </p>
+                      </div>
                     </div>
                   </CardContent>
                 </Card>

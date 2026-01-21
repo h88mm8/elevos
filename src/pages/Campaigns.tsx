@@ -38,7 +38,18 @@ import {
   CalendarClock,
   Pencil,
   XCircle,
+  Copy,
 } from 'lucide-react';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 import { format, setHours, setMinutes } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import { Lead, Campaign } from '@/types';
@@ -81,6 +92,7 @@ export default function Campaigns() {
   const [sendingCampaignId, setSendingCampaignId] = useState<string | null>(null);
   const [reportCampaign, setReportCampaign] = useState<{ id: string; name: string } | null>(null);
   const [editingCampaign, setEditingCampaign] = useState<Campaign | null>(null);
+  const [cancelCampaignId, setCancelCampaignId] = useState<string | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   // Form state
@@ -288,9 +300,10 @@ export default function Campaigns() {
     }
   }
 
-  async function handleCancelScheduledCampaign(campaignId: string) {
+  async function handleCancelScheduledCampaign() {
+    if (!cancelCampaignId) return;
     try {
-      await updateCampaign({ id: campaignId, status: 'draft', schedule: null });
+      await updateCampaign({ id: cancelCampaignId, status: 'draft', schedule: null });
       toast({
         title: 'Agendamento cancelado',
         description: 'A campanha voltou para rascunho.',
@@ -301,7 +314,22 @@ export default function Campaigns() {
         description: error.message,
         variant: 'destructive',
       });
+    } finally {
+      setCancelCampaignId(null);
     }
+  }
+
+  function handleDuplicateCampaign(campaign: Campaign) {
+    setName(`${campaign.name} (cópia)`);
+    setType(campaign.type as 'email' | 'whatsapp' | 'linkedin');
+    setMessage(campaign.message);
+    setSubject(campaign.subject || '');
+    setSelectedAccountId(campaign.account_id || '');
+    setSelectedLeadIds(new Set());
+    setScheduleEnabled(false);
+    setScheduleDate(undefined);
+    setScheduleTime('09:00');
+    setDialogOpen(true);
   }
 
   async function handleSaveEditedCampaign(updates: { name?: string; message?: string; subject?: string; schedule?: string }) {
@@ -773,12 +801,22 @@ export default function Campaigns() {
                                 size="icon"
                                 variant="ghost"
                                 className="h-8 w-8 text-amber-500 hover:text-amber-600"
-                                onClick={() => handleCancelScheduledCampaign(campaign.id)}
+                                onClick={() => setCancelCampaignId(campaign.id)}
                                 title="Cancelar agendamento"
                               >
                                 <XCircle className="h-4 w-4" />
                               </Button>
                             )}
+                            {/* Duplicate campaign button */}
+                            <Button
+                              size="icon"
+                              variant="ghost"
+                              className="h-8 w-8"
+                              onClick={() => handleDuplicateCampaign(campaign)}
+                              title="Duplicar campanha"
+                            >
+                              <Copy className="h-4 w-4" />
+                            </Button>
                             {canSend && (
                               <Button
                                 size="sm"
@@ -833,6 +871,24 @@ export default function Campaigns() {
         onOpenChange={(open) => !open && setEditingCampaign(null)}
         onSave={handleSaveEditedCampaign}
       />
+
+      {/* Cancel Schedule Confirmation Dialog */}
+      <AlertDialog open={!!cancelCampaignId} onOpenChange={(open) => !open && setCancelCampaignId(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Cancelar agendamento?</AlertDialogTitle>
+            <AlertDialogDescription>
+              A campanha voltará para rascunho e o agendamento será removido. Você poderá reagendar ou enviar manualmente depois.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Não, manter</AlertDialogCancel>
+            <AlertDialogAction onClick={handleCancelScheduledCampaign}>
+              Sim, cancelar agendamento
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </AppLayout>
   );
 }

@@ -24,6 +24,7 @@ import { SearchListDialog } from '@/components/leads/SearchListDialog';
 import { MoveLeadsDialog } from '@/components/leads/MoveLeadsDialog';
 import { DeleteLeadsDialog } from '@/components/leads/DeleteLeadsDialog';
 import { LeadTagsPopover, LeadTagsBadges } from '@/components/leads/LeadTagsPopover';
+import { BulkTagsPopover } from '@/components/leads/BulkTagsPopover';
 import { 
   Search, 
   Phone, 
@@ -689,6 +690,16 @@ export default function Leads() {
                       <Trash2 className="mr-2 h-4 w-4" />
                       Apagar ({selectedLeads.size})
                     </Button>
+                    <BulkTagsPopover
+                      selectedLeadIds={Array.from(selectedLeads)}
+                      onComplete={() => {
+                        refetchTags();
+                        toast({
+                          title: 'Tags aplicadas',
+                          description: `Tags aplicadas em ${selectedLeads.size} leads.`,
+                        });
+                      }}
+                    />
                     <Button
                       variant="outline"
                       size="sm"

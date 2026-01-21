@@ -27,7 +27,8 @@ export function useMediaPreCache({ workspaceId, messages, enabled = true }: PreC
       return null;
     }
 
-    // Skip if URL is already from our storage
+    // Skip if no URL or URL is already from our storage
+    if (!attachment.url) return null;
     if (attachment.url.includes('supabase') && attachment.url.includes('message-attachments')) {
       cachedUrls.add(cacheKey);
       return null;
@@ -79,8 +80,11 @@ export function useMediaPreCache({ workspaceId, messages, enabled = true }: PreC
           if (['audio', 'image', 'video'].includes(attachment.type)) {
             const cacheKey = `${message.id}-${index}`;
             
-            // Skip if already cached or is from our storage
+            // Skip if already cached
             if (cachedUrls.has(cacheKey)) return;
+            
+            // Skip if no URL or is from our storage
+            if (!attachment.url) return;
             if (attachment.url.includes('supabase') && attachment.url.includes('message-attachments')) {
               cachedUrls.add(cacheKey);
               return;

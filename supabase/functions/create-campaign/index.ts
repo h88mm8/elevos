@@ -168,17 +168,23 @@ serve(async (req) => {
     }
 
     // ============================================
-    // BATCH INSERT CAMPAIGN_LEADS: Link all leads to campaign in single operation
+    // UPSERT CAMPAIGN_LEADS: Link all leads to campaign, avoid duplicates
+    // If lead already exists for this campaign and is 'sent', don't overwrite
     // ============================================
     const campaignLeads = allLeadIds.map(leadId => ({
       campaign_id: campaign.id,
       lead_id: leadId,
       status: 'pending',
+      retry_count: 0,
     }));
 
+    // Use upsert with onConflict - only update if not already 'sent'
     const { error: linkError } = await supabase
       .from('campaign_leads')
-      .insert(campaignLeads);
+      .upsert(campaignLeads, {
+        onConflict: 'campaign_id,lead_id',
+        ignoreDuplicates: true, // Don't update existing rows
+      });
 
     if (linkError) {
       console.error('Error linking leads to campaign:', linkError);

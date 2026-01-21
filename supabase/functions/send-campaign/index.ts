@@ -757,11 +757,8 @@ serve(async (req) => {
             }
           }
 
-          // Update campaign sent_count incrementally
-          await supabase
-            .from('campaigns')
-            .update({ sent_count: campaign.sent_count + sentCount })
-            .eq('id', campaignId);
+          // NOTE: No longer updating campaigns.sent_count incrementally
+          // The view campaigns_with_stats calculates counts from campaign_leads current state
         } else {
           const newRetryCount = cl.retry_count + 1;
           const willRetry = newRetryCount < settings.max_retries;
@@ -785,11 +782,8 @@ serve(async (req) => {
             })
             .eq('id', cl.id);
 
-          // Update campaign failed_count incrementally
-          await supabase
-            .from('campaigns')
-            .update({ failed_count: campaign.failed_count + failedCount })
-            .eq('id', campaignId);
+          // NOTE: No longer updating campaigns.failed_count incrementally
+          // The view campaigns_with_stats calculates counts from campaign_leads current state
         }
       } catch (error) {
         const errorMessage = error instanceof Error ? error.message : String(error);
@@ -859,14 +853,10 @@ serve(async (req) => {
       finalStatus = sentCount > 0 ? 'running' : 'failed';
     }
 
-    // Update final counts and status
+    // Update final status only (counts are derived from campaign_leads via view)
     await supabase
       .from('campaigns')
-      .update({ 
-        status: finalStatus,
-        sent_count: (updatedCampaign?.sent_count || 0),
-        failed_count: (updatedCampaign?.failed_count || 0),
-      })
+      .update({ status: finalStatus })
       .eq('id', campaignId);
 
     console.log(`Campaign ${campaignId} finished: ${sentCount} sent, ${failedCount} failed, status: ${finalStatus}`);

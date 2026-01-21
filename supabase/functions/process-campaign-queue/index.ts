@@ -716,14 +716,8 @@ serve(async (req) => {
         })
         .eq('id', entry.queue_id);
 
-      // Update campaign counts
-      await supabase
-        .from('campaigns')
-        .update({
-          sent_count: campaign.sent_count + sentCount,
-          failed_count: campaign.failed_count + failedCount,
-        })
-        .eq('id', campaign.id);
+      // NOTE: No longer updating campaigns.sent_count/failed_count incrementally
+      // The view campaigns_with_stats calculates counts from campaign_leads current state
 
       // Determine final campaign status
       const { data: remainingQueue } = await supabase

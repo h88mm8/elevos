@@ -484,7 +484,42 @@ export default function Messages() {
     setLoadingChats(true);
     try {
       const data = await invokeAuthedFunction('get-chats', { workspaceId: currentWorkspace.id });
-      setChats(data.chats || []);
+      const fetchedChats: Chat[] = data.chats || [];
+      
+      // Fetch leads to match phone numbers with names
+      const { data: leads } = await supabase
+        .from('leads')
+        .select('full_name, mobile_number, phone')
+        .eq('workspace_id', currentWorkspace.id);
+      
+      if (leads && leads.length > 0) {
+        // Create a map of phone numbers to lead names
+        const phoneToName = new Map<string, string>();
+        leads.forEach(lead => {
+          const phone = lead.mobile_number || lead.phone;
+          if (phone && lead.full_name) {
+            const normalizedPhone = phone.replace(/\D/g, '');
+            phoneToName.set(normalizedPhone, lead.full_name);
+          }
+        });
+        
+        // Update chats with lead names where phone matches and name is just a phone number
+        fetchedChats.forEach(chat => {
+          const chatPhone = chat.attendee_identifier?.replace(/\D/g, '') || '';
+          // Only update if current name looks like a phone number (starts with +)
+          if (chat.attendee_name?.startsWith('+') || !chat.attendee_name) {
+            // Try to find a matching lead
+            for (const [leadPhone, leadName] of phoneToName) {
+              if (chatPhone.includes(leadPhone) || leadPhone.includes(chatPhone)) {
+                chat.attendee_name = leadName;
+                break;
+              }
+            }
+          }
+        });
+      }
+      
+      setChats(fetchedChats);
     } catch (error: any) {
       toast({
         title: 'Erro ao carregar conversas',

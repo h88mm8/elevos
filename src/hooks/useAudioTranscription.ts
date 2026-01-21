@@ -38,11 +38,26 @@ async function getTranscriber(onProgress?: (progress: number) => void) {
   try {
     const { pipeline } = await import('@huggingface/transformers');
     
+    // Check WebGPU support
+    let device: 'webgpu' | 'wasm' = 'wasm';
+    try {
+      const gpu = (navigator as any).gpu;
+      if (gpu) {
+        const adapter = await gpu.requestAdapter();
+        if (adapter) {
+          device = 'webgpu';
+          console.log('Using WebGPU for transcription');
+        }
+      }
+    } catch (e) {
+      console.log('WebGPU not available, falling back to WASM');
+    }
+    
     pipelineLoadPromise = pipeline(
       'automatic-speech-recognition',
       'onnx-community/whisper-tiny',
       { 
-        device: 'webgpu',
+        device,
         progress_callback: (progress: any) => {
           if (progress.status === 'progress' && onProgress) {
             onProgress(Math.round((progress.loaded / progress.total) * 100));

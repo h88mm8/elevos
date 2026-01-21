@@ -31,6 +31,13 @@ function replaceVariables(message: string, lead: Record<string, any>): string {
   return result;
 }
 
+// Apply jitter to interval (±20% randomization)
+function applyJitter(baseSeconds: number, minSeconds: number = 10): number {
+  const jitterFactor = 0.8 + Math.random() * 0.4; // 0.8 to 1.2
+  const jitteredValue = Math.round(baseSeconds * jitterFactor);
+  return Math.max(jitteredValue, minSeconds);
+}
+
 interface CampaignLead {
   id: string;
   lead_id: string;
@@ -55,15 +62,25 @@ interface CampaignLead {
 }
 
 interface WorkspaceSettings {
+  // WhatsApp settings
   daily_message_limit: number;
   message_interval_seconds: number;
   max_retries: number;
+  // LinkedIn settings
+  linkedin_daily_message_limit: number;
+  linkedin_daily_invite_limit: number;
+  linkedin_message_interval_seconds: number;
 }
 
 const DEFAULT_SETTINGS: WorkspaceSettings = {
+  // WhatsApp defaults
   daily_message_limit: 50,
   message_interval_seconds: 15,
   max_retries: 3,
+  // LinkedIn defaults
+  linkedin_daily_message_limit: 50,
+  linkedin_daily_invite_limit: 25,
+  linkedin_message_interval_seconds: 30,
 };
 
 serve(async (req) => {
@@ -139,10 +156,10 @@ serve(async (req) => {
         continue;
       }
 
-      // Get workspace settings
+      // Get workspace settings (including LinkedIn)
       const { data: workspaceSettings } = await supabase
         .from('workspace_settings')
-        .select('daily_message_limit, message_interval_seconds, max_retries')
+        .select('daily_message_limit, message_interval_seconds, max_retries, linkedin_daily_message_limit, linkedin_daily_invite_limit, linkedin_message_interval_seconds')
         .eq('workspace_id', campaign.workspace_id)
         .maybeSingle();
 
@@ -150,6 +167,13 @@ serve(async (req) => {
         ...DEFAULT_SETTINGS,
         ...workspaceSettings,
       };
+
+      // Select channel-specific settings
+      const isLinkedIn = campaign.type === 'linkedin';
+      const baseIntervalSeconds = isLinkedIn ? settings.linkedin_message_interval_seconds : settings.message_interval_seconds;
+      const minIntervalSeconds = isLinkedIn ? 10 : 10; // Both have 10s minimum
+
+      console.log(`Using ${isLinkedIn ? 'LinkedIn' : 'WhatsApp'} settings: ${baseIntervalSeconds}s base interval (with ±20% jitter)`);
 
       // Get account for WhatsApp/LinkedIn
       let accountId: string | null = null;
@@ -233,6 +257,7 @@ serve(async (req) => {
         try {
           let sendSuccess = false;
           let sendError = '';
+          let providerMessageId: string | null = null;
 
           if (campaign.type === 'whatsapp') {
             const phoneNumber = lead.mobile_number || lead.phone;
@@ -257,6 +282,10 @@ serve(async (req) => {
 
             if (response.ok) {
               sendSuccess = true;
+              const responseData = await response.json().catch(() => ({}));
+              if (responseData.message_id || responseData.id) {
+                providerMessageId = responseData.message_id || responseData.id;
+              }
             } else {
               sendError = await response.text().catch(() => `HTTP ${response.status}`);
             }
@@ -281,6 +310,10 @@ serve(async (req) => {
 
             if (response.ok) {
               sendSuccess = true;
+              const responseData = await response.json().catch(() => ({}));
+              if (responseData.message_id || responseData.id) {
+                providerMessageId = responseData.message_id || responseData.id;
+              }
             } else {
               const errorData = await response.json().catch(() => ({}));
               sendError = errorData.message || `HTTP ${response.status}`;
@@ -288,13 +321,17 @@ serve(async (req) => {
           }
 
           if (sendSuccess) {
+            const updateData: Record<string, any> = { 
+              status: 'sent', 
+              sent_at: new Date().toISOString(),
+              retry_count: cl.retry_count, // Keep current count
+            };
+            if (providerMessageId) {
+              updateData.provider_message_id = providerMessageId;
+            }
             await supabase
               .from('campaign_leads')
-              .update({ 
-                status: 'sent', 
-                sent_at: new Date().toISOString(),
-                retry_count: cl.retry_count, // Keep current count
-              })
+              .update(updateData)
               .eq('id', cl.id);
             sentCount++;
           } else {
@@ -312,9 +349,11 @@ serve(async (req) => {
             console.log(`Lead ${cl.lead_id} failed (attempt ${newRetryCount}/${settings.max_retries})${isFinalFailure ? ' - no more retries' : ''}`);
           }
 
-          // Delay between messages
+          // Apply jitter to interval (±20% randomization) for more natural sending pattern
           if (i < campaignLeads.length - 1) {
-            await new Promise(resolve => setTimeout(resolve, settings.message_interval_seconds * 1000));
+            const delaySeconds = applyJitter(baseIntervalSeconds, minIntervalSeconds);
+            console.log(`Waiting ${delaySeconds}s before next message (base: ${baseIntervalSeconds}s)`);
+            await new Promise(resolve => setTimeout(resolve, delaySeconds * 1000));
           }
         } catch (error) {
           const errorMessage = error instanceof Error ? error.message : 'Unknown error';

@@ -31,6 +31,13 @@ function replaceVariables(message: string, lead: Record<string, any>): string {
   return result;
 }
 
+// Apply jitter to interval (±20% randomization)
+function applyJitter(baseSeconds: number, minSeconds: number = 10): number {
+  const jitterFactor = 0.8 + Math.random() * 0.4; // 0.8 to 1.2
+  const jitteredValue = Math.round(baseSeconds * jitterFactor);
+  return Math.max(jitteredValue, minSeconds);
+}
+
 interface CampaignLead {
   id: string;
   lead_id: string;
@@ -55,15 +62,25 @@ interface CampaignLead {
 }
 
 interface WorkspaceSettings {
+  // WhatsApp settings
   daily_message_limit: number;
   message_interval_seconds: number;
   max_retries: number;
+  // LinkedIn settings
+  linkedin_daily_message_limit: number;
+  linkedin_daily_invite_limit: number;
+  linkedin_message_interval_seconds: number;
 }
 
 const DEFAULT_SETTINGS: WorkspaceSettings = {
+  // WhatsApp defaults
   daily_message_limit: 50,
   message_interval_seconds: 15,
   max_retries: 3,
+  // LinkedIn defaults
+  linkedin_daily_message_limit: 50,
+  linkedin_daily_invite_limit: 25,
+  linkedin_message_interval_seconds: 30,
 };
 
 serve(async (req) => {
@@ -122,11 +139,11 @@ serve(async (req) => {
     }
 
     // ============================================
-    // GET WORKSPACE SETTINGS
+    // GET WORKSPACE SETTINGS (including LinkedIn)
     // ============================================
     const { data: workspaceSettings } = await supabase
       .from('workspace_settings')
-      .select('daily_message_limit, message_interval_seconds, max_retries')
+      .select('daily_message_limit, message_interval_seconds, max_retries, linkedin_daily_message_limit, linkedin_daily_invite_limit, linkedin_message_interval_seconds')
       .eq('workspace_id', campaign.workspace_id)
       .maybeSingle();
 
@@ -134,7 +151,16 @@ serve(async (req) => {
       ...DEFAULT_SETTINGS,
       ...workspaceSettings,
     };
-    console.log(`Using settings: ${settings.daily_message_limit} msgs/day, ${settings.message_interval_seconds}s interval`);
+
+    // ============================================
+    // SELECT CHANNEL-SPECIFIC SETTINGS
+    // ============================================
+    const isLinkedIn = campaign.type === 'linkedin';
+    const dailyLimit = isLinkedIn ? settings.linkedin_daily_message_limit : settings.daily_message_limit;
+    const baseIntervalSeconds = isLinkedIn ? settings.linkedin_message_interval_seconds : settings.message_interval_seconds;
+    const minIntervalSeconds = isLinkedIn ? 10 : 10; // Both have 10s minimum
+
+    console.log(`Using ${isLinkedIn ? 'LinkedIn' : 'WhatsApp'} settings: ${dailyLimit} msgs/day, ${baseIntervalSeconds}s base interval (with ±20% jitter)`);
 
     // ============================================
     // GET MESSAGING PROVIDER CREDENTIALS
@@ -218,7 +244,6 @@ serve(async (req) => {
     }
 
     const totalLeads = campaignLeads.length;
-    const dailyLimit = settings.daily_message_limit;
 
     console.log(`Campaign ${campaignId}: ${totalLeads} leads, daily limit: ${dailyLimit}`);
 
@@ -382,7 +407,11 @@ serve(async (req) => {
 
           if (response.ok) {
             sendSuccess = true;
-            console.log(`LinkedIn message sent to ${linkedinUrl}`);
+            const responseData = await response.json().catch(() => ({}));
+            if (responseData.message_id || responseData.id) {
+              providerMessageId = responseData.message_id || responseData.id;
+            }
+            console.log(`LinkedIn message sent to ${linkedinUrl}, messageId: ${providerMessageId || 'unknown'}`);
           } else {
             const errorData = await response.json().catch(() => ({}));
             sendError = errorData.message || `HTTP ${response.status}`;
@@ -437,9 +466,11 @@ serve(async (req) => {
           console.log(`Lead ${cl.lead_id} failed (attempt ${newRetryCount}/${settings.max_retries})${isFinalFailure ? ' - no more retries' : ''}`);
         }
 
-        // Use configured delay between messages (except for last message)
+        // Apply jitter to interval (±20% randomization) for more natural sending pattern
         if (i < leadsToProcess.length - 1) {
-          await new Promise(resolve => setTimeout(resolve, settings.message_interval_seconds * 1000));
+          const delaySeconds = applyJitter(baseIntervalSeconds, minIntervalSeconds);
+          console.log(`Waiting ${delaySeconds}s before next message (base: ${baseIntervalSeconds}s)`);
+          await new Promise(resolve => setTimeout(resolve, delaySeconds * 1000));
         }
 
       } catch (error) {

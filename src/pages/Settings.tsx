@@ -985,189 +985,253 @@ export default function Settings() {
           </TabsContent>
 
           <TabsContent value="preferences" className="space-y-4">
-            {/* Card de Limites de Envio */}
-            <Card>
-              <CardHeader>
-                <div className="flex items-center justify-between">
-                  <div>
+            <Tabs defaultValue="whatsapp" className="w-full">
+              <TabsList className="mb-4">
+                <TabsTrigger value="whatsapp" className="gap-2">
+                  <MessageCircle className="h-4 w-4" />
+                  WhatsApp
+                </TabsTrigger>
+                <TabsTrigger value="email" className="gap-2">
+                  <Mail className="h-4 w-4" />
+                  Email
+                </TabsTrigger>
+                <TabsTrigger value="linkedin" className="gap-2">
+                  <Linkedin className="h-4 w-4" />
+                  LinkedIn
+                </TabsTrigger>
+              </TabsList>
+
+              {/* WhatsApp Preferences */}
+              <TabsContent value="whatsapp" className="space-y-4">
+                {/* Card de Limites de Envio */}
+                <Card>
+                  <CardHeader>
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <CardTitle className="flex items-center gap-2">
+                          <Clock className="h-5 w-5" />
+                          Limites de Envio
+                        </CardTitle>
+                        <CardDescription>
+                          Configure os limites diários e intervalos para evitar bloqueios de conta
+                        </CardDescription>
+                      </div>
+                      {settingsChanged && (
+                        <Button onClick={handleSaveSettings} disabled={isUpdatingSettings}>
+                          {isUpdatingSettings ? (
+                            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                          ) : (
+                            <Save className="mr-2 h-4 w-4" />
+                          )}
+                          Salvar
+                        </Button>
+                      )}
+                    </div>
+                  </CardHeader>
+                  <CardContent className="space-y-6">
+                    <div className="grid gap-6 md:grid-cols-3">
+                      <div className="space-y-2">
+                        <Label htmlFor="dailyLimit">Limite diário de mensagens</Label>
+                        <div className="flex items-center gap-2">
+                          <Input
+                            id="dailyLimit"
+                            type="number"
+                            min={1}
+                            max={500}
+                            value={dailyLimit}
+                            onChange={(e) => setDailyLimit(parseInt(e.target.value) || 50)}
+                            className="w-32"
+                          />
+                          <span className="text-sm text-muted-foreground">mensagens/dia</span>
+                        </div>
+                        <p className="text-xs text-muted-foreground">
+                          Campanhas maiores serão divididas em múltiplos dias.
+                        </p>
+                      </div>
+
+                      <div className="space-y-2">
+                        <Label htmlFor="intervalSeconds">Intervalo entre mensagens</Label>
+                        <div className="flex items-center gap-2">
+                          <Input
+                            id="intervalSeconds"
+                            type="number"
+                            min={5}
+                            max={120}
+                            value={intervalSeconds}
+                            onChange={(e) => setIntervalSeconds(parseInt(e.target.value) || 15)}
+                            className="w-32"
+                          />
+                          <span className="text-sm text-muted-foreground">segundos</span>
+                        </div>
+                        <p className="text-xs text-muted-foreground">
+                          Mínimo recomendado: 10-20s para simular comportamento humano.
+                        </p>
+                      </div>
+
+                      <div className="space-y-2">
+                        <Label htmlFor="maxRetries">Tentativas de reenvio</Label>
+                        <div className="flex items-center gap-2">
+                          <Input
+                            id="maxRetries"
+                            type="number"
+                            min={0}
+                            max={10}
+                            value={maxRetries}
+                            onChange={(e) => setMaxRetries(parseInt(e.target.value) || 3)}
+                            className="w-32"
+                          />
+                          <span className="text-sm text-muted-foreground">tentativas</span>
+                        </div>
+                        <p className="text-xs text-muted-foreground">
+                          Mensagens falhas serão reenviadas automaticamente.
+                        </p>
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+
+                {/* Card de Boas Práticas */}
+                <Card>
+                  <CardHeader>
                     <CardTitle className="flex items-center gap-2">
-                      <Clock className="h-5 w-5" />
-                      Limites de Envio
+                      <AlertCircle className="h-5 w-5" />
+                      Boas Práticas do WhatsApp
                     </CardTitle>
                     <CardDescription>
-                      Configure os limites diários e intervalos para evitar bloqueios de conta
+                      Siga estas recomendações para evitar suspensão da conta
                     </CardDescription>
-                  </div>
-                  {settingsChanged && (
-                    <Button onClick={handleSaveSettings} disabled={isUpdatingSettings}>
-                      {isUpdatingSettings ? (
-                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                      ) : (
-                        <Save className="mr-2 h-4 w-4" />
-                      )}
-                      Salvar
-                    </Button>
-                  )}
-                </div>
-              </CardHeader>
-              <CardContent className="space-y-6">
-                <div className="grid gap-6 md:grid-cols-3">
-                  <div className="space-y-2">
-                    <Label htmlFor="dailyLimit">Limite diário de mensagens</Label>
-                    <div className="flex items-center gap-2">
-                      <Input
-                        id="dailyLimit"
-                        type="number"
-                        min={1}
-                        max={500}
-                        value={dailyLimit}
-                        onChange={(e) => setDailyLimit(parseInt(e.target.value) || 50)}
-                        className="w-32"
-                      />
-                      <span className="text-sm text-muted-foreground">mensagens/dia</span>
-                    </div>
-                    <p className="text-xs text-muted-foreground">
-                      Campanhas maiores serão divididas em múltiplos dias.
-                    </p>
-                  </div>
+                  </CardHeader>
+                  <CardContent>
+                    <ul className="space-y-3 text-sm">
+                      <li className="flex items-start gap-3">
+                        <MessageCircle className="h-4 w-4 mt-0.5 text-muted-foreground shrink-0" />
+                        <div>
+                          <span className="font-medium">Use contas com histórico</span>
+                          <p className="text-muted-foreground">Evite contas novas exclusivamente para automação. Prefira contas com atividade real de usuários.</p>
+                        </div>
+                      </li>
+                      <li className="flex items-start gap-3">
+                        <CheckCircle2 className="h-4 w-4 mt-0.5 text-muted-foreground shrink-0" />
+                        <div>
+                          <span className="font-medium">Engaje os usuários</span>
+                          <p className="text-muted-foreground">A primeira mensagem deve solicitar uma resposta para manter conversas ativas.</p>
+                        </div>
+                      </li>
+                      <li className="flex items-start gap-3">
+                        <XCircle className="h-4 w-4 mt-0.5 text-muted-foreground shrink-0" />
+                        <div>
+                          <span className="font-medium">Evite spam</span>
+                          <p className="text-muted-foreground">Muitos chats sem resposta podem restringir sua conta temporariamente.</p>
+                        </div>
+                      </li>
+                    </ul>
+                  </CardContent>
+                </Card>
 
-                  <div className="space-y-2">
-                    <Label htmlFor="intervalSeconds">Intervalo entre mensagens</Label>
-                    <div className="flex items-center gap-2">
-                      <Input
-                        id="intervalSeconds"
-                        type="number"
-                        min={5}
-                        max={120}
-                        value={intervalSeconds}
-                        onChange={(e) => setIntervalSeconds(parseInt(e.target.value) || 15)}
-                        className="w-32"
-                      />
-                      <span className="text-sm text-muted-foreground">segundos</span>
+                {/* Card de Variáveis de Mensagem */}
+                <Card>
+                  <CardHeader>
+                    <CardTitle>Variáveis de Mensagem</CardTitle>
+                    <CardDescription>
+                      Use estas variáveis nas suas campanhas para personalizar automaticamente as mensagens para cada lead.
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent>
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>Variável</TableHead>
+                          <TableHead>Campo</TableHead>
+                          <TableHead>Descrição</TableHead>
+                          <TableHead className="w-16"></TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {MESSAGE_VARIABLES.map((variable) => (
+                          <VariableRow key={variable.variable} variable={variable} />
+                        ))}
+                      </TableBody>
+                    </Table>
+                    <div className="mt-4 p-4 border rounded-lg bg-muted/50">
+                      <div className="flex items-start gap-2 text-sm text-muted-foreground">
+                        <AlertCircle className="h-4 w-4 mt-0.5 shrink-0" />
+                        <div>
+                          <p className="font-medium text-foreground">Dica</p>
+                          <p>Se o campo estiver vazio para um lead, a variável será substituída por texto vazio. Certifique-se de que seus leads tenham os dados preenchidos para melhor personalização.</p>
+                        </div>
+                      </div>
                     </div>
-                    <p className="text-xs text-muted-foreground">
-                      Mínimo recomendado: 10-20s para simular comportamento humano.
-                    </p>
-                  </div>
+                  </CardContent>
+                </Card>
 
-                  <div className="space-y-2">
-                    <Label htmlFor="maxRetries">Tentativas de reenvio</Label>
-                    <div className="flex items-center gap-2">
-                      <Input
-                        id="maxRetries"
-                        type="number"
-                        min={0}
-                        max={10}
-                        value={maxRetries}
-                        onChange={(e) => setMaxRetries(parseInt(e.target.value) || 3)}
-                        className="w-32"
-                      />
-                      <span className="text-sm text-muted-foreground">tentativas</span>
+                <Card>
+                  <CardHeader>
+                    <CardTitle>Exemplo de Uso</CardTitle>
+                    <CardDescription>
+                      Veja como as variáveis funcionam em uma mensagem
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent className="space-y-4">
+                    <div className="p-4 border rounded-lg bg-muted/30">
+                      <p className="text-sm font-medium text-muted-foreground mb-2">Mensagem com variáveis:</p>
+                      <p className="font-mono text-sm">
+                        Olá {"{{primeiro_nome}}"}, vi que você trabalha na {"{{empresa}}"} como {"{{cargo}}"}. Podemos conversar?
+                      </p>
                     </div>
-                    <p className="text-xs text-muted-foreground">
-                      Mensagens falhas serão reenviadas automaticamente.
-                    </p>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
+                    <div className="p-4 border rounded-lg bg-primary/5 border-primary/20">
+                      <p className="text-sm font-medium text-muted-foreground mb-2">Resultado para o lead:</p>
+                      <p className="text-sm">
+                        Olá <span className="font-semibold text-primary">João</span>, vi que você trabalha na <span className="font-semibold text-primary">Empresa ABC</span> como <span className="font-semibold text-primary">CEO</span>. Podemos conversar?
+                      </p>
+                    </div>
+                  </CardContent>
+                </Card>
+              </TabsContent>
 
-            {/* Card de Boas Práticas */}
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <AlertCircle className="h-5 w-5" />
-                  Boas Práticas do WhatsApp
-                </CardTitle>
-                <CardDescription>
-                  Siga estas recomendações para evitar suspensão da conta
-                </CardDescription>
-              </CardHeader>
-              <CardContent>
-                <ul className="space-y-3 text-sm">
-                  <li className="flex items-start gap-3">
-                    <MessageCircle className="h-4 w-4 mt-0.5 text-muted-foreground shrink-0" />
-                    <div>
-                      <span className="font-medium">Use contas com histórico</span>
-                      <p className="text-muted-foreground">Evite contas novas exclusivamente para automação. Prefira contas com atividade real de usuários.</p>
+              {/* Email Preferences */}
+              <TabsContent value="email" className="space-y-4">
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="flex items-center gap-2">
+                      <Mail className="h-5 w-5" />
+                      Configurações de Email
+                    </CardTitle>
+                    <CardDescription>
+                      Configure as preferências para campanhas de email
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="text-center py-12 text-muted-foreground">
+                      <Mail className="h-12 w-12 mx-auto mb-4 opacity-50" />
+                      <p className="font-medium">Em breve</p>
+                      <p className="text-sm">As configurações de email estarão disponíveis em breve.</p>
                     </div>
-                  </li>
-                  <li className="flex items-start gap-3">
-                    <CheckCircle2 className="h-4 w-4 mt-0.5 text-muted-foreground shrink-0" />
-                    <div>
-                      <span className="font-medium">Engaje os usuários</span>
-                      <p className="text-muted-foreground">A primeira mensagem deve solicitar uma resposta para manter conversas ativas.</p>
-                    </div>
-                  </li>
-                  <li className="flex items-start gap-3">
-                    <XCircle className="h-4 w-4 mt-0.5 text-muted-foreground shrink-0" />
-                    <div>
-                      <span className="font-medium">Evite spam</span>
-                      <p className="text-muted-foreground">Muitos chats sem resposta podem restringir sua conta temporariamente.</p>
-                    </div>
-                  </li>
-                </ul>
-              </CardContent>
-            </Card>
+                  </CardContent>
+                </Card>
+              </TabsContent>
 
-            {/* Card de Variáveis de Mensagem */}
-            <Card>
-              <CardHeader>
-                <CardTitle>Variáveis de Mensagem</CardTitle>
-                <CardDescription>
-                  Use estas variáveis nas suas campanhas para personalizar automaticamente as mensagens para cada lead.
-                </CardDescription>
-              </CardHeader>
-              <CardContent>
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Variável</TableHead>
-                      <TableHead>Campo</TableHead>
-                      <TableHead>Descrição</TableHead>
-                      <TableHead className="w-16"></TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {MESSAGE_VARIABLES.map((variable) => (
-                      <VariableRow key={variable.variable} variable={variable} />
-                    ))}
-                  </TableBody>
-                </Table>
-                <div className="mt-4 p-4 border rounded-lg bg-muted/50">
-                  <div className="flex items-start gap-2 text-sm text-muted-foreground">
-                    <AlertCircle className="h-4 w-4 mt-0.5 shrink-0" />
-                    <div>
-                      <p className="font-medium text-foreground">Dica</p>
-                      <p>Se o campo estiver vazio para um lead, a variável será substituída por texto vazio. Certifique-se de que seus leads tenham os dados preenchidos para melhor personalização.</p>
+              {/* LinkedIn Preferences */}
+              <TabsContent value="linkedin" className="space-y-4">
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="flex items-center gap-2">
+                      <Linkedin className="h-5 w-5" />
+                      Configurações do LinkedIn
+                    </CardTitle>
+                    <CardDescription>
+                      Configure as preferências para campanhas de LinkedIn
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="text-center py-12 text-muted-foreground">
+                      <Linkedin className="h-12 w-12 mx-auto mb-4 opacity-50" />
+                      <p className="font-medium">Em breve</p>
+                      <p className="text-sm">As configurações de LinkedIn estarão disponíveis em breve.</p>
                     </div>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-
-            <Card>
-              <CardHeader>
-                <CardTitle>Exemplo de Uso</CardTitle>
-                <CardDescription>
-                  Veja como as variáveis funcionam em uma mensagem
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                <div className="p-4 border rounded-lg bg-muted/30">
-                  <p className="text-sm font-medium text-muted-foreground mb-2">Mensagem com variáveis:</p>
-                  <p className="font-mono text-sm">
-                    Olá {"{{primeiro_nome}}"}, vi que você trabalha na {"{{empresa}}"} como {"{{cargo}}"}. Podemos conversar?
-                  </p>
-                </div>
-                <div className="p-4 border rounded-lg bg-primary/5 border-primary/20">
-                  <p className="text-sm font-medium text-muted-foreground mb-2">Resultado para o lead:</p>
-                  <p className="text-sm">
-                    Olá <span className="font-semibold text-primary">João</span>, vi que você trabalha na <span className="font-semibold text-primary">Empresa ABC</span> como <span className="font-semibold text-primary">CEO</span>. Podemos conversar?
-                  </p>
-                </div>
-              </CardContent>
-            </Card>
+                  </CardContent>
+                </Card>
+              </TabsContent>
+            </Tabs>
           </TabsContent>
         </Tabs>
       </div>

@@ -10,7 +10,6 @@ import Register from "./pages/Register";
 import Dashboard from "./pages/Dashboard";
 import Leads from "./pages/Leads";
 import Campaigns from "./pages/Campaigns";
-import Messages from "./pages/Messages";
 import Settings from "./pages/Settings";
 import NotFound from "./pages/NotFound";
 
@@ -29,7 +28,6 @@ const App = () => (
             <Route path="/dashboard" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
             <Route path="/leads" element={<ProtectedRoute><Leads /></ProtectedRoute>} />
             <Route path="/campaigns" element={<ProtectedRoute><Campaigns /></ProtectedRoute>} />
-            <Route path="/messages" element={<ProtectedRoute><Messages /></ProtectedRoute>} />
             <Route path="/settings" element={<ProtectedRoute><Settings /></ProtectedRoute>} />
             <Route path="/" element={<Navigate to="/dashboard" replace />} />
             <Route path="*" element={<NotFound />} />

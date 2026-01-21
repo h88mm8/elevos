@@ -540,7 +540,7 @@ export default function Campaigns() {
                 <TableBody>
                   {campaigns.map((campaign) => {
                     const TypeIcon = typeIcons[campaign.type] || Mail;
-                    const canSend = campaign.status === 'draft' || campaign.status === 'partial';
+                    const canSend = campaign.status === 'draft' || campaign.status === 'partial' || campaign.status === 'failed';
                     const isSending = sendingCampaignId === campaign.id || campaign.status === 'sending';
                     
                     return (

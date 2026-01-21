@@ -16,6 +16,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { useToast } from '@/hooks/use-toast';
 import { supabase } from '@/integrations/supabase/client';
 import { useNotificationSettings } from '@/hooks/useNotificationSettings';
+import { cn } from '@/lib/utils';
 import { Switch } from '@/components/ui/switch';
 import { 
   Building2, 
@@ -35,7 +36,8 @@ import {
   ExternalLink,
   Bell,
   Volume2,
-  VolumeX
+  VolumeX,
+  Filter
 } from 'lucide-react';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
@@ -45,7 +47,7 @@ export default function Settings() {
   const { credits, creditHistory, isLoading: creditsLoading } = useCredits();
   const { members, isLoading: membersLoading, removeMember, updateRole } = useWorkspaceMembers();
   const { accounts, isLoading: accountsLoading, syncAccounts, isSyncing, refetchAccounts, deleteAccount, isDeleting } = useAccounts();
-  const { soundEnabled, setSoundEnabled } = useNotificationSettings();
+  const { soundEnabled, setSoundEnabled, filterByLeads, setFilterByLeads } = useNotificationSettings();
   const { toast } = useToast();
 
   const [createWorkspaceOpen, setCreateWorkspaceOpen] = useState(false);
@@ -833,6 +835,38 @@ export default function Settings() {
                     id="sound-notifications"
                     checked={soundEnabled}
                     onCheckedChange={setSoundEnabled}
+                  />
+                </div>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader>
+                <CardTitle>WhatsApp</CardTitle>
+                <CardDescription>
+                  Configurações de exibição do WhatsApp
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-6">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    <Filter className={cn(
+                      "h-5 w-5",
+                      filterByLeads ? "text-primary" : "text-muted-foreground"
+                    )} />
+                    <div className="space-y-0.5">
+                      <Label htmlFor="filter-by-leads" className="text-base">
+                        Filtrar por leads
+                      </Label>
+                      <p className="text-sm text-muted-foreground">
+                        Mostrar apenas conversas com contatos cadastrados como leads na plataforma
+                      </p>
+                    </div>
+                  </div>
+                  <Switch
+                    id="filter-by-leads"
+                    checked={filterByLeads}
+                    onCheckedChange={setFilterByLeads}
                   />
                 </div>
               </CardContent>

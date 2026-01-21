@@ -69,40 +69,50 @@ serve(async (req) => {
     // ============================================
     // Provider webhook formats:
     // 1. QR flow: { AccountStatus: { account_id, message, account_type }, reason? }
-    // 2. Hosted Auth: { event, account_id, name (JSON with workspaceId and accountName), ... }
+    // 2. Hosted Auth: { event, account_id, name (JSON with workspaceId, accountName, channel), ... }
     const accountStatusData = payload.AccountStatus || payload.accountStatus || {};
     const eventData = payload.data || payload.object || payload;
     
     // Extract account ID from various possible locations
     const accountId = accountStatusData.account_id || eventData.account_id || eventData.id || payload.account_id;
     
-    // Name field contains either workspaceId (old) or JSON with workspaceId and accountName (new)
+    // Name field contains either workspaceId (old) or JSON with workspaceId, accountName, and channel (new)
     const rawName = accountStatusData.name || eventData.name || eventData.display_name || payload.name;
     
     // Extract status/message from AccountStatus or other fields
     const accountMessage = accountStatusData.message || '';
     const accountStatus = accountMessage || eventData.status || payload.status;
-    const accountType = accountStatusData.account_type || eventData.account_type || payload.account_type || 'whatsapp';
+    
+    // IMPORTANT: Use provider/type from Unipile as source of truth for channel detection
+    // Unipile returns: type (LINKEDIN, WHATSAPP, MAIL, etc.) or provider field
+    const providerFromUnipile = eventData.type || eventData.provider || accountStatusData.account_type || 
+                                payload.type || payload.provider || payload.account_type;
     
     // Event type and other fields
     const eventType = payload.event || payload.type || accountMessage;
     const qrCode = eventData.qrCodeString || eventData.qr_code || eventData.qrcode;
     const errorMessage = payload.reason || eventData.error || payload.error;
+    
+    // Extract account_info for LinkedIn feature detection (classic/sales_navigator/recruiter)
+    const accountInfo = eventData.account_info || payload.account_info || {};
+    const linkedinFeature = accountInfo.feature || null;
 
     // ============================================
     // PARSE NAME FIELD (may be JSON or plain UUID)
     // ============================================
     let parsedWorkspaceId: string | null = null;
     let parsedAccountName: string | null = null;
+    let parsedChannel: string | null = null;
     
-    // Try to parse as JSON first (new format)
+    // Try to parse as JSON first (new format with workspaceId, accountName, channel)
     if (rawName) {
       try {
         const parsed = JSON.parse(rawName);
         if (parsed.workspaceId) {
           parsedWorkspaceId = parsed.workspaceId;
           parsedAccountName = parsed.accountName || null;
-          console.log(`Parsed JSON name: workspaceId=${parsedWorkspaceId}, accountName=${parsedAccountName}`);
+          parsedChannel = parsed.channel || null;
+          console.log(`Parsed JSON name: workspaceId=${parsedWorkspaceId}, accountName=${parsedAccountName}, channel=${parsedChannel}`);
         }
       } catch {
         // Not JSON, treat as plain value (old format - workspaceId only)
@@ -284,13 +294,18 @@ serve(async (req) => {
     // ============================================
     // Now we use workspaceId directly (from Hosted Auth or QR session)
     if (newStatus === 'connected' && workspaceId && accountId) {
-      // Map account type to channel
+      // Determine channel from Unipile provider (source of truth), then fallback to parsed channel from metadata
       const channelMap: Record<string, string> = {
         'WHATSAPP': 'whatsapp',
         'LINKEDIN': 'linkedin',
         'MAIL': 'email',
       };
-      const channel = channelMap[accountType?.toUpperCase()] || session?.channel || 'whatsapp';
+      
+      // Priority: 1) Unipile provider field, 2) parsed channel from metadata, 3) session channel, 4) default whatsapp
+      const normalizedProvider = (providerFromUnipile || '').toUpperCase();
+      const channel = channelMap[normalizedProvider] || parsedChannel || session?.channel || 'whatsapp';
+      
+      console.log(`[UPSERT] workspaceId=${workspaceId}, accountId=${accountId}, provider=${providerFromUnipile}, channel=${channel}, linkedinFeature=${linkedinFeature}`);
 
       const { error: upsertError } = await serviceClient
         .from('accounts')
@@ -309,7 +324,7 @@ serve(async (req) => {
       if (upsertError) {
         console.error('Error upserting account:', upsertError);
       } else {
-        console.log(`Account ${accountId} saved/updated successfully for workspace ${workspaceId}`);
+        console.log(`Account ${accountId} saved/updated successfully for workspace ${workspaceId} with channel=${channel}`);
       }
     } else if (newStatus === 'connected' && !workspaceId) {
       console.warn(`Cannot save account ${accountId}: no workspaceId found`);

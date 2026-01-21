@@ -359,16 +359,25 @@ serve(async (req) => {
 
       const isLinkedIn = campaign.type === 'linkedin';
       const isWhatsApp = campaign.type === 'whatsapp';
-      const dailyLimit = isLinkedIn ? settings.linkedin_daily_message_limit : settings.daily_message_limit;
+      const linkedinAction = campaign.linkedin_action || 'dm'; // dm | inmail | invite
+      const isLinkedInInvite = isLinkedIn && linkedinAction === 'invite';
+      
+      const dailyLimit = isLinkedIn 
+        ? (isLinkedInInvite ? settings.linkedin_daily_invite_limit : settings.linkedin_daily_message_limit)
+        : settings.daily_message_limit;
       const baseIntervalSeconds = isLinkedIn ? settings.linkedin_message_interval_seconds : settings.message_interval_seconds;
-      const usageAction: UsageAction = isLinkedIn ? 'linkedin_message' : 'whatsapp_message';
+      const usageAction: UsageAction = isLinkedIn 
+        ? (isLinkedInInvite ? 'linkedin_invite' : 'linkedin_message')
+        : 'whatsapp_message';
 
-      // Get account
+      // Get account (include linkedin_feature for InMail api param)
       let unipileAccountId: string | null = null;
+      let linkedinFeature: string = 'classic';
+      
       if (campaign.type === 'whatsapp' || campaign.type === 'linkedin') {
         const { data: account } = await supabase
           .from('accounts')
-          .select('account_id, status')
+          .select('account_id, status, linkedin_feature')
           .eq('id', campaign.account_id)
           .single();
 
@@ -381,6 +390,7 @@ serve(async (req) => {
           continue;
         }
         unipileAccountId = account.account_id;
+        linkedinFeature = account.linkedin_feature || 'classic';
       }
 
       // Check daily usage
@@ -511,24 +521,88 @@ serve(async (req) => {
             const providerId = await resolveLinkedInProviderId(unipileDsn, unipileApiKey, unipileAccountId!, publicIdentifier);
             if (!providerId) throw new Error(`Could not resolve LinkedIn: ${publicIdentifier}`);
 
-            const formData = new FormData();
-            formData.append('account_id', unipileAccountId!);
-            formData.append('text', personalizedMessage);
-            formData.append('attendees_ids', providerId);
-            formData.append('linkedin[api]', 'classic');
+            // Map feature to API value
+            const apiValue = linkedinFeature.toLowerCase().replace(/\s+/g, '_');
 
-            const response = await fetch(`https://${unipileDsn}/api/v1/chats`, {
-              method: 'POST',
-              headers: { 'X-API-KEY': unipileApiKey, 'Accept': 'application/json' },
-              body: formData,
-            });
+            if (linkedinAction === 'invite') {
+              // LINKEDIN INVITE
+              const formData = new FormData();
+              formData.append('provider_id', providerId);
+              formData.append('account_id', unipileAccountId!);
+              if (personalizedMessage && personalizedMessage.trim().length > 0) {
+                formData.append('message', personalizedMessage.slice(0, 300));
+              }
 
-            if (response.ok) {
-              sendSuccess = true;
-              const responseData = await response.json().catch(() => ({}));
-              providerMessageId = responseData.message_id || responseData.id || null;
+              const response = await fetch(`https://${unipileDsn}/api/v1/users/invite`, {
+                method: 'POST',
+                headers: { 'X-API-KEY': unipileApiKey, 'Accept': 'application/json' },
+                body: formData,
+              });
+
+              const responseText = await response.text().catch(() => '');
+              if (response.ok) {
+                sendSuccess = true;
+                try {
+                  const responseData = JSON.parse(responseText);
+                  providerMessageId = responseData.invitation_id || responseData.id || null;
+                } catch { /* ignore */ }
+              } else {
+                sendError = `HTTP ${response.status}: ${responseText}`;
+              }
+            } else if (linkedinAction === 'inmail') {
+              // LINKEDIN INMAIL
+              const formData = new FormData();
+              formData.append('account_id', unipileAccountId!);
+              formData.append('text', personalizedMessage);
+              formData.append('attendees_ids', providerId);
+              formData.append('linkedin[inmail]', 'true');
+              formData.append('linkedin[api]', apiValue);
+
+              const response = await fetch(`https://${unipileDsn}/api/v1/chats`, {
+                method: 'POST',
+                headers: { 'X-API-KEY': unipileApiKey, 'Accept': 'application/json' },
+                body: formData,
+              });
+
+              const responseText = await response.text().catch(() => '');
+              if (response.ok) {
+                sendSuccess = true;
+                try {
+                  const responseData = JSON.parse(responseText);
+                  providerMessageId = responseData.message_id || responseData.id || null;
+                } catch { /* ignore */ }
+              } else {
+                sendError = `HTTP ${response.status}: ${responseText}`;
+              }
             } else {
-              sendError = await response.text().catch(() => `HTTP ${response.status}`);
+              // LINKEDIN DM
+              const formData = new FormData();
+              formData.append('account_id', unipileAccountId!);
+              formData.append('text', personalizedMessage);
+              formData.append('attendees_ids', providerId);
+              formData.append('linkedin[api]', apiValue);
+
+              const response = await fetch(`https://${unipileDsn}/api/v1/chats`, {
+                method: 'POST',
+                headers: { 'X-API-KEY': unipileApiKey, 'Accept': 'application/json' },
+                body: formData,
+              });
+
+              const responseText = await response.text().catch(() => '');
+              if (response.ok) {
+                sendSuccess = true;
+                try {
+                  const responseData = JSON.parse(responseText);
+                  providerMessageId = responseData.message_id || responseData.id || null;
+                } catch { /* ignore */ }
+              } else {
+                const lowerError = responseText.toLowerCase();
+                if (lowerError.includes('not connected') || lowerError.includes('connection') || lowerError.includes('relationship')) {
+                  sendError = `Não é conexão. Use Convite ou InMail. (HTTP ${response.status})`;
+                } else {
+                  sendError = `HTTP ${response.status}: ${responseText}`;
+                }
+              }
             }
           }
 

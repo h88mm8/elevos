@@ -41,10 +41,16 @@ serve(async (req) => {
       return new Response(JSON.stringify({ error: 'Unauthorized' }), { status: 401, headers: corsHeaders });
     }
 
-    const { workspaceId, name, type, leads, message, subject, accountId, schedule } = await req.json();
+    const { workspaceId, name, type, leads, message, subject, accountId, schedule, linkedinAction } = await req.json();
 
-    if (!workspaceId || !name || !type || !message || !leads?.length) {
+    if (!workspaceId || !name || !type || !leads?.length) {
       return new Response(JSON.stringify({ error: 'Missing required fields' }), { status: 400, headers: corsHeaders });
+    }
+
+    // Message is optional for invite action, required for others
+    const isInviteAction = type === 'linkedin' && linkedinAction === 'invite';
+    if (!isInviteAction && !message) {
+      return new Response(JSON.stringify({ error: 'Message is required' }), { status: 400, headers: corsHeaders });
     }
 
     // ============================================
@@ -137,7 +143,7 @@ serve(async (req) => {
     }
 
     // ============================================
-    // CREATE CAMPAIGN: Using correct schema fields (message, subject, account_id)
+    // CREATE CAMPAIGN: Using correct schema fields (message, subject, account_id, linkedin_action)
     // ============================================
     const { data: campaign, error: campaignError } = await supabase
       .from('campaigns')
@@ -145,9 +151,10 @@ serve(async (req) => {
         workspace_id: workspaceId,
         name,
         type,
-        message,  // Correct field name (not message_template)
+        message: message || '',  // Default to empty for invite action
         subject: type === 'email' ? subject : null,  // Include subject
         account_id: accountId || null,  // Include account_id
+        linkedin_action: type === 'linkedin' ? (linkedinAction || 'dm') : null,  // Include linkedin_action
         schedule: schedule ? new Date(schedule).toISOString() : null,
         status: schedule ? 'scheduled' : 'draft',
         leads_count: allLeadIds.length,

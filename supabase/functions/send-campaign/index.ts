@@ -220,14 +220,22 @@ serve(async (req) => {
     // ============================================
     const isLinkedIn = campaign.type === 'linkedin';
     const isWhatsApp = campaign.type === 'whatsapp';
-    const dailyLimit = isLinkedIn ? settings.linkedin_daily_message_limit : settings.daily_message_limit;
+    const linkedinAction = campaign.linkedin_action || 'dm'; // dm | inmail | invite
+    const isLinkedInInvite = isLinkedIn && linkedinAction === 'invite';
+    
+    // Use invite limit for invite action, message limit for dm/inmail
+    const dailyLimit = isLinkedIn 
+      ? (isLinkedInInvite ? settings.linkedin_daily_invite_limit : settings.linkedin_daily_message_limit) 
+      : settings.daily_message_limit;
     const baseIntervalSeconds = isLinkedIn ? settings.linkedin_message_interval_seconds : settings.message_interval_seconds;
     const minIntervalSeconds = 10; // Both have 10s minimum
 
     // Determine usage action type
-    const usageAction: UsageAction = isLinkedIn ? 'linkedin_message' : isWhatsApp ? 'whatsapp_message' : 'whatsapp_message';
+    const usageAction: UsageAction = isLinkedIn 
+      ? (isLinkedInInvite ? 'linkedin_invite' : 'linkedin_message') 
+      : isWhatsApp ? 'whatsapp_message' : 'whatsapp_message';
 
-    console.log(`Using ${isLinkedIn ? 'LinkedIn' : 'WhatsApp'} settings: ${dailyLimit} msgs/day, ${baseIntervalSeconds}s base interval (with ±20% jitter)`);
+    console.log(`Using ${isLinkedIn ? `LinkedIn (${linkedinAction})` : 'WhatsApp'} settings: ${dailyLimit}/day, ${baseIntervalSeconds}s base interval (with ±20% jitter)`);
 
     // ============================================
     // GET MESSAGING PROVIDER CREDENTIALS
@@ -255,9 +263,10 @@ serve(async (req) => {
       }
 
       // Verify account belongs to workspace (campaign.account_id stores the internal UUID)
+      // Include linkedin_feature for InMail API parameter
       const { data: account, error: accountError } = await supabase
         .from('accounts')
-        .select('id, account_id, status')
+        .select('id, account_id, status, linkedin_feature')
         .eq('id', campaign.account_id)
         .eq('workspace_id', campaign.workspace_id)
         .single();
@@ -273,6 +282,11 @@ serve(async (req) => {
 
       internalAccountUuid = account.id; // Internal UUID (for DB references)
       unipileAccountId = account.account_id; // Unipile account ID (for API calls & usage tracking)
+      
+      // Store linkedin_feature for InMail api parameter
+      if (isLinkedIn) {
+        (campaign as any)._linkedinFeature = account.linkedin_feature || 'classic';
+      }
     }
 
     // ============================================
@@ -559,33 +573,137 @@ serve(async (req) => {
           if (!providerId) {
             throw new Error(`Could not resolve LinkedIn profile: ${publicIdentifier}`);
           }
-          
-          const formData = new FormData();
-          formData.append('account_id', unipileAccountId!);
-          formData.append('text', personalizedMessage);
-          formData.append('attendees_ids', providerId);
-          formData.append('linkedin[api]', 'classic');
 
-          const response = await fetch(`https://${unipileDsn}/api/v1/chats`, {
-            method: 'POST',
-            headers: {
-              'X-API-KEY': unipileApiKey,
-              'Accept': 'application/json',
-            },
-            body: formData,
-          });
+          // Get linkedin_feature for API parameter (from account fetch earlier)
+          const linkedinFeature = (campaign as any)._linkedinFeature || 'classic';
+          // Map feature to API value: Classic, Sales Navigator, Recruiter -> classic, sales_navigator, recruiter
+          const apiValue = linkedinFeature.toLowerCase().replace(/\s+/g, '_').replace('sales_navigator', 'sales_navigator');
 
-          if (response.ok) {
-            sendSuccess = true;
-            const responseData = await response.json().catch(() => ({}));
-            if (responseData.message_id || responseData.id) {
-              providerMessageId = responseData.message_id || responseData.id;
+          if (linkedinAction === 'invite') {
+            // ============================================
+            // LINKEDIN INVITE (Connection Request)
+            // ============================================
+            const formData = new FormData();
+            formData.append('provider_id', providerId);
+            formData.append('account_id', unipileAccountId!);
+            // Message is optional for invites (note field)
+            if (personalizedMessage && personalizedMessage.trim().length > 0) {
+              // Truncate to 300 chars max
+              const note = personalizedMessage.slice(0, 300);
+              formData.append('message', note);
             }
-            console.log(`LinkedIn message sent to ${publicIdentifier}, messageId: ${providerMessageId || 'unknown'}`);
+
+            const inviteUrl = `https://${unipileDsn}/api/v1/users/invite`;
+            console.log(`LinkedIn invite to ${publicIdentifier} (providerId: ${providerId}), endpoint: ${inviteUrl}`);
+
+            const response = await fetch(inviteUrl, {
+              method: 'POST',
+              headers: {
+                'X-API-KEY': unipileApiKey,
+                'Accept': 'application/json',
+              },
+              body: formData,
+            });
+
+            const responseText = await response.text().catch(() => '');
+            console.log(`LinkedIn invite response: HTTP ${response.status} - ${responseText}`);
+
+            if (response.ok) {
+              sendSuccess = true;
+              try {
+                const responseData = JSON.parse(responseText);
+                providerMessageId = responseData.invitation_id || responseData.id || null;
+              } catch {
+                // Response might not be JSON
+              }
+              console.log(`LinkedIn invite sent to ${publicIdentifier}, invitationId: ${providerMessageId || 'unknown'}`);
+            } else {
+              sendError = `HTTP ${response.status}: ${responseText}`;
+              console.error(`Failed LinkedIn invite to ${publicIdentifier}:`, sendError);
+            }
+          } else if (linkedinAction === 'inmail') {
+            // ============================================
+            // LINKEDIN INMAIL (Premium message)
+            // ============================================
+            const formData = new FormData();
+            formData.append('account_id', unipileAccountId!);
+            formData.append('text', personalizedMessage);
+            formData.append('attendees_ids', providerId);
+            formData.append('linkedin[inmail]', 'true');
+            formData.append('linkedin[api]', apiValue);
+
+            const chatUrl = `https://${unipileDsn}/api/v1/chats`;
+            console.log(`LinkedIn InMail to ${publicIdentifier}, api: ${apiValue}, endpoint: ${chatUrl}`);
+
+            const response = await fetch(chatUrl, {
+              method: 'POST',
+              headers: {
+                'X-API-KEY': unipileApiKey,
+                'Accept': 'application/json',
+              },
+              body: formData,
+            });
+
+            const responseText = await response.text().catch(() => '');
+            console.log(`LinkedIn InMail response: HTTP ${response.status} - ${responseText}`);
+
+            if (response.ok) {
+              sendSuccess = true;
+              try {
+                const responseData = JSON.parse(responseText);
+                providerMessageId = responseData.message_id || responseData.id || null;
+              } catch {
+                // Response might not be JSON
+              }
+              console.log(`LinkedIn InMail sent to ${publicIdentifier}, messageId: ${providerMessageId || 'unknown'}`);
+            } else {
+              sendError = `HTTP ${response.status}: ${responseText}`;
+              console.error(`Failed LinkedIn InMail to ${publicIdentifier}:`, sendError);
+            }
           } else {
-            const errorText = await response.text().catch(() => '');
-            sendError = errorText || `HTTP ${response.status}`;
-            console.error(`Failed to send LinkedIn to ${publicIdentifier}:`, sendError);
+            // ============================================
+            // LINKEDIN DM (Direct Message - requires connection)
+            // ============================================
+            const formData = new FormData();
+            formData.append('account_id', unipileAccountId!);
+            formData.append('text', personalizedMessage);
+            formData.append('attendees_ids', providerId);
+            formData.append('linkedin[api]', apiValue);
+
+            const chatUrl = `https://${unipileDsn}/api/v1/chats`;
+            console.log(`LinkedIn DM to ${publicIdentifier}, api: ${apiValue}, endpoint: ${chatUrl}`);
+
+            const response = await fetch(chatUrl, {
+              method: 'POST',
+              headers: {
+                'X-API-KEY': unipileApiKey,
+                'Accept': 'application/json',
+              },
+              body: formData,
+            });
+
+            const responseText = await response.text().catch(() => '');
+            console.log(`LinkedIn DM response: HTTP ${response.status} - ${responseText}`);
+
+            if (response.ok) {
+              sendSuccess = true;
+              try {
+                const responseData = JSON.parse(responseText);
+                providerMessageId = responseData.message_id || responseData.id || null;
+              } catch {
+                // Response might not be JSON
+              }
+              console.log(`LinkedIn DM sent to ${publicIdentifier}, messageId: ${providerMessageId || 'unknown'}`);
+            } else {
+              // Check if the error is related to not being connected
+              const lowerError = responseText.toLowerCase();
+              if (lowerError.includes('not connected') || lowerError.includes('connection') || lowerError.includes('relationship')) {
+                sendError = `Não é conexão. Use Convite ou InMail. (HTTP ${response.status}: ${responseText})`;
+              } else {
+                sendError = `HTTP ${response.status}: ${responseText}`;
+              }
+              console.error(`Failed LinkedIn DM to ${publicIdentifier}:`, sendError);
+            }
           }
         } else if (campaign.type === 'email') {
           // Email sending placeholder - not implemented

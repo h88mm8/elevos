@@ -55,6 +55,55 @@ serve(async (req) => {
     }
 
     // ============================================
+    // GET ACCOUNT: Fetch account_id (provider ID) before deletion
+    // ============================================
+    const { data: account, error: fetchError } = await supabase
+      .from('accounts')
+      .select('account_id')
+      .eq('id', accountId)
+      .eq('workspace_id', workspaceId)
+      .maybeSingle();
+
+    if (fetchError || !account) {
+      console.error('Error fetching account:', fetchError);
+      return new Response(JSON.stringify({ error: 'Account not found' }), { status: 404, headers: corsHeaders });
+    }
+
+    const providerAccountId = account.account_id;
+
+    // ============================================
+    // DELETE FROM UNIPILE: Remove connection from provider
+    // ============================================
+    const unipileDsn = Deno.env.get('UNIPILE_DSN');
+    const unipileApiKey = Deno.env.get('UNIPILE_API_KEY');
+
+    if (unipileDsn && unipileApiKey && providerAccountId) {
+      try {
+        const deleteUrl = `https://${unipileDsn}/api/v1/accounts/${providerAccountId}`;
+        console.log(`Deleting account from Unipile: ${deleteUrl}`);
+        
+        const unipileResponse = await fetch(deleteUrl, {
+          method: 'DELETE',
+          headers: {
+            'X-API-KEY': unipileApiKey,
+            'Accept': 'application/json',
+          },
+        });
+
+        if (!unipileResponse.ok) {
+          const errorText = await unipileResponse.text();
+          console.warn(`Unipile delete failed (${unipileResponse.status}): ${errorText}`);
+          // Continue with local deletion even if Unipile fails
+        } else {
+          console.log(`Successfully deleted account ${providerAccountId} from Unipile`);
+        }
+      } catch (unipileError) {
+        console.warn('Error calling Unipile delete:', unipileError);
+        // Continue with local deletion even if Unipile fails
+      }
+    }
+
+    // ============================================
     // DELETE ACCOUNT: Remove from accounts table
     // ============================================
     const { error: deleteError } = await supabase

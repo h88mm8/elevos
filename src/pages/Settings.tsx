@@ -32,7 +32,12 @@ import {
   XCircle,
   ExternalLink,
   Pencil,
+  Settings2,
+  Copy,
+  Check,
+  AlertCircle,
 } from 'lucide-react';
+import { MESSAGE_VARIABLES } from '@/lib/messageVariables';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 
@@ -380,6 +385,10 @@ export default function Settings() {
             <TabsTrigger value="credits" className="gap-2">
               <History className="h-4 w-4" />
               Créditos
+            </TabsTrigger>
+            <TabsTrigger value="preferences" className="gap-2">
+              <Settings2 className="h-4 w-4" />
+              Preferências
             </TabsTrigger>
           </TabsList>
 
@@ -923,8 +932,104 @@ export default function Settings() {
               </CardContent>
             </Card>
           </TabsContent>
+
+          <TabsContent value="preferences" className="space-y-4">
+            <Card>
+              <CardHeader>
+                <CardTitle>Variáveis de Mensagem</CardTitle>
+                <CardDescription>
+                  Use estas variáveis nas suas campanhas para personalizar automaticamente as mensagens para cada lead.
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Variável</TableHead>
+                      <TableHead>Campo</TableHead>
+                      <TableHead>Descrição</TableHead>
+                      <TableHead className="w-16"></TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {MESSAGE_VARIABLES.map((variable) => (
+                      <VariableRow key={variable.variable} variable={variable} />
+                    ))}
+                  </TableBody>
+                </Table>
+                <div className="mt-4 p-4 border rounded-lg bg-muted/50">
+                  <div className="flex items-start gap-2 text-sm text-muted-foreground">
+                    <AlertCircle className="h-4 w-4 mt-0.5 shrink-0" />
+                    <div>
+                      <p className="font-medium text-foreground">Dica</p>
+                      <p>Se o campo estiver vazio para um lead, a variável será substituída por texto vazio. Certifique-se de que seus leads tenham os dados preenchidos para melhor personalização.</p>
+                    </div>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader>
+                <CardTitle>Exemplo de Uso</CardTitle>
+                <CardDescription>
+                  Veja como as variáveis funcionam em uma mensagem
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="p-4 border rounded-lg bg-muted/30">
+                  <p className="text-sm font-medium text-muted-foreground mb-2">Mensagem com variáveis:</p>
+                  <p className="font-mono text-sm">
+                    Olá {"{{primeiro_nome}}"}, vi que você trabalha na {"{{empresa}}"} como {"{{cargo}}"}. Podemos conversar?
+                  </p>
+                </div>
+                <div className="p-4 border rounded-lg bg-primary/5 border-primary/20">
+                  <p className="text-sm font-medium text-muted-foreground mb-2">Resultado para o lead:</p>
+                  <p className="text-sm">
+                    Olá <span className="font-semibold text-primary">João</span>, vi que você trabalha na <span className="font-semibold text-primary">Empresa ABC</span> como <span className="font-semibold text-primary">CEO</span>. Podemos conversar?
+                  </p>
+                </div>
+              </CardContent>
+            </Card>
+          </TabsContent>
         </Tabs>
       </div>
     </AppLayout>
+  );
+}
+
+// Componente para linha de variável com botão de copiar
+function VariableRow({ variable }: { variable: typeof MESSAGE_VARIABLES[0] }) {
+  const [copied, setCopied] = useState(false);
+
+  const handleCopy = async () => {
+    await navigator.clipboard.writeText(variable.variable);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+
+  return (
+    <TableRow>
+      <TableCell>
+        <code className="px-2 py-1 rounded bg-muted font-mono text-sm">
+          {variable.variable}
+        </code>
+      </TableCell>
+      <TableCell>
+        <Badge variant="outline">{variable.label}</Badge>
+      </TableCell>
+      <TableCell className="text-muted-foreground">
+        {variable.description}
+      </TableCell>
+      <TableCell>
+        <Button variant="ghost" size="icon" onClick={handleCopy}>
+          {copied ? (
+            <Check className="h-4 w-4 text-green-500" />
+          ) : (
+            <Copy className="h-4 w-4" />
+          )}
+        </Button>
+      </TableCell>
+    </TableRow>
   );
 }

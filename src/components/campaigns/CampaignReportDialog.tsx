@@ -1,5 +1,5 @@
-import { useState } from 'react';
-import { useCampaignReport } from '@/hooks/useCampaignReport';
+import { useState, useMemo } from 'react';
+import { useCampaignReport, CampaignLeadDetail } from '@/hooks/useCampaignReport';
 import {
   Dialog,
   DialogContent,
@@ -14,8 +14,7 @@ import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { Progress } from '@/components/ui/progress';
-import { Alert, AlertDescription } from '@/components/ui/alert';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import {
   Send,
   CheckCheck,
@@ -23,15 +22,13 @@ import {
   MessageCircle,
   XCircle,
   Clock,
-  TrendingUp,
-  Users,
   RefreshCw,
-  Info,
-  ArrowUp,
-  ArrowDown,
+  Download,
+  Filter,
 } from 'lucide-react';
-import { format, formatDistanceToNow } from 'date-fns';
+import { format, formatDistanceToNow, parseISO, startOfHour } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
+import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 
 interface CampaignReportDialogProps {
   campaignId: string | null;
@@ -54,6 +51,8 @@ const statusConfig: Record<string, {
   failed: { label: 'Falhou', icon: XCircle, color: 'text-destructive', bgColor: 'bg-destructive/10' },
 };
 
+const allStatuses = ['all', 'pending', 'sent', 'delivered', 'seen', 'replied', 'failed'];
+
 export function CampaignReportDialog({
   campaignId,
   campaignName,
@@ -65,6 +64,90 @@ export function CampaignReportDialog({
   );
 
   const [activeTab, setActiveTab] = useState('overview');
+  const [statusFilter, setStatusFilter] = useState('all');
+
+  // Filter leads by status
+  const filteredLeads = useMemo(() => {
+    if (!leads) return [];
+    if (statusFilter === 'all') return leads;
+    return leads.filter(lead => lead.status === statusFilter);
+  }, [leads, statusFilter]);
+
+  // Generate timeline chart data from events
+  const chartData = useMemo(() => {
+    if (!events || events.length === 0) return [];
+
+    // Group events by hour
+    const hourlyData: Record<string, { time: string; sent: number; delivered: number; seen: number; replied: number }> = {};
+
+    events.forEach(event => {
+      const hourKey = format(startOfHour(parseISO(event.created_at)), 'dd/MM HH:mm');
+      
+      if (!hourlyData[hourKey]) {
+        hourlyData[hourKey] = { time: hourKey, sent: 0, delivered: 0, seen: 0, replied: 0 };
+      }
+
+      if (event.event_type === 'sent') hourlyData[hourKey].sent++;
+      if (event.event_type === 'delivered') hourlyData[hourKey].delivered++;
+      if (event.event_type === 'seen') hourlyData[hourKey].seen++;
+      if (event.event_type === 'replied') hourlyData[hourKey].replied++;
+    });
+
+    // Sort by time and return as array
+    return Object.values(hourlyData).sort((a, b) => {
+      const [dayA, monthA, hourA] = a.time.split(/[\/\s:]/);
+      const [dayB, monthB, hourB] = b.time.split(/[\/\s:]/);
+      return `${monthA}${dayA}${hourA}`.localeCompare(`${monthB}${dayB}${hourB}`);
+    });
+  }, [events]);
+
+  // Export leads to CSV
+  function exportToCSV() {
+    if (!leads || leads.length === 0) return;
+
+    const headers = [
+      'Nome',
+      'Email',
+      'Telefone',
+      'Empresa',
+      'Cargo',
+      'Status',
+      'Enviado em',
+      'Entregue em',
+      'Visualizado em',
+      'Respondido em',
+      'Erro',
+    ];
+
+    const rows = leads.map(lead => [
+      lead.lead?.full_name || lead.lead?.first_name || '',
+      lead.lead?.email || '',
+      lead.lead?.mobile_number || '',
+      lead.lead?.company || '',
+      lead.lead?.job_title || '',
+      statusConfig[lead.status]?.label || lead.status,
+      lead.sent_at ? format(new Date(lead.sent_at), 'dd/MM/yyyy HH:mm', { locale: ptBR }) : '',
+      lead.delivered_at ? format(new Date(lead.delivered_at), 'dd/MM/yyyy HH:mm', { locale: ptBR }) : '',
+      lead.seen_at ? format(new Date(lead.seen_at), 'dd/MM/yyyy HH:mm', { locale: ptBR }) : '',
+      lead.replied_at ? format(new Date(lead.replied_at), 'dd/MM/yyyy HH:mm', { locale: ptBR }) : '',
+      lead.error || '',
+    ]);
+
+    const csvContent = [
+      headers.join(';'),
+      ...rows.map(row => row.map(cell => `"${String(cell).replace(/"/g, '""')}"`).join(';'))
+    ].join('\n');
+
+    const blob = new Blob(['\ufeff' + csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `relatorio-campanha-${campaignName || campaignId}-${format(new Date(), 'yyyy-MM-dd')}.csv`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  }
 
   if (!open) return null;
 
@@ -81,16 +164,22 @@ export function CampaignReportDialog({
                 Métricas de entrega, visualização e resposta
               </DialogDescription>
             </div>
-            <Button variant="ghost" size="icon" onClick={() => refetch()}>
-              <RefreshCw className="h-4 w-4" />
-            </Button>
+            <div className="flex items-center gap-2">
+              <Button variant="outline" size="sm" onClick={exportToCSV} disabled={!leads?.length}>
+                <Download className="h-4 w-4 mr-1" />
+                CSV
+              </Button>
+              <Button variant="ghost" size="icon" onClick={() => refetch()}>
+                <RefreshCw className="h-4 w-4" />
+              </Button>
+            </div>
           </div>
         </DialogHeader>
 
         <Tabs value={activeTab} onValueChange={setActiveTab} className="flex-1 overflow-hidden flex flex-col">
           <TabsList className="flex-shrink-0">
             <TabsTrigger value="overview">Visão Geral</TabsTrigger>
-            <TabsTrigger value="leads">Leads ({leads?.length || 0})</TabsTrigger>
+            <TabsTrigger value="leads">Leads ({filteredLeads?.length || 0})</TabsTrigger>
             <TabsTrigger value="timeline">Timeline</TabsTrigger>
           </TabsList>
 
@@ -170,6 +259,72 @@ export function CampaignReportDialog({
                     </CardContent>
                   </Card>
 
+                  {/* Timeline Chart */}
+                  {chartData.length > 0 && (
+                    <Card>
+                      <CardHeader>
+                        <CardTitle className="text-base">Evolução ao Longo do Tempo</CardTitle>
+                        <CardDescription>Eventos agrupados por hora</CardDescription>
+                      </CardHeader>
+                      <CardContent>
+                        <ResponsiveContainer width="100%" height={250}>
+                          <LineChart data={chartData}>
+                            <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
+                            <XAxis 
+                              dataKey="time" 
+                              tick={{ fontSize: 11 }} 
+                              className="text-muted-foreground"
+                            />
+                            <YAxis 
+                              tick={{ fontSize: 11 }} 
+                              className="text-muted-foreground"
+                            />
+                            <Tooltip 
+                              contentStyle={{ 
+                                backgroundColor: 'hsl(var(--background))', 
+                                border: '1px solid hsl(var(--border))',
+                                borderRadius: '8px',
+                              }}
+                            />
+                            <Legend />
+                            <Line 
+                              type="monotone" 
+                              dataKey="sent" 
+                              name="Enviados"
+                              stroke="#3b82f6" 
+                              strokeWidth={2}
+                              dot={{ r: 3 }}
+                            />
+                            <Line 
+                              type="monotone" 
+                              dataKey="delivered" 
+                              name="Entregues"
+                              stroke="#22c55e" 
+                              strokeWidth={2}
+                              dot={{ r: 3 }}
+                            />
+                            <Line 
+                              type="monotone" 
+                              dataKey="seen" 
+                              name="Visualizados"
+                              stroke="#a855f7" 
+                              strokeWidth={2}
+                              dot={{ r: 3 }}
+                            />
+                            <Line 
+                              type="monotone" 
+                              dataKey="replied" 
+                              name="Respondidos"
+                              stroke="#10b981" 
+                              strokeWidth={2}
+                              dot={{ r: 3 }}
+                            />
+                          </LineChart>
+                        </ResponsiveContainer>
+                      </CardContent>
+                    </Card>
+                  )}
+
                   {/* Status distribution */}
                   <Card>
                     <CardHeader>
@@ -196,15 +351,6 @@ export function CampaignReportDialog({
                       </div>
                     </CardContent>
                   </Card>
-
-                  {/* Best practices alert */}
-                  <Alert>
-                    <Info className="h-4 w-4" />
-                    <AlertDescription className="text-sm">
-                      <strong>Dica:</strong> Uma taxa de resposta acima de 5% é considerada boa para campanhas de WhatsApp.
-                      Mensagens personalizadas com perguntas diretas tendem a gerar mais engajamento.
-                    </AlertDescription>
-                  </Alert>
                 </div>
               ) : (
                 <div className="text-center py-12 text-muted-foreground">
@@ -213,8 +359,35 @@ export function CampaignReportDialog({
               )}
             </TabsContent>
 
-            <TabsContent value="leads" className="h-full overflow-hidden mt-0">
-              <ScrollArea className="h-[500px]">
+            <TabsContent value="leads" className="h-full overflow-hidden mt-0 flex flex-col">
+              {/* Status filter */}
+              <div className="flex items-center gap-2 mb-4 flex-shrink-0">
+                <Filter className="h-4 w-4 text-muted-foreground" />
+                <Select value={statusFilter} onValueChange={setStatusFilter}>
+                  <SelectTrigger className="w-48">
+                    <SelectValue placeholder="Filtrar por status" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">Todos os status</SelectItem>
+                    {allStatuses.filter(s => s !== 'all').map(status => {
+                      const config = statusConfig[status];
+                      return (
+                        <SelectItem key={status} value={status}>
+                          <div className="flex items-center gap-2">
+                            <config.icon className={`h-3.5 w-3.5 ${config.color}`} />
+                            {config.label}
+                          </div>
+                        </SelectItem>
+                      );
+                    })}
+                  </SelectContent>
+                </Select>
+                <span className="text-sm text-muted-foreground">
+                  {filteredLeads.length} lead{filteredLeads.length !== 1 ? 's' : ''}
+                </span>
+              </div>
+
+              <ScrollArea className="flex-1">
                 <Table>
                   <TableHeader>
                     <TableRow>
@@ -226,7 +399,7 @@ export function CampaignReportDialog({
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {leads?.map((lead) => {
+                    {filteredLeads.map((lead) => {
                       const config = statusConfig[lead.status] || statusConfig.pending;
                       const Icon = config.icon;
                       const lastEvent = lead.replied_at || lead.seen_at || lead.delivered_at || lead.sent_at;
@@ -270,10 +443,13 @@ export function CampaignReportDialog({
                         </TableRow>
                       );
                     })}
-                    {(!leads || leads.length === 0) && (
+                    {filteredLeads.length === 0 && (
                       <TableRow>
                         <TableCell colSpan={5} className="text-center py-8 text-muted-foreground">
-                          Nenhum lead encontrado
+                          {statusFilter !== 'all' 
+                            ? `Nenhum lead com status "${statusConfig[statusFilter]?.label || statusFilter}"`
+                            : 'Nenhum lead encontrado'
+                          }
                         </TableCell>
                       </TableRow>
                     )}

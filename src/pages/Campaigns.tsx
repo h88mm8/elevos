@@ -18,6 +18,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { useToast } from '@/hooks/use-toast';
 import { supabase } from '@/integrations/supabase/client';
+import { CampaignReportDialog } from '@/components/campaigns/CampaignReportDialog';
 import { 
   Send, 
   Plus, 
@@ -31,6 +32,7 @@ import {
   Eye,
   Trash2,
   Clock,
+  BarChart3,
 } from 'lucide-react';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
@@ -72,6 +74,7 @@ export default function Campaigns() {
   const [creating, setCreating] = useState(false);
   const [showPreview, setShowPreview] = useState(false);
   const [sendingCampaignId, setSendingCampaignId] = useState<string | null>(null);
+  const [reportCampaign, setReportCampaign] = useState<{ id: string; name: string } | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   // Form state
@@ -607,6 +610,18 @@ export default function Campaigns() {
                         </TableCell>
                         <TableCell className="text-center">
                           <div className="flex items-center justify-center gap-1">
+                            {/* Report button - always visible for sent campaigns */}
+                            {campaign.sent_count > 0 && (
+                              <Button
+                                size="icon"
+                                variant="ghost"
+                                className="h-8 w-8"
+                                onClick={() => setReportCampaign({ id: campaign.id, name: campaign.name })}
+                                title="Ver relatório"
+                              >
+                                <BarChart3 className="h-4 w-4" />
+                              </Button>
+                            )}
                             {canSend && (
                               <Button
                                 size="sm"
@@ -623,7 +638,7 @@ export default function Campaigns() {
                                 )}
                               </Button>
                             )}
-                            {campaign.status === 'completed' && (
+                            {campaign.status === 'completed' && campaign.sent_count === 0 && (
                               <span className="text-sm text-muted-foreground">Concluído</span>
                             )}
                             <Button
@@ -645,6 +660,14 @@ export default function Campaigns() {
           </CardContent>
         </Card>
       </div>
+
+      {/* Campaign Report Dialog */}
+      <CampaignReportDialog
+        campaignId={reportCampaign?.id || null}
+        campaignName={reportCampaign?.name}
+        open={!!reportCampaign}
+        onOpenChange={(open) => !open && setReportCampaign(null)}
+      />
     </AppLayout>
   );
 }

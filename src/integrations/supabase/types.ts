@@ -58,31 +58,88 @@ export type Database = {
           },
         ]
       }
+      campaign_events: {
+        Row: {
+          campaign_id: string
+          campaign_lead_id: string | null
+          created_at: string
+          event_type: string
+          id: string
+          metadata: Json | null
+          provider_message_id: string | null
+        }
+        Insert: {
+          campaign_id: string
+          campaign_lead_id?: string | null
+          created_at?: string
+          event_type: string
+          id?: string
+          metadata?: Json | null
+          provider_message_id?: string | null
+        }
+        Update: {
+          campaign_id?: string
+          campaign_lead_id?: string | null
+          created_at?: string
+          event_type?: string
+          id?: string
+          metadata?: Json | null
+          provider_message_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "campaign_events_campaign_id_fkey"
+            columns: ["campaign_id"]
+            isOneToOne: false
+            referencedRelation: "campaigns"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "campaign_events_campaign_lead_id_fkey"
+            columns: ["campaign_lead_id"]
+            isOneToOne: false
+            referencedRelation: "campaign_leads"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       campaign_leads: {
         Row: {
           campaign_id: string
           created_at: string
+          delivered_at: string | null
           error: string | null
           id: string
           lead_id: string
+          provider_message_id: string | null
+          replied_at: string | null
+          seen_at: string | null
           sent_at: string | null
           status: string
         }
         Insert: {
           campaign_id: string
           created_at?: string
+          delivered_at?: string | null
           error?: string | null
           id?: string
           lead_id: string
+          provider_message_id?: string | null
+          replied_at?: string | null
+          seen_at?: string | null
           sent_at?: string | null
           status?: string
         }
         Update: {
           campaign_id?: string
           created_at?: string
+          delivered_at?: string | null
           error?: string | null
           id?: string
           lead_id?: string
+          provider_message_id?: string | null
+          replied_at?: string | null
+          seen_at?: string | null
           sent_at?: string | null
           status?: string
         }
@@ -143,12 +200,15 @@ export type Database = {
         Row: {
           account_id: string | null
           created_at: string
+          delivered_count: number
           failed_count: number
           id: string
           leads_count: number
           message: string
           name: string
+          replied_count: number
           schedule: string | null
+          seen_count: number
           sent_count: number
           status: string
           subject: string | null
@@ -159,12 +219,15 @@ export type Database = {
         Insert: {
           account_id?: string | null
           created_at?: string
+          delivered_count?: number
           failed_count?: number
           id?: string
           leads_count?: number
           message: string
           name: string
+          replied_count?: number
           schedule?: string | null
+          seen_count?: number
           sent_count?: number
           status?: string
           subject?: string | null
@@ -175,12 +238,15 @@ export type Database = {
         Update: {
           account_id?: string | null
           created_at?: string
+          delivered_count?: number
           failed_count?: number
           id?: string
           leads_count?: number
           message?: string
           name?: string
+          replied_count?: number
           schedule?: string | null
+          seen_count?: number
           sent_count?: number
           status?: string
           subject?: string | null

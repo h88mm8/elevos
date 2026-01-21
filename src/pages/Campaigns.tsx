@@ -21,6 +21,7 @@ import { useToast } from '@/hooks/use-toast';
 import { supabase } from '@/integrations/supabase/client';
 import { CampaignReportDialog } from '@/components/campaigns/CampaignReportDialog';
 import { EditScheduledCampaignDialog } from '@/components/campaigns/EditScheduledCampaignDialog';
+import { Alert, AlertDescription } from '@/components/ui/alert';
 import { 
   Send, 
   Plus, 
@@ -39,6 +40,10 @@ import {
   Pencil,
   XCircle,
   Copy,
+  UserPlus,
+  MessageSquare,
+  Sparkles,
+  Info,
 } from 'lucide-react';
 import {
   AlertDialog,
@@ -52,8 +57,14 @@ import {
 } from '@/components/ui/alert-dialog';
 import { format, setHours, setMinutes } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
-import { Lead, Campaign } from '@/types';
+import { Lead, Campaign, LinkedInAction } from '@/types';
 import { MESSAGE_VARIABLES, getMessagePreview } from '@/lib/messageVariables';
+
+const linkedInActionLabels: Record<LinkedInAction, { label: string; description: string }> = {
+  dm: { label: 'Mensagem (DM)', description: 'Envia mensagem para conexões' },
+  inmail: { label: 'InMail (Premium)', description: 'Requer créditos InMail' },
+  invite: { label: 'Convite de Conexão', description: 'Envia solicitação de conexão' },
+};
 
 const statusLabels: Record<string, { label: string; variant: 'default' | 'secondary' | 'destructive' | 'outline' }> = {
   draft: { label: 'Rascunho', variant: 'secondary' },
@@ -102,11 +113,16 @@ export default function Campaigns() {
   const [subject, setSubject] = useState('');
   const [selectedAccountId, setSelectedAccountId] = useState<string>('');
   const [selectedLeadIds, setSelectedLeadIds] = useState<Set<string>>(new Set());
+  const [linkedInAction, setLinkedInAction] = useState<LinkedInAction>('dm');
   
   // Schedule state
   const [scheduleEnabled, setScheduleEnabled] = useState(false);
   const [scheduleDate, setScheduleDate] = useState<Date | undefined>(undefined);
   const [scheduleTime, setScheduleTime] = useState('09:00');
+
+  // Message character limit for invite notes
+  const MAX_INVITE_NOTE_LENGTH = 300;
+  const isInviteAction = type === 'linkedin' && linkedInAction === 'invite';
 
   // Filter accounts by campaign type
   const channelAccounts = useMemo(() => {
@@ -142,6 +158,7 @@ export default function Campaigns() {
     setScheduleEnabled(false);
     setScheduleDate(undefined);
     setScheduleTime('09:00');
+    setLinkedInAction('dm');
   }
 
   function insertVariable(variable: string) {
@@ -163,17 +180,40 @@ export default function Campaigns() {
     }, 0);
   }
 
-  // Reset account when type changes
+  // Reset account and linkedin action when type changes
   function handleTypeChange(newType: 'email' | 'whatsapp' | 'linkedin') {
     setType(newType);
     setSelectedAccountId('');
+    if (newType !== 'linkedin') {
+      setLinkedInAction('dm');
+    }
   }
 
   async function handleCreateCampaign() {
-    if (!currentWorkspace || !name || !message || selectedLeadIds.size === 0) {
+    if (!currentWorkspace || !name || selectedLeadIds.size === 0) {
       toast({
         title: 'Campos obrigatórios',
         description: 'Preencha todos os campos e selecione pelo menos 1 lead.',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    // Message is optional for invite action, required for others
+    if (!isInviteAction && !message) {
+      toast({
+        title: 'Mensagem obrigatória',
+        description: 'Digite uma mensagem para a campanha.',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    // Validate invite note length
+    if (isInviteAction && message.length > MAX_INVITE_NOTE_LENGTH) {
+      toast({
+        title: 'Nota muito longa',
+        description: `A nota do convite deve ter no máximo ${MAX_INVITE_NOTE_LENGTH} caracteres.`,
         variant: 'destructive',
       });
       return;
@@ -210,6 +250,7 @@ export default function Campaigns() {
           subject: type === 'email' ? subject : undefined,
           accountId: selectedAccountId || undefined,
           schedule: scheduleISO,
+          linkedinAction: type === 'linkedin' ? linkedInAction : undefined,
           leads: selectedLeadsData.map(l => ({
             id: l.id,
             email: l.email,
@@ -329,6 +370,7 @@ export default function Campaigns() {
     setScheduleEnabled(false);
     setScheduleDate(undefined);
     setScheduleTime('09:00');
+    setLinkedInAction(campaign.linkedin_action || 'dm');
     setDialogOpen(true);
   }
 
@@ -479,6 +521,67 @@ export default function Campaigns() {
                   </div>
                 )}
 
+                {/* LinkedIn Action Selector */}
+                {type === 'linkedin' && (
+                  <div className="space-y-2">
+                    <Label htmlFor="linkedin-action">Ação do LinkedIn</Label>
+                    <Select value={linkedInAction} onValueChange={(v: LinkedInAction) => setLinkedInAction(v)}>
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="dm">
+                          <div className="flex items-center gap-2">
+                            <MessageSquare className="h-4 w-4" />
+                            <div>
+                              <span>Mensagem (DM)</span>
+                              <span className="text-xs text-muted-foreground ml-2">Para conexões</span>
+                            </div>
+                          </div>
+                        </SelectItem>
+                        <SelectItem value="inmail">
+                          <div className="flex items-center gap-2">
+                            <Sparkles className="h-4 w-4" />
+                            <div>
+                              <span>InMail (Premium)</span>
+                              <span className="text-xs text-muted-foreground ml-2">Créditos InMail</span>
+                            </div>
+                          </div>
+                        </SelectItem>
+                        <SelectItem value="invite">
+                          <div className="flex items-center gap-2">
+                            <UserPlus className="h-4 w-4" />
+                            <div>
+                              <span>Convite de Conexão</span>
+                              <span className="text-xs text-muted-foreground ml-2">Solicitação</span>
+                            </div>
+                          </div>
+                        </SelectItem>
+                      </SelectContent>
+                    </Select>
+
+                    {/* Warning/Info for InMail */}
+                    {linkedInAction === 'inmail' && (
+                      <Alert className="bg-amber-500/10 border-amber-500/30">
+                        <Sparkles className="h-4 w-4 text-amber-500" />
+                        <AlertDescription className="text-amber-600 dark:text-amber-400 text-xs">
+                          InMail requer conta Premium/Sales Navigator e consome créditos InMail.
+                        </AlertDescription>
+                      </Alert>
+                    )}
+
+                    {/* Info for DM */}
+                    {linkedInAction === 'dm' && (
+                      <Alert className="bg-blue-500/10 border-blue-500/30">
+                        <Info className="h-4 w-4 text-blue-500" />
+                        <AlertDescription className="text-blue-600 dark:text-blue-400 text-xs">
+                          Mensagens diretas só podem ser enviadas para conexões. Se o lead não for conexão, a mensagem falhará.
+                        </AlertDescription>
+                      </Alert>
+                    )}
+                  </div>
+                )}
+
                 {type === 'email' && (
                   <div className="space-y-2">
                     <Label htmlFor="subject">Assunto</Label>
@@ -493,7 +596,9 @@ export default function Campaigns() {
 
                 <div className="space-y-2">
                   <div className="flex items-center justify-between">
-                    <Label htmlFor="message">Mensagem</Label>
+                    <Label htmlFor="message">
+                      {isInviteAction ? 'Nota do convite (opcional)' : 'Mensagem'}
+                    </Label>
                     <div className="flex items-center gap-2">
                       <Popover>
                         <PopoverTrigger asChild>
@@ -538,14 +643,32 @@ export default function Campaigns() {
                       </p>
                     </div>
                   ) : (
-                    <Textarea
-                      ref={textareaRef}
-                      id="message"
-                      placeholder="Escreva sua mensagem... Use variáveis como {{primeiro_nome}} para personalizar"
-                      rows={5}
-                      value={message}
-                      onChange={(e) => setMessage(e.target.value)}
-                    />
+                    <div className="space-y-1">
+                      <Textarea
+                        ref={textareaRef}
+                        id="message"
+                        placeholder={isInviteAction 
+                          ? "Nota personalizada para o convite (opcional, máx 300 caracteres)" 
+                          : "Escreva sua mensagem... Use variáveis como {{primeiro_nome}} para personalizar"
+                        }
+                        rows={isInviteAction ? 3 : 5}
+                        value={message}
+                        onChange={(e) => {
+                          if (isInviteAction && e.target.value.length > MAX_INVITE_NOTE_LENGTH) {
+                            return; // Prevent exceeding limit
+                          }
+                          setMessage(e.target.value);
+                        }}
+                        maxLength={isInviteAction ? MAX_INVITE_NOTE_LENGTH : undefined}
+                      />
+                      {isInviteAction && (
+                        <div className="flex justify-end">
+                          <span className={`text-xs ${message.length > MAX_INVITE_NOTE_LENGTH * 0.9 ? 'text-amber-500' : 'text-muted-foreground'}`}>
+                            {message.length}/{MAX_INVITE_NOTE_LENGTH}
+                          </span>
+                        </div>
+                      )}
+                    </div>
                   )}
                   
                   <div className="flex flex-wrap gap-1">

@@ -111,6 +111,8 @@ export interface LeadFilters {
   tagIds: string[];
 }
 
+export type LinkedInAction = 'dm' | 'inmail' | 'invite';
+
 export interface Campaign {
   id: string;
   workspace_id: string;
@@ -121,6 +123,7 @@ export interface Campaign {
   subject: string | null;
   account_id: string | null;
   schedule: string | null;
+  linkedin_action: LinkedInAction | null;
   leads_count: number;
   sent_count: number;
   failed_count: number;

@@ -246,6 +246,7 @@ export type Database = {
           failed_count: number
           id: string
           leads_count: number
+          linkedin_action: string | null
           message: string
           name: string
           replied_count: number
@@ -265,6 +266,7 @@ export type Database = {
           failed_count?: number
           id?: string
           leads_count?: number
+          linkedin_action?: string | null
           message: string
           name: string
           replied_count?: number
@@ -284,6 +286,7 @@ export type Database = {
           failed_count?: number
           id?: string
           leads_count?: number
+          linkedin_action?: string | null
           message?: string
           name?: string
           replied_count?: number

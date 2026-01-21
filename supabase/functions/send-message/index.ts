@@ -29,7 +29,7 @@ serve(async (req) => {
       return new Response(JSON.stringify({ error: 'Unauthorized' }), { status: 401, headers: corsHeaders });
     }
 
-    const { workspaceId, chatId, accountId, attendeesIds, text, attachmentUrl, attachmentType, attachmentName } = await req.json();
+    const { workspaceId, chatId, accountId, attendeesIds, text, attachmentUrl, attachmentType, attachmentName, isVoiceNote } = await req.json();
 
     if (!workspaceId) {
       return new Response(JSON.stringify({ error: 'workspaceId is required' }), { status: 400, headers: corsHeaders });
@@ -103,7 +103,7 @@ serve(async (req) => {
       
       // Check if we're sending an attachment
       if (attachmentUrl) {
-        console.log('Sending message with attachment:', { attachmentUrl, attachmentType, attachmentName });
+        console.log('Sending message with attachment:', { attachmentUrl, attachmentType, attachmentName, isVoiceNote });
         
         // Fetch the file from the signed URL
         const fileResponse = await fetch(attachmentUrl);
@@ -115,7 +115,15 @@ serve(async (req) => {
         
         // Create FormData for multipart upload
         const formData = new FormData();
-        formData.append('file', fileBlob, attachmentName || 'attachment');
+        
+        // For voice notes, we need to specify it's a voice note
+        if (isVoiceNote) {
+          // Unipile expects the file with specific naming for voice notes
+          formData.append('file', fileBlob, attachmentName || 'voice.ogg');
+          formData.append('voice_message', 'true');
+        } else {
+          formData.append('file', fileBlob, attachmentName || 'attachment');
+        }
         
         if (text) {
           formData.append('text', text);

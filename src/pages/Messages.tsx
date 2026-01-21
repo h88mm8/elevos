@@ -11,6 +11,7 @@ import { useNotificationSettings } from '@/hooks/useNotificationSettings';
 import { useMediaPreCache } from '@/hooks/useMediaPreCache';
 import { supabase } from '@/integrations/supabase/client';
 import { MessageAttachments } from '@/components/messages/MessageAttachments';
+import { VoiceRecorder } from '@/components/messages/VoiceRecorder';
 import { 
   MessageSquare, 
   Send, 
@@ -27,7 +28,6 @@ import {
   Music,
   Check,
   CheckCheck,
-  Mic
 } from 'lucide-react';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
@@ -115,6 +115,9 @@ export default function Messages() {
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [filePreview, setFilePreview] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
+  
+  // Audio recording state
+  const [isRecordingAudio, setIsRecordingAudio] = useState(false);
   
   // Message search state
   const [messageSearchQuery, setMessageSearchQuery] = useState('');
@@ -545,6 +548,78 @@ export default function Messages() {
     setFilePreview(null);
     if (fileInputRef.current) {
       fileInputRef.current.value = '';
+    }
+  }
+
+  // Handle voice recording completion
+  async function handleVoiceRecordingComplete(audioBlob: Blob) {
+    if (!selectedChat || !currentWorkspace) return;
+    
+    setIsRecordingAudio(false);
+    setSending(true);
+
+    // Create optimistic message
+    const tempMessage: Message = {
+      id: 'temp-' + Date.now(),
+      chat_id: selectedChat.id,
+      sender: 'me',
+      text: '🎤 Mensagem de voz',
+      timestamp: new Date().toISOString(),
+      status: 'sending',
+    };
+    setMessages(prev => [...prev, tempMessage]);
+
+    try {
+      setUploading(true);
+      
+      // Create a File from the Blob
+      const fileName = `voice-${Date.now()}.ogg`;
+      const file = new File([audioBlob], fileName, { type: 'audio/ogg' });
+      
+      // Upload to Supabase Storage
+      const filePath = `${currentWorkspace.id}/${selectedChat.id}/${fileName}`;
+      const { error: uploadError } = await supabase.storage
+        .from('message-attachments')
+        .upload(filePath, file);
+
+      if (uploadError) throw uploadError;
+
+      // Get a signed URL for the file
+      const { data: signedUrlData, error: signedUrlError } = await supabase.storage
+        .from('message-attachments')
+        .createSignedUrl(filePath, 3600);
+
+      if (signedUrlError) throw signedUrlError;
+
+      setUploading(false);
+
+      // Send voice message via edge function
+      const data = await invokeAuthedFunction('send-message', {
+        workspaceId: currentWorkspace.id,
+        chatId: selectedChat.id,
+        attachmentUrl: signedUrlData.signedUrl,
+        attachmentType: 'audio/ogg',
+        attachmentName: fileName,
+        isVoiceNote: true, // Flag to indicate this is a voice note
+      });
+
+      // Update temp message with real ID
+      setMessages(prev => prev.map(m => 
+        m.id === tempMessage.id 
+          ? { ...m, id: data.messageId || m.id, status: 'sent' as const }
+          : m
+      ));
+    } catch (error: any) {
+      // Remove temp message on error
+      setMessages(prev => prev.filter(m => m.id !== tempMessage.id));
+      toast({
+        title: 'Erro ao enviar áudio',
+        description: error.message,
+        variant: 'destructive',
+      });
+      setUploading(false);
+    } finally {
+      setSending(false);
     }
   }
 
@@ -1009,6 +1084,10 @@ export default function Messages() {
                     >
                       <Paperclip className="h-4 w-4" />
                     </Button>
+                    <VoiceRecorder 
+                      onRecordingComplete={handleVoiceRecordingComplete}
+                      disabled={sending || uploading}
+                    />
                     <Input
                       placeholder="Digite sua mensagem..."
                       value={newMessage}

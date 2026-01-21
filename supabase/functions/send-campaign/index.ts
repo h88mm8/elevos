@@ -176,7 +176,7 @@ serve(async (req) => {
         )
       `)
       .eq('campaign_id', campaignId)
-      .eq('status', 'pending');
+      .in('status', ['pending', 'failed']);
 
     if (leadsError) {
       console.error('Error fetching campaign leads:', leadsError);
@@ -184,7 +184,7 @@ serve(async (req) => {
     }
 
     if (!campaignLeads || campaignLeads.length === 0) {
-      return new Response(JSON.stringify({ error: 'No pending leads to send' }), { status: 400, headers: corsHeaders });
+      return new Response(JSON.stringify({ error: 'No leads to send' }), { status: 400, headers: corsHeaders });
     }
 
     console.log(`Starting campaign ${campaignId} with ${campaignLeads.length} leads`);
@@ -227,26 +227,33 @@ serve(async (req) => {
             throw new Error('No phone number available');
           }
 
-          // Send via Unipile API
-          const response = await fetch(`https://${unipileDsn}/api/v1/messages`, {
+          // Send via provider API by starting a new chat (works reliably for outbound campaigns)
+          // WhatsApp attendee identifier format: "<digits>@s.whatsapp.net"
+          const digits = String(phoneNumber).replace(/\D/g, '');
+          if (!digits) {
+            throw new Error('Invalid phone number');
+          }
+
+          const formData = new FormData();
+          formData.append('account_id', accountId!);
+          formData.append('text', personalizedMessage);
+          formData.append('attendees_ids', `${digits}@s.whatsapp.net`);
+
+          const response = await fetch(`https://${unipileDsn}/api/v1/chats`, {
             method: 'POST',
             headers: {
               'X-API-KEY': unipileApiKey,
-              'Content-Type': 'application/json',
+              'Accept': 'application/json',
             },
-            body: JSON.stringify({
-              account_id: accountId,
-              to: phoneNumber,
-              body: personalizedMessage,
-            }),
+            body: formData,
           });
 
           if (response.ok) {
             sendSuccess = true;
             console.log(`WhatsApp message sent to ${phoneNumber}`);
           } else {
-            const errorData = await response.json().catch(() => ({}));
-            sendError = errorData.message || `HTTP ${response.status}`;
+            const errorText = await response.text().catch(() => '');
+            sendError = errorText || `HTTP ${response.status}`;
             console.error(`Failed to send WhatsApp to ${phoneNumber}:`, sendError);
           }
         } else if (campaign.type === 'linkedin') {

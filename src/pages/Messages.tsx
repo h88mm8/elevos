@@ -831,9 +831,11 @@ export default function Messages() {
                                 )}
                               >
                                 {/* Attachments (audio, images, video, files) */}
-                                {msg.attachments && msg.attachments.length > 0 && (
+                                {msg.attachments && msg.attachments.length > 0 && currentWorkspace && (
                                   <MessageAttachments 
                                     attachments={msg.attachments} 
+                                    messageId={msg.id}
+                                    workspaceId={currentWorkspace.id}
                                     variant={msg.sender === 'me' ? 'sent' : 'received'}
                                   />
                                 )}

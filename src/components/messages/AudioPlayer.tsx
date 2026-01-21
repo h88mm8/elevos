@@ -1,23 +1,94 @@
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useCallback } from 'react';
 import { Button } from '@/components/ui/button';
 import { Slider } from '@/components/ui/slider';
-import { Play, Pause, Download } from 'lucide-react';
+import { Play, Pause, Download, RefreshCw } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { supabase } from '@/integrations/supabase/client';
 
 interface AudioPlayerProps {
   url: string;
+  messageId: string;
+  workspaceId: string;
   duration?: number;
   filename?: string;
+  mimeType?: string;
   variant?: 'sent' | 'received';
 }
 
-export function AudioPlayer({ url, duration, filename, variant = 'received' }: AudioPlayerProps) {
+export function AudioPlayer({ 
+  url, 
+  messageId,
+  workspaceId,
+  duration, 
+  filename, 
+  mimeType,
+  variant = 'received' 
+}: AudioPlayerProps) {
   const audioRef = useRef<HTMLAudioElement>(null);
+  const [audioUrl, setAudioUrl] = useState(url);
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [audioDuration, setAudioDuration] = useState(duration || 0);
   const [isLoading, setIsLoading] = useState(true);
+  const [isCaching, setIsCaching] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [retryCount, setRetryCount] = useState(0);
+
+  const cacheMedia = useCallback(async () => {
+    if (!workspaceId || !messageId || isCaching) return null;
+    
+    setIsCaching(true);
+    console.log('Attempting to cache media...');
+    
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) {
+        console.error('No session for caching');
+        return null;
+      }
+
+      const response = await supabase.functions.invoke('cache-media', {
+        body: {
+          workspaceId,
+          mediaUrl: url,
+          messageId,
+          mediaType: 'audio',
+          mimeType: mimeType || 'audio/ogg',
+        },
+      });
+
+      if (response.error) {
+        console.error('Cache error:', response.error);
+        return null;
+      }
+
+      if (response.data?.success && response.data?.url) {
+        console.log('Media cached successfully:', response.data.url);
+        return response.data.url;
+      }
+    } catch (err) {
+      console.error('Failed to cache media:', err);
+    } finally {
+      setIsCaching(false);
+    }
+    
+    return null;
+  }, [workspaceId, messageId, url, mimeType, isCaching]);
+
+  const handleRetry = useCallback(async () => {
+    setError(null);
+    setIsLoading(true);
+    setRetryCount(prev => prev + 1);
+    
+    // Try to cache the media
+    const cachedUrl = await cacheMedia();
+    if (cachedUrl) {
+      setAudioUrl(cachedUrl);
+    } else {
+      setError('Mídia não disponível');
+      setIsLoading(false);
+    }
+  }, [cacheMedia]);
 
   useEffect(() => {
     const audio = audioRef.current;
@@ -26,6 +97,7 @@ export function AudioPlayer({ url, duration, filename, variant = 'received' }: A
     const handleLoadedMetadata = () => {
       setAudioDuration(audio.duration);
       setIsLoading(false);
+      setError(null);
     };
 
     const handleTimeUpdate = () => {
@@ -39,10 +111,23 @@ export function AudioPlayer({ url, duration, filename, variant = 'received' }: A
 
     const handleCanPlay = () => {
       setIsLoading(false);
+      setError(null);
     };
 
-    const handleError = () => {
-      setError('Erro ao carregar áudio');
+    const handleError = async () => {
+      console.log('Audio load error, attempting to cache...');
+      
+      // Only try to cache once automatically
+      if (retryCount === 0) {
+        const cachedUrl = await cacheMedia();
+        if (cachedUrl) {
+          setAudioUrl(cachedUrl);
+          setRetryCount(1);
+          return;
+        }
+      }
+      
+      setError('Áudio expirado');
       setIsLoading(false);
     };
 
@@ -59,7 +144,7 @@ export function AudioPlayer({ url, duration, filename, variant = 'received' }: A
       audio.removeEventListener('canplay', handleCanPlay);
       audio.removeEventListener('error', handleError);
     };
-  }, []);
+  }, [audioUrl, retryCount, cacheMedia]);
 
   const togglePlay = async () => {
     const audio = audioRef.current;
@@ -74,7 +159,13 @@ export function AudioPlayer({ url, duration, filename, variant = 'received' }: A
       setIsPlaying(!isPlaying);
     } catch (err) {
       console.error('Error playing audio:', err);
-      setError('Erro ao reproduzir áudio');
+      // Try caching on play error
+      const cachedUrl = await cacheMedia();
+      if (cachedUrl) {
+        setAudioUrl(cachedUrl);
+      } else {
+        setError('Erro ao reproduzir');
+      }
     }
   };
 
@@ -97,10 +188,19 @@ export function AudioPlayer({ url, duration, filename, variant = 'received' }: A
   if (error) {
     return (
       <div className={cn(
-        'flex items-center gap-2 p-2 rounded-lg text-xs',
+        'flex items-center gap-2 p-2 rounded-lg',
         isSent ? 'text-primary-foreground/70' : 'text-muted-foreground'
       )}>
-        <span>🎵 Áudio indisponível</span>
+        <span className="text-xs">🎵 {error}</span>
+        <Button
+          variant="ghost"
+          size="icon"
+          className="h-6 w-6"
+          onClick={handleRetry}
+          disabled={isCaching}
+        >
+          <RefreshCw className={cn('h-3 w-3', isCaching && 'animate-spin')} />
+        </Button>
       </div>
     );
   }
@@ -109,7 +209,7 @@ export function AudioPlayer({ url, duration, filename, variant = 'received' }: A
     <div className={cn(
       'flex items-center gap-2 min-w-[200px] max-w-[280px]',
     )}>
-      <audio ref={audioRef} src={url} preload="metadata" />
+      <audio ref={audioRef} src={audioUrl} preload="metadata" crossOrigin="anonymous" />
       
       <Button
         variant="ghost"
@@ -121,9 +221,9 @@ export function AudioPlayer({ url, duration, filename, variant = 'received' }: A
             : 'hover:bg-muted-foreground/20'
         )}
         onClick={togglePlay}
-        disabled={isLoading}
+        disabled={isLoading || isCaching}
       >
-        {isLoading ? (
+        {isLoading || isCaching ? (
           <div className={cn(
             'h-4 w-4 animate-pulse rounded-full',
             isSent ? 'bg-primary-foreground/50' : 'bg-muted-foreground/50'
@@ -141,7 +241,7 @@ export function AudioPlayer({ url, duration, filename, variant = 'received' }: A
           max={audioDuration || 100}
           step={0.1}
           onValueChange={handleSeek}
-          disabled={isLoading}
+          disabled={isLoading || isCaching}
           className={cn(
             'w-full',
             isSent && '[&_[role=slider]]:bg-primary-foreground [&_[role=slider]]:border-primary-foreground [&_.range]:bg-primary-foreground/70'
@@ -156,10 +256,10 @@ export function AudioPlayer({ url, duration, filename, variant = 'received' }: A
         </div>
       </div>
 
-      {filename && (
+      {audioUrl && (
         <a
-          href={url}
-          download={filename}
+          href={audioUrl}
+          download={filename || 'audio.ogg'}
           target="_blank"
           rel="noopener noreferrer"
           className={cn(

@@ -209,6 +209,7 @@ export type Database = {
           processed_at: string | null
           scheduled_date: string
           status: string
+          updated_at: string
           workspace_id: string
         }
         Insert: {
@@ -220,6 +221,7 @@ export type Database = {
           processed_at?: string | null
           scheduled_date: string
           status?: string
+          updated_at?: string
           workspace_id: string
         }
         Update: {
@@ -231,6 +233,7 @@ export type Database = {
           processed_at?: string | null
           scheduled_date?: string
           status?: string
+          updated_at?: string
           workspace_id?: string
         }
         Relationships: []
@@ -874,6 +877,18 @@ export type Database = {
           p_workspace_id: string
         }
         Returns: boolean
+      }
+      claim_due_queue_entries: {
+        Args: { p_limit?: number; p_workspace_id?: string }
+        Returns: {
+          campaign_id: string
+          leads_sent: number
+          leads_to_send: number
+          queue_id: string
+          scheduled_date: string
+          workspace_id: string
+          workspace_timezone: string
+        }[]
       }
       deduct_credits: {
         Args: {

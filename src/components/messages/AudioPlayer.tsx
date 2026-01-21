@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { Button } from '@/components/ui/button';
 import { Slider } from '@/components/ui/slider';
-import { Play, Pause, Download, RefreshCw } from 'lucide-react';
+import { Play, Pause, Download, Loader2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { supabase } from '@/integrations/supabase/client';
 
@@ -33,12 +33,18 @@ export function AudioPlayer({
   const [isCaching, setIsCaching] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [retryCount, setRetryCount] = useState(0);
+  const [isDownloading, setIsDownloading] = useState(false);
+
+  // Check if URL is already from storage (cached)
+  const isStorageUrl = useCallback((testUrl: string) => {
+    return testUrl.includes('supabase') && testUrl.includes('storage');
+  }, []);
 
   const cacheMedia = useCallback(async () => {
     if (!workspaceId || !messageId || isCaching) return null;
     
     setIsCaching(true);
-    console.log('Attempting to cache media...');
+    console.log('Attempting to cache audio...');
     
     try {
       const { data: { session } } = await supabase.auth.getSession();
@@ -63,32 +69,17 @@ export function AudioPlayer({
       }
 
       if (response.data?.success && response.data?.url) {
-        console.log('Media cached successfully:', response.data.url);
+        console.log('Audio cached successfully:', response.data.url);
         return response.data.url;
       }
     } catch (err) {
-      console.error('Failed to cache media:', err);
+      console.error('Failed to cache audio:', err);
     } finally {
       setIsCaching(false);
     }
     
     return null;
   }, [workspaceId, messageId, url, mimeType, isCaching]);
-
-  const handleRetry = useCallback(async () => {
-    setError(null);
-    setIsLoading(true);
-    setRetryCount(prev => prev + 1);
-    
-    // Try to cache the media
-    const cachedUrl = await cacheMedia();
-    if (cachedUrl) {
-      setAudioUrl(cachedUrl);
-    } else {
-      setError('Mídia não disponível');
-      setIsLoading(false);
-    }
-  }, [cacheMedia]);
 
   useEffect(() => {
     const audio = audioRef.current;
@@ -115,19 +106,19 @@ export function AudioPlayer({
     };
 
     const handleError = async () => {
-      console.log('Audio load error, attempting to cache...');
+      console.log('Audio load error, retryCount:', retryCount);
       
       // Only try to cache once automatically
-      if (retryCount === 0) {
+      if (retryCount === 0 && !isStorageUrl(audioUrl)) {
+        setRetryCount(1);
         const cachedUrl = await cacheMedia();
         if (cachedUrl) {
           setAudioUrl(cachedUrl);
-          setRetryCount(1);
           return;
         }
       }
       
-      setError('Áudio expirado');
+      setError('Áudio não disponível');
       setIsLoading(false);
     };
 
@@ -144,7 +135,7 @@ export function AudioPlayer({
       audio.removeEventListener('canplay', handleCanPlay);
       audio.removeEventListener('error', handleError);
     };
-  }, [audioUrl, retryCount, cacheMedia]);
+  }, [audioUrl, retryCount, cacheMedia, isStorageUrl]);
 
   const togglePlay = async () => {
     const audio = audioRef.current;
@@ -159,10 +150,14 @@ export function AudioPlayer({
       setIsPlaying(!isPlaying);
     } catch (err) {
       console.error('Error playing audio:', err);
-      // Try caching on play error
-      const cachedUrl = await cacheMedia();
-      if (cachedUrl) {
-        setAudioUrl(cachedUrl);
+      // Try caching on play error if not already a storage URL
+      if (!isStorageUrl(audioUrl)) {
+        const cachedUrl = await cacheMedia();
+        if (cachedUrl) {
+          setAudioUrl(cachedUrl);
+        } else {
+          setError('Erro ao reproduzir');
+        }
       } else {
         setError('Erro ao reproduzir');
       }
@@ -183,6 +178,40 @@ export function AudioPlayer({
     return `${mins}:${secs.toString().padStart(2, '0')}`;
   };
 
+  // Download via fetch blob to prevent redirect
+  const handleDownload = async (e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    
+    if (isDownloading) return;
+    
+    setIsDownloading(true);
+    
+    try {
+      const response = await fetch(audioUrl);
+      if (!response.ok) throw new Error('Download failed');
+      
+      const blob = await response.blob();
+      const blobUrl = URL.createObjectURL(blob);
+      
+      const link = document.createElement('a');
+      link.href = blobUrl;
+      link.download = filename || `audio-${messageId}.ogg`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      
+      // Clean up
+      setTimeout(() => URL.revokeObjectURL(blobUrl), 1000);
+    } catch (err) {
+      console.error('Download error:', err);
+      // Fallback: open in new tab
+      window.open(audioUrl, '_blank');
+    } finally {
+      setIsDownloading(false);
+    }
+  };
+
   const isSent = variant === 'sent';
 
   if (error) {
@@ -192,15 +221,6 @@ export function AudioPlayer({
         isSent ? 'text-primary-foreground/70' : 'text-muted-foreground'
       )}>
         <span className="text-xs">🎵 {error}</span>
-        <Button
-          variant="ghost"
-          size="icon"
-          className="h-6 w-6"
-          onClick={handleRetry}
-          disabled={isCaching}
-        >
-          <RefreshCw className={cn('h-3 w-3', isCaching && 'animate-spin')} />
-        </Button>
       </div>
     );
   }
@@ -257,18 +277,21 @@ export function AudioPlayer({
       </div>
 
       {audioUrl && (
-        <a
-          href={audioUrl}
-          download={filename || 'audio.ogg'}
-          target="_blank"
-          rel="noopener noreferrer"
+        <button
+          onClick={handleDownload}
+          disabled={isDownloading}
           className={cn(
-            'shrink-0 p-1 rounded hover:bg-accent/20',
+            'shrink-0 p-1 rounded hover:bg-accent/20 disabled:opacity-50',
             isSent ? 'text-primary-foreground/70' : 'text-muted-foreground'
           )}
+          title="Baixar áudio"
         >
-          <Download className="h-4 w-4" />
-        </a>
+          {isDownloading ? (
+            <Loader2 className="h-4 w-4 animate-spin" />
+          ) : (
+            <Download className="h-4 w-4" />
+          )}
+        </button>
       )}
     </div>
   );

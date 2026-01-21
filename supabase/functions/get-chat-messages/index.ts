@@ -268,14 +268,6 @@ serve(async (req) => {
       // Filter out attachments without valid URLs
       attachments = attachments.filter(att => att.url);
       
-      // Log for debugging when there are attachments
-      if (attachments.length > 0) {
-        console.log('Message with attachments:', { 
-          msgId: msg.id, 
-          attachments: attachments.map(a => ({ type: a.type, mime_type: a.mime_type, hasUrl: !!a.url, url: a.url?.slice(0, 60) }))
-        });
-      }
-      
       return {
         id: msg.id || msg.message_id,
         chat_id: chatId,
@@ -295,6 +287,57 @@ serve(async (req) => {
       if (mimeType.startsWith('audio/')) return 'audio';
       if (mimeType === 'application/pdf') return 'document';
       return 'file';
+    }
+    
+    // ============================================
+    // MERGE CACHED ATTACHMENTS: Check audit log for cached URLs
+    // ============================================
+    // Fetch cached attachments from our messages table
+    const messageIds = mappedMessages.map((m: any) => m.id).filter(Boolean);
+    
+    if (messageIds.length > 0) {
+      const { data: cachedMessages } = await supabase
+        .from('messages')
+        .select('external_id, attachments')
+        .eq('workspace_id', workspaceId)
+        .in('external_id', messageIds);
+      
+      if (cachedMessages && cachedMessages.length > 0) {
+        const cachedMap = new Map<string, any[]>();
+        for (const cm of cachedMessages) {
+          if (cm.external_id && cm.attachments) {
+            const atts = typeof cm.attachments === 'string' 
+              ? JSON.parse(cm.attachments) 
+              : cm.attachments;
+            if (Array.isArray(atts) && atts.length > 0) {
+              cachedMap.set(cm.external_id, atts);
+            }
+          }
+        }
+        
+        // Replace temporary URLs with cached storage URLs
+        for (const msg of mappedMessages) {
+          const cached = cachedMap.get(msg.id);
+          if (cached && msg.attachments) {
+            // Match by index and type
+            msg.attachments = msg.attachments.map((att: any, idx: number) => {
+              const cachedAtt = cached[idx];
+              if (cachedAtt && cachedAtt.url) {
+                // Prefer storage URL if available
+                const isCachedUrl = cachedAtt.url.includes('supabase') && cachedAtt.url.includes('storage');
+                if (isCachedUrl) {
+                  console.log(`Using cached URL for message ${msg.id} attachment ${idx}`);
+                  return { ...att, url: cachedAtt.url, original_url: att.url };
+                }
+              }
+              return att;
+            });
+          } else if (cached && !msg.attachments) {
+            // Message from provider has no attachments but we have cached ones
+            msg.attachments = cached;
+          }
+        }
+      }
     }
 
     return new Response(JSON.stringify({

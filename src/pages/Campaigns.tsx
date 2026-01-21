@@ -167,10 +167,15 @@ export default function Campaigns() {
           subject: type === 'email' ? subject : undefined,
           accountId: selectedAccountId || undefined,
           leads: selectedLeadsData.map(l => ({
+            id: l.id,
             email: l.email,
             full_name: l.full_name,
             phone: l.phone,
+            mobile_number: l.mobile_number,
             linkedin_url: l.linkedin_url,
+            company: l.company,
+            job_title: l.job_title,
+            country: l.country,
           })),
         },
       });

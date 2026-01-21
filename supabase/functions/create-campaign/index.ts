@@ -116,7 +116,7 @@ serve(async (req) => {
 
     if (validLeads.length === 0) {
       return new Response(JSON.stringify({ 
-        error: `No valid leads for campaign type "${type}". Leads need ${type === 'email' ? 'email' : type === 'linkedin' ? 'linkedin_url' : 'phone'}` 
+        error: `No valid leads for campaign type "${type}". Leads need ${type === 'email' ? 'email' : type === 'linkedin' ? 'linkedin_url' : 'mobile_number (celular)'}` 
       }), { status: 400, headers: corsHeaders });
     }
 

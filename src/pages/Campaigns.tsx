@@ -20,6 +20,7 @@ import { Calendar as CalendarComponent } from '@/components/ui/calendar';
 import { useToast } from '@/hooks/use-toast';
 import { supabase } from '@/integrations/supabase/client';
 import { CampaignReportDialog } from '@/components/campaigns/CampaignReportDialog';
+import { EditScheduledCampaignDialog } from '@/components/campaigns/EditScheduledCampaignDialog';
 import { 
   Send, 
   Plus, 
@@ -35,10 +36,12 @@ import {
   Clock,
   BarChart3,
   CalendarClock,
+  Pencil,
+  XCircle,
 } from 'lucide-react';
 import { format, setHours, setMinutes } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
-import { Lead } from '@/types';
+import { Lead, Campaign } from '@/types';
 import { MESSAGE_VARIABLES, getMessagePreview } from '@/lib/messageVariables';
 
 const statusLabels: Record<string, { label: string; variant: 'default' | 'secondary' | 'destructive' | 'outline' }> = {
@@ -67,7 +70,7 @@ const typeLabels: Record<string, string> = {
 
 export default function Campaigns() {
   const { currentWorkspace } = useAuth();
-  const { campaigns, isLoading, createCampaign, refetchCampaigns } = useCampaigns();
+  const { campaigns, isLoading, createCampaign, updateCampaign, refetchCampaigns } = useCampaigns();
   const { leads } = useLeads();
   const { accounts } = useAccounts();
   const { toast } = useToast();
@@ -77,6 +80,7 @@ export default function Campaigns() {
   const [showPreview, setShowPreview] = useState(false);
   const [sendingCampaignId, setSendingCampaignId] = useState<string | null>(null);
   const [reportCampaign, setReportCampaign] = useState<{ id: string; name: string } | null>(null);
+  const [editingCampaign, setEditingCampaign] = useState<Campaign | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   // Form state
@@ -281,6 +285,47 @@ export default function Campaigns() {
         description: error.message,
         variant: 'destructive',
       });
+    }
+  }
+
+  async function handleCancelScheduledCampaign(campaignId: string) {
+    try {
+      await updateCampaign({ id: campaignId, status: 'draft', schedule: null });
+      toast({
+        title: 'Agendamento cancelado',
+        description: 'A campanha voltou para rascunho.',
+      });
+    } catch (error: any) {
+      toast({
+        title: 'Erro ao cancelar',
+        description: error.message,
+        variant: 'destructive',
+      });
+    }
+  }
+
+  async function handleSaveEditedCampaign(updates: { name?: string; message?: string; subject?: string; schedule?: string }) {
+    if (!editingCampaign) return;
+    
+    try {
+      await updateCampaign({
+        id: editingCampaign.id,
+        ...(updates.name && { name: updates.name }),
+        ...(updates.message && { message: updates.message }),
+        ...(updates.subject !== undefined && { subject: updates.subject }),
+        ...(updates.schedule && { schedule: updates.schedule }),
+      });
+      toast({
+        title: 'Campanha atualizada',
+        description: 'As alterações foram salvas.',
+      });
+    } catch (error: any) {
+      toast({
+        title: 'Erro ao salvar',
+        description: error.message,
+        variant: 'destructive',
+      });
+      throw error;
     }
   }
 
@@ -710,6 +755,30 @@ export default function Campaigns() {
                                 <BarChart3 className="h-4 w-4" />
                               </Button>
                             )}
+                            {/* Edit button for scheduled campaigns */}
+                            {campaign.status === 'scheduled' && (
+                              <Button
+                                size="icon"
+                                variant="ghost"
+                                className="h-8 w-8"
+                                onClick={() => setEditingCampaign(campaign)}
+                                title="Editar campanha"
+                              >
+                                <Pencil className="h-4 w-4" />
+                              </Button>
+                            )}
+                            {/* Cancel schedule button */}
+                            {campaign.status === 'scheduled' && (
+                              <Button
+                                size="icon"
+                                variant="ghost"
+                                className="h-8 w-8 text-amber-500 hover:text-amber-600"
+                                onClick={() => handleCancelScheduledCampaign(campaign.id)}
+                                title="Cancelar agendamento"
+                              >
+                                <XCircle className="h-4 w-4" />
+                              </Button>
+                            )}
                             {canSend && (
                               <Button
                                 size="sm"
@@ -755,6 +824,14 @@ export default function Campaigns() {
         campaignName={reportCampaign?.name}
         open={!!reportCampaign}
         onOpenChange={(open) => !open && setReportCampaign(null)}
+      />
+
+      {/* Edit Scheduled Campaign Dialog */}
+      <EditScheduledCampaignDialog
+        campaign={editingCampaign}
+        open={!!editingCampaign}
+        onOpenChange={(open) => !open && setEditingCampaign(null)}
+        onSave={handleSaveEditedCampaign}
       />
     </AppLayout>
   );

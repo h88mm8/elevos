@@ -43,44 +43,41 @@ function getTodayDate(): string {
   return new Date().toISOString().split('T')[0];
 }
 
-// Get next day at 09:00 in specified timezone (fallback to UTC)
-function getNextDayAt9AM(timezone?: string): string {
-  const tomorrow = new Date();
-  tomorrow.setDate(tomorrow.getDate() + 1);
-  
-  if (timezone) {
-    try {
-      // Create a date string for tomorrow at 09:00 in the target timezone
-      const formatter = new Intl.DateTimeFormat('en-CA', {
-        timeZone: timezone,
-        year: 'numeric',
-        month: '2-digit',
-        day: '2-digit',
-      });
-      const parts = formatter.formatToParts(tomorrow);
-      const year = parts.find(p => p.type === 'year')?.value;
-      const month = parts.find(p => p.type === 'month')?.value;
-      const day = parts.find(p => p.type === 'day')?.value;
-      
-      // Return ISO string with 09:00 in the target timezone
-      // This is approximate - for precise scheduling, store the timezone and handle in CRON
-      return `${year}-${month}-${day}T09:00:00`;
-    } catch {
-      // Fallback to UTC if timezone is invalid
-      console.warn(`Invalid timezone: ${timezone}, falling back to UTC`);
-    }
-  }
-  
-  // Default: 09:00 UTC
-  tomorrow.setUTCHours(9, 0, 0, 0);
-  return tomorrow.toISOString();
-}
-
 // Get tomorrow's date string in YYYY-MM-DD format
 function getTomorrowDate(): string {
   const tomorrow = new Date();
   tomorrow.setDate(tomorrow.getDate() + 1);
   return tomorrow.toISOString().split('T')[0];
+}
+
+// Get next day at 09:00 in specified timezone (fallback to UTC)
+function getNextDayAt9AM(timezone: string = 'UTC'): string {
+  const tomorrow = new Date();
+  tomorrow.setDate(tomorrow.getDate() + 1);
+  
+  try {
+    // Create a date string for tomorrow at 09:00 in the target timezone
+    const formatter = new Intl.DateTimeFormat('en-CA', {
+      timeZone: timezone,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    });
+    const parts = formatter.formatToParts(tomorrow);
+    const year = parts.find(p => p.type === 'year')?.value;
+    const month = parts.find(p => p.type === 'month')?.value;
+    const day = parts.find(p => p.type === 'day')?.value;
+    
+    // Return ISO string with 09:00 in the target timezone
+    return `${year}-${month}-${day}T09:00:00`;
+  } catch {
+    // Fallback to UTC if timezone is invalid
+    console.warn(`Invalid timezone: ${timezone}, falling back to UTC`);
+  }
+  
+  // Default: 09:00 UTC
+  tomorrow.setUTCHours(9, 0, 0, 0);
+  return tomorrow.toISOString();
 }
 
 interface CampaignLead {
@@ -191,6 +188,18 @@ serve(async (req) => {
     if (!memberCheck) {
       return new Response(JSON.stringify({ error: 'Access denied to this campaign' }), { status: 403, headers: corsHeaders });
     }
+
+    // ============================================
+    // GET WORKSPACE TIMEZONE
+    // ============================================
+    const { data: workspace } = await supabase
+      .from('workspaces')
+      .select('timezone')
+      .eq('id', campaign.workspace_id)
+      .single();
+    
+    const workspaceTimezone = workspace?.timezone || 'UTC';
+    console.log(`Workspace timezone: ${workspaceTimezone}`);
 
     // ============================================
     // GET WORKSPACE SETTINGS (including LinkedIn)
@@ -334,6 +343,7 @@ serve(async (req) => {
     }
 
     const totalLeads = campaignLeads.length;
+    const allPendingIds = (campaignLeads as unknown as CampaignLead[]).map(cl => cl.id);
     
     // ============================================
     // CALCULATE LEADS TO SEND TODAY
@@ -348,6 +358,32 @@ serve(async (req) => {
     console.log(`  leadsToSendNow: ${leadsToSendNow}, remainingAfterToday: ${remainingAfterToday}`);
 
     // ============================================
+    // HELPER: UPSERT QUEUE ENTRY (idempotent)
+    // ============================================
+    async function upsertQueueEntry(scheduledDateStr: string, leadsCount: number) {
+      // Use ON CONFLICT with unique index (campaign_id, scheduled_date)
+      const { error } = await supabase
+        .from('campaign_queue')
+        .upsert({
+          campaign_id: campaignId,
+          workspace_id: campaign.workspace_id,
+          scheduled_date: scheduledDateStr,
+          leads_to_send: leadsCount,
+          leads_sent: 0,
+          status: 'queued',
+        }, {
+          onConflict: 'campaign_id,scheduled_date',
+          ignoreDuplicates: false,
+        });
+      
+      if (error) {
+        console.error(`Error upserting queue entry for ${scheduledDateStr}:`, error);
+      } else {
+        console.log(`Queue entry upserted: ${scheduledDateStr} -> ${leadsCount} leads`);
+      }
+    }
+
+    // ============================================
     // CHECK DAILY LIMIT - DEFER IF NO CAPACITY
     // ============================================
     if (leadsToSendNow === 0) {
@@ -355,46 +391,13 @@ serve(async (req) => {
       
       const tomorrowDateStr = getTomorrowDate();
       
-      // Update all pending leads to DEFERRED status
-      await supabase
-        .from('campaign_leads')
-        .update({ 
-          status: 'deferred',
-          error: 'DEFERRED_DAILY_LIMIT',
-        })
-        .eq('campaign_id', campaignId)
-        .in('status', ['pending', 'deferred']);
+      // All leads remain pending - campaign_queue handles scheduling
+      // DO NOT mark as deferred - keep as pending for queue processor
+      
+      // Upsert queue entry for tomorrow (idempotent)
+      await upsertQueueEntry(tomorrowDateStr, totalLeads);
 
-      // Check if queue entry already exists for tomorrow
-      const { data: existingQueue } = await supabase
-        .from('campaign_queue')
-        .select('id, leads_to_send')
-        .eq('campaign_id', campaignId)
-        .eq('scheduled_date', tomorrowDateStr)
-        .maybeSingle();
-
-      if (!existingQueue) {
-        await supabase
-          .from('campaign_queue')
-          .insert({
-            campaign_id: campaignId,
-            workspace_id: campaign.workspace_id,
-            scheduled_date: tomorrowDateStr,
-            leads_to_send: totalLeads,
-            leads_sent: 0,
-            status: 'queued',
-          });
-        console.log(`Queue entry created for ${tomorrowDateStr}: ${totalLeads} leads`);
-      } else {
-        // Update existing entry with correct lead count
-        await supabase
-          .from('campaign_queue')
-          .update({ leads_to_send: totalLeads })
-          .eq('id', existingQueue.id);
-        console.log(`Queue entry updated for ${tomorrowDateStr}: ${totalLeads} leads`);
-      }
-
-      // Update campaign status
+      // Update campaign status to queued
       await supabase
         .from('campaigns')
         .update({ status: 'queued' })
@@ -403,9 +406,9 @@ serve(async (req) => {
       return new Response(JSON.stringify({
         success: true,
         campaignId,
-        status: 'deferred',
+        status: 'queued',
         reason: 'DAILY_LIMIT_REACHED',
-        nextRunAt: getNextDayAt9AM(),
+        nextRunAt: getNextDayAt9AM(workspaceTimezone),
         currentUsage,
         dailyLimit,
         remainingCapacity: 0,
@@ -416,16 +419,23 @@ serve(async (req) => {
     // ============================================
     // CREATE QUEUE FOR REMAINING LEADS (if any)
     // ============================================
+    // Get leads we'll process today (first N by order)
+    const leadsToProcess = (campaignLeads as unknown as CampaignLead[]).slice(0, leadsToSendNow);
+    const idsToSend = new Set(leadsToProcess.map(cl => cl.id));
+    
+    // IDs that won't be sent today - these remain pending for queue
+    const idsToDefer = allPendingIds.filter(id => !idsToSend.has(id));
+    
     if (remainingAfterToday > 0) {
       console.log(`${remainingAfterToday} leads won't fit today. Creating queue entries...`);
+      console.log(`  idsToSend: ${idsToSend.size}, idsToDefer: ${idsToDefer.length}`);
       
       // Calculate how many additional days needed using FULL dailyLimit (not remainingCapacity)
       const additionalDays = Math.ceil(remainingAfterToday / dailyLimit);
       const today = new Date();
       today.setHours(0, 0, 0, 0);
 
-      // Create queue entries for subsequent days
-      const queueEntries = [];
+      // Create/update queue entries for subsequent days (idempotent via upsert)
       let leadsRemaining = remainingAfterToday;
       
       for (let day = 1; day <= additionalDays; day++) {
@@ -438,55 +448,19 @@ serve(async (req) => {
         leadsRemaining -= leadsForDay;
 
         if (leadsForDay > 0) {
-          queueEntries.push({
-            campaign_id: campaignId,
-            workspace_id: campaign.workspace_id,
-            scheduled_date: scheduledDateStr,
-            leads_to_send: leadsForDay,
-            leads_sent: 0,
-            status: 'queued',
-          });
-          console.log(`  Queue entry: ${scheduledDateStr} -> ${leadsForDay} leads`);
+          await upsertQueueEntry(scheduledDateStr, leadsForDay);
         }
       }
 
-      if (queueEntries.length > 0) {
-        const { error: queueError } = await supabase
-          .from('campaign_queue')
-          .insert(queueEntries);
-
-        if (queueError) {
-          console.error('Error creating queue entries:', queueError);
-          // Don't fail - continue sending what we can today
-        } else {
-          console.log(`Queue created: ${queueEntries.length} entries for ${remainingAfterToday} leads`);
-        }
-
-        // Update campaign status to 'queued' (will be partially completed)
-        await supabase
-          .from('campaigns')
-          .update({ status: 'queued' })
-          .eq('id', campaignId);
-      }
-      
-      // Mark remaining leads (those not being sent today) as deferred
-      const leadsToProcess = (campaignLeads as unknown as CampaignLead[]).slice(0, leadsToSendNow);
-      const leadIdsToSend = leadsToProcess.map(cl => cl.id);
-      
-      // Defer leads that won't be sent today
+      // Update campaign status to 'queued' (will be partially completed)
       await supabase
-        .from('campaign_leads')
-        .update({ 
-          status: 'deferred',
-          error: 'QUEUED_FOR_LATER',
-        })
-        .eq('campaign_id', campaignId)
-        .eq('status', 'pending')
-        .not('id', 'in', `(${leadIdsToSend.join(',')})`);
+        .from('campaigns')
+        .update({ status: 'queued' })
+        .eq('id', campaignId);
+      
+      // NOTE: We do NOT mark deferred leads here - they remain 'pending'
+      // The campaign_queue processor will handle them on their scheduled date
     }
-
-    // Get the leads we'll actually process today
-    const leadsToProcess = (campaignLeads as unknown as CampaignLead[]).slice(0, leadsToSendNow);
 
     console.log(`Starting campaign ${campaignId}: sending ${leadsToProcess.length} of ${totalLeads} leads today`);
 
@@ -566,21 +540,30 @@ serve(async (req) => {
             console.error(`Failed to send WhatsApp to ${phoneNumber}:`, sendError);
           }
         } else if (campaign.type === 'linkedin') {
-          // LinkedIn requires attendees_ids (profile ID from linkedin_url)
+          // LinkedIn requires provider_id - resolve from linkedin_url first
           const linkedinUrl = lead.linkedin_url;
           
           if (!linkedinUrl) {
             throw new Error('No LinkedIn URL available');
           }
 
-          // Extract LinkedIn ID from URL or use URL directly
-          // Note: Unipile may need the internal profile ID, which we might not have
-          // For now, we'll try with the URL - may need adjustment based on Unipile's requirements
+          // Extract public identifier from LinkedIn URL
+          const publicIdentifier = extractLinkedInPublicIdentifier(linkedinUrl);
+          if (!publicIdentifier) {
+            throw new Error(`Invalid LinkedIn URL format: ${linkedinUrl}`);
+          }
+
+          // Resolve to provider_id via Unipile user lookup
+          const providerId = await resolveLinkedInProviderId(unipileDsn, unipileApiKey, unipileAccountId!, publicIdentifier);
+          
+          if (!providerId) {
+            throw new Error(`Could not resolve LinkedIn profile: ${publicIdentifier}`);
+          }
           
           const formData = new FormData();
           formData.append('account_id', unipileAccountId!);
           formData.append('text', personalizedMessage);
-          formData.append('attendees_ids', linkedinUrl); // May need profile ID
+          formData.append('attendees_ids', providerId);
           formData.append('linkedin[api]', 'classic');
 
           const response = await fetch(`https://${unipileDsn}/api/v1/chats`, {
@@ -598,43 +581,33 @@ serve(async (req) => {
             if (responseData.message_id || responseData.id) {
               providerMessageId = responseData.message_id || responseData.id;
             }
-            console.log(`LinkedIn message sent to ${linkedinUrl}, messageId: ${providerMessageId || 'unknown'}`);
+            console.log(`LinkedIn message sent to ${publicIdentifier}, messageId: ${providerMessageId || 'unknown'}`);
           } else {
-            const errorData = await response.json().catch(() => ({}));
-            sendError = errorData.message || `HTTP ${response.status}`;
-            console.error(`Failed to send LinkedIn to ${linkedinUrl}:`, sendError);
+            const errorText = await response.text().catch(() => '');
+            sendError = errorText || `HTTP ${response.status}`;
+            console.error(`Failed to send LinkedIn to ${publicIdentifier}:`, sendError);
           }
         } else if (campaign.type === 'email') {
-          // Email sending would require a different provider (not Unipile)
-          // For now, mark as not implemented
-          sendError = 'Email sending not implemented yet';
-          console.log('Email campaigns not yet implemented');
-        } else if (campaign.type === 'sms') {
-          // SMS would need a separate provider
-          sendError = 'SMS sending not implemented yet';
-          console.log('SMS campaigns not yet implemented');
+          // Email sending placeholder - not implemented
+          throw new Error('Email campaigns not yet implemented');
         }
 
-        // Update campaign_lead status
         if (sendSuccess) {
-          const updateData: Record<string, any> = { 
-            status: 'sent', 
-            sent_at: new Date().toISOString(),
-            retry_count: cl.retry_count, // Keep current count
-          };
-          if (providerMessageId) {
-            updateData.provider_message_id = providerMessageId;
-          }
-          await supabase
-            .from('campaign_leads')
-            .update(updateData)
-            .eq('id', cl.id);
           sentCount++;
           results.push({ leadId: cl.lead_id, success: true });
+          
+          // Update campaign_lead status
+          await supabase
+            .from('campaign_leads')
+            .update({ 
+              status: 'sent', 
+              sent_at: new Date().toISOString(),
+              error: null,
+              provider_message_id: providerMessageId,
+            })
+            .eq('id', cl.id);
 
-          // ============================================
           // INCREMENT DAILY USAGE (after successful send)
-          // ============================================
           if (unipileAccountId) {
             const { data: newUsage, error: incrementError } = await serviceClient
               .rpc('increment_daily_usage', {
@@ -644,57 +617,52 @@ serve(async (req) => {
                 p_usage_date: todayDate,
                 p_increment: 1,
               });
-            
+
             if (incrementError) {
               console.error(`Error incrementing usage for ${usageAction}:`, incrementError);
             } else {
               console.log(`Usage incremented for ${usageAction}: now ${newUsage}/${dailyLimit}`);
             }
           }
+
+          // Update campaign sent_count incrementally
+          await supabase
+            .from('campaigns')
+            .update({ sent_count: campaign.sent_count + sentCount })
+            .eq('id', campaignId);
         } else {
           const newRetryCount = cl.retry_count + 1;
-          const isFinalFailure = newRetryCount >= settings.max_retries;
-          await supabase
-            .from('campaign_leads')
-            .update({ 
-              status: 'failed', 
-              error: sendError,
-              retry_count: newRetryCount,
-            })
-            .eq('id', cl.id);
+          const willRetry = newRetryCount < settings.max_retries;
+          
           failedCount++;
           results.push({ 
             leadId: cl.lead_id, 
             success: false, 
             error: sendError,
             retryCount: newRetryCount,
-            willRetry: !isFinalFailure,
+            willRetry
           });
-          console.log(`Lead ${cl.lead_id} failed (attempt ${newRetryCount}/${settings.max_retries})${isFinalFailure ? ' - no more retries' : ''}`);
-        }
+          
+          // Update campaign_lead with failure
+          await supabase
+            .from('campaign_leads')
+            .update({ 
+              status: willRetry ? 'pending' : 'failed', 
+              error: sendError,
+              retry_count: newRetryCount,
+            })
+            .eq('id', cl.id);
 
-        // Apply jitter to interval (±20% randomization) for more natural sending pattern
-        if (i < leadsToProcess.length - 1) {
-          const delaySeconds = applyJitter(baseIntervalSeconds, minIntervalSeconds);
-          console.log(`Waiting ${delaySeconds}s before next message (base: ${baseIntervalSeconds}s)`);
-          await new Promise(resolve => setTimeout(resolve, delaySeconds * 1000));
+          // Update campaign failed_count incrementally
+          await supabase
+            .from('campaigns')
+            .update({ failed_count: campaign.failed_count + failedCount })
+            .eq('id', campaignId);
         }
-
       } catch (error) {
-        const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-        console.error(`Error sending to lead ${cl.lead_id}:`, errorMessage);
-        
+        const errorMessage = error instanceof Error ? error.message : String(error);
         const newRetryCount = cl.retry_count + 1;
-        const isFinalFailure = newRetryCount >= settings.max_retries;
-        
-        await supabase
-          .from('campaign_leads')
-          .update({ 
-            status: 'failed', 
-            error: errorMessage,
-            retry_count: newRetryCount,
-          })
-          .eq('id', cl.id);
+        const willRetry = newRetryCount < settings.max_retries;
         
         failedCount++;
         results.push({ 
@@ -702,74 +670,161 @@ serve(async (req) => {
           success: false, 
           error: errorMessage,
           retryCount: newRetryCount,
-          willRetry: !isFinalFailure,
+          willRetry
         });
-        console.log(`Lead ${cl.lead_id} exception (attempt ${newRetryCount}/${settings.max_retries})${isFinalFailure ? ' - no more retries' : ''}`);
+        
+        // Update campaign_lead with error
+        await supabase
+          .from('campaign_leads')
+          .update({ 
+            status: willRetry ? 'pending' : 'failed', 
+            error: errorMessage,
+            retry_count: newRetryCount,
+          })
+          .eq('id', cl.id);
+
+        console.error(`Error sending to lead ${cl.lead_id}:`, errorMessage);
+      }
+
+      // Apply jitter delay between messages (except for last message)
+      if (i < leadsToProcess.length - 1) {
+        const delaySeconds = applyJitter(baseIntervalSeconds, minIntervalSeconds);
+        console.log(`Waiting ${delaySeconds}s before next message...`);
+        await new Promise(resolve => setTimeout(resolve, delaySeconds * 1000));
       }
     }
 
     // ============================================
-    // UPDATE QUEUE ENTRY IF EXISTS
+    // UPDATE FINAL CAMPAIGN STATUS
     // ============================================
-    const today = new Date().toISOString().split('T')[0];
-    await supabase
-      .from('campaign_queue')
-      .update({ 
-        leads_sent: sentCount, 
-        status: 'completed',
-        processed_at: new Date().toISOString()
-      })
-      .eq('campaign_id', campaignId)
-      .eq('scheduled_date', today);
+    const { data: updatedCampaign } = await supabase
+      .from('campaigns')
+      .select('sent_count, failed_count, leads_count')
+      .eq('id', campaignId)
+      .single();
 
-    // ============================================
-    // UPDATE CAMPAIGN FINAL STATUS
-    // ============================================
-    // Check if there are more queued items
-    const { data: pendingQueue } = await supabase
+    // Check if there are queued entries (partial completion)
+    const { data: queuedEntries } = await supabase
       .from('campaign_queue')
       .select('id')
       .eq('campaign_id', campaignId)
-      .eq('status', 'queued');
+      .eq('status', 'queued')
+      .limit(1);
+    
+    const hasQueuedEntries = queuedEntries && queuedEntries.length > 0;
 
-    const hasMoreInQueue = pendingQueue && pendingQueue.length > 0;
-
+    // Determine final status
     let finalStatus: string;
-    if (hasMoreInQueue) {
-      finalStatus = 'queued';
-    } else if (failedCount === leadsToProcess.length) {
+    if (hasQueuedEntries) {
+      finalStatus = 'queued'; // More leads to send on future days
+    } else if (failedCount > 0 && sentCount === 0) {
       finalStatus = 'failed';
-    } else if (sentCount === totalLeads) {
+    } else if (failedCount > 0 && sentCount > 0) {
+      finalStatus = 'partial';
+    } else if (updatedCampaign && updatedCampaign.sent_count >= updatedCampaign.leads_count) {
       finalStatus = 'completed';
     } else {
-      finalStatus = totalLeads > dailyLimit ? 'queued' : 'partial';
+      finalStatus = sentCount > 0 ? 'running' : 'failed';
     }
 
+    // Update final counts and status
     await supabase
       .from('campaigns')
-      .update({
+      .update({ 
         status: finalStatus,
-        sent_count: campaign.sent_count + sentCount,
-        failed_count: campaign.failed_count + failedCount,
+        sent_count: (updatedCampaign?.sent_count || 0),
+        failed_count: (updatedCampaign?.failed_count || 0),
       })
       .eq('id', campaignId);
 
-    console.log(`Campaign ${campaignId} batch completed: ${sentCount} sent, ${failedCount} failed. Status: ${finalStatus}`);
+    console.log(`Campaign ${campaignId} finished: ${sentCount} sent, ${failedCount} failed, status: ${finalStatus}`);
 
     return new Response(JSON.stringify({
       success: true,
       campaignId,
-      sentCount,
-      failedCount,
-      totalLeads,
       status: finalStatus,
-      hasMoreInQueue,
+      sentToday: sentCount,
+      failed: failedCount,
+      deferred: idsToDefer.length,
       results,
+      hasQueuedEntries,
+      currentUsage: currentUsage + sentCount,
+      dailyLimit,
     }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
 
-  } catch (err) {
-    const error = err as Error;
+  } catch (error) {
     console.error('Error in send-campaign:', error);
-    return new Response(JSON.stringify({ error: error.message }), { status: 500, headers: corsHeaders });
+    return new Response(JSON.stringify({ error: String(error) }), { status: 500, headers: corsHeaders });
   }
 });
+
+// ============================================
+// HELPER: Extract LinkedIn public identifier from URL
+// ============================================
+function extractLinkedInPublicIdentifier(linkedinUrl: string): string | null {
+  // Handle various LinkedIn URL formats:
+  // https://www.linkedin.com/in/username
+  // https://linkedin.com/in/username/
+  // https://www.linkedin.com/in/username?param=value
+  // /in/username
+  
+  try {
+    const url = linkedinUrl.startsWith('http') ? new URL(linkedinUrl) : new URL(`https://linkedin.com${linkedinUrl.startsWith('/') ? '' : '/'}${linkedinUrl}`);
+    const pathParts = url.pathname.split('/').filter(Boolean);
+    
+    // Find 'in' segment and get the next segment
+    const inIndex = pathParts.findIndex(p => p.toLowerCase() === 'in');
+    if (inIndex !== -1 && pathParts[inIndex + 1]) {
+      return pathParts[inIndex + 1];
+    }
+    
+    // Fallback: just return the last non-empty segment
+    return pathParts[pathParts.length - 1] || null;
+  } catch {
+    // If URL parsing fails, try regex
+    const match = linkedinUrl.match(/\/in\/([^\/\?]+)/);
+    return match ? match[1] : null;
+  }
+}
+
+// ============================================
+// HELPER: Resolve LinkedIn public identifier to provider_id
+// ============================================
+async function resolveLinkedInProviderId(
+  unipileDsn: string, 
+  unipileApiKey: string, 
+  accountId: string, 
+  publicIdentifier: string
+): Promise<string | null> {
+  try {
+    // Unipile endpoint: GET /api/v1/users/{public_identifier}
+    const response = await fetch(`https://${unipileDsn}/api/v1/users/${encodeURIComponent(publicIdentifier)}?account_id=${accountId}`, {
+      method: 'GET',
+      headers: {
+        'X-API-KEY': unipileApiKey,
+        'Accept': 'application/json',
+      },
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text().catch(() => '');
+      console.error(`LinkedIn user lookup failed for ${publicIdentifier}: HTTP ${response.status} - ${errorText}`);
+      return null;
+    }
+
+    const data = await response.json();
+    // The provider_id is typically in data.provider_id or data.id
+    const providerId = data.provider_id || data.id;
+    
+    if (providerId) {
+      console.log(`Resolved LinkedIn ${publicIdentifier} -> provider_id: ${providerId}`);
+      return providerId;
+    }
+    
+    console.error(`LinkedIn user lookup returned no provider_id for ${publicIdentifier}:`, data);
+    return null;
+  } catch (error) {
+    console.error(`Error resolving LinkedIn provider_id for ${publicIdentifier}:`, error);
+    return null;
+  }
+}

@@ -18,6 +18,75 @@ function getTodayDate(): string {
   return new Date().toISOString().split('T')[0];
 }
 
+// ============================================
+// HELPER: Extract LinkedIn public identifier from URL
+// ============================================
+function extractLinkedInPublicIdentifier(linkedinUrl: string): string | null {
+  try {
+    const url = linkedinUrl.startsWith('http') 
+      ? new URL(linkedinUrl) 
+      : new URL(`https://linkedin.com${linkedinUrl.startsWith('/') ? '' : '/'}${linkedinUrl}`);
+    const pathParts = url.pathname.split('/').filter(Boolean);
+    
+    // Find 'in' segment and get the next segment
+    const inIndex = pathParts.findIndex(p => p.toLowerCase() === 'in');
+    if (inIndex !== -1 && pathParts[inIndex + 1]) {
+      return pathParts[inIndex + 1];
+    }
+    
+    // Fallback: just return the last non-empty segment
+    return pathParts[pathParts.length - 1] || null;
+  } catch {
+    // If URL parsing fails, try regex
+    const match = linkedinUrl.match(/\/in\/([^\/\?]+)/);
+    return match ? match[1] : null;
+  }
+}
+
+// ============================================
+// HELPER: Resolve LinkedIn public identifier to provider_id
+// ============================================
+async function resolveLinkedInProviderId(
+  unipileDsn: string, 
+  unipileApiKey: string, 
+  accountId: string, 
+  publicIdentifier: string
+): Promise<{ providerId: string | null; error?: string }> {
+  try {
+    // Unipile endpoint: GET /api/v1/users/{public_identifier}
+    const response = await fetch(`https://${unipileDsn}/api/v1/users/${encodeURIComponent(publicIdentifier)}?account_id=${accountId}`, {
+      method: 'GET',
+      headers: {
+        'X-API-KEY': unipileApiKey,
+        'Accept': 'application/json',
+      },
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text().catch(() => '');
+      const errorMsg = `HTTP ${response.status}: ${errorText}`;
+      console.error(`LinkedIn user lookup failed for ${publicIdentifier}: ${errorMsg}`);
+      return { providerId: null, error: errorMsg };
+    }
+
+    const data = await response.json();
+    // The provider_id is typically in data.provider_id or data.id
+    const providerId = data.provider_id || data.id;
+    
+    if (providerId) {
+      console.log(`Resolved LinkedIn ${publicIdentifier} -> provider_id: ${providerId}`);
+      return { providerId };
+    }
+    
+    console.error(`LinkedIn user lookup returned no provider_id for ${publicIdentifier}:`, data);
+    return { providerId: null, error: 'No provider_id in response' };
+  } catch (error) {
+    const errorMsg = error instanceof Error ? error.message : String(error);
+    console.error(`Error resolving LinkedIn provider_id for ${publicIdentifier}:`, errorMsg);
+    return { providerId: null, error: errorMsg };
+  }
+}
+
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
@@ -207,10 +276,44 @@ serve(async (req) => {
     }
 
     // ============================================
+    // RESOLVE LINKEDIN URL TO PROVIDER_ID
+    // ============================================
+    const publicIdentifier = extractLinkedInPublicIdentifier(linkedinUrl);
+    if (!publicIdentifier) {
+      console.error(`Invalid LinkedIn URL format: ${linkedinUrl}`);
+      return new Response(JSON.stringify({ 
+        error: 'Invalid LinkedIn URL format',
+        details: `Could not extract public identifier from: ${linkedinUrl}`
+      }), { 
+        status: 400, 
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
+      });
+    }
+
+    console.log(`Resolving LinkedIn public identifier: ${publicIdentifier}`);
+
+    const { providerId, error: resolveError } = await resolveLinkedInProviderId(
+      unipileDsn, 
+      unipileApiKey, 
+      unipileAccountId, 
+      publicIdentifier
+    );
+
+    if (!providerId) {
+      console.error(`Failed to resolve LinkedIn provider_id for ${publicIdentifier}: ${resolveError}`);
+      return new Response(JSON.stringify({ 
+        error: 'Could not resolve LinkedIn profile',
+        details: resolveError || `Profile not found: ${publicIdentifier}`,
+        publicIdentifier,
+      }), { 
+        status: 404, 
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
+      });
+    }
+
+    // ============================================
     // APPLY JITTER DELAY (for rate limiting)
     // ============================================
-    // Only apply if this is part of a batch (could be extended with a skipDelay param)
-    // For now, we'll apply a small jitter to avoid burst requests
     const delaySeconds = applyJitter(baseIntervalSeconds * 0.3, 2); // 30% of interval, min 2s
     console.log(`Applying ${delaySeconds}s jitter delay before invite`);
     await new Promise(resolve => setTimeout(resolve, delaySeconds * 1000));
@@ -221,13 +324,13 @@ serve(async (req) => {
     // Unipile endpoint: POST /api/v1/users/invite
     const formData = new FormData();
     formData.append('account_id', unipileAccountId);
-    formData.append('provider_id', linkedinUrl); // LinkedIn URL or provider ID
+    formData.append('provider_id', providerId); // Resolved provider_id, NOT the URL
     
     if (note) {
       formData.append('message', note);
     }
 
-    console.log(`Sending invite request to Unipile for account ${unipileAccountId}`);
+    console.log(`Sending invite request to Unipile: account=${unipileAccountId}, provider_id=${providerId}`);
 
     const response = await fetch(`https://${unipileDsn}/api/v1/users/invite`, {
       method: 'POST',
@@ -240,11 +343,13 @@ serve(async (req) => {
 
     if (!response.ok) {
       const errorData = await response.json().catch(() => ({}));
-      const errorMessage = errorData.message || `HTTP ${response.status}`;
-      console.error('Failed to send LinkedIn invite:', errorMessage);
+      const errorMessage = errorData.message || errorData.error || `HTTP ${response.status}`;
+      console.error(`Failed to send LinkedIn invite: ${errorMessage}`, errorData);
       return new Response(JSON.stringify({ 
         error: 'Failed to send connection request',
         details: errorMessage,
+        httpStatus: response.status,
+        providerId,
       }), { 
         status: 500, 
         headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
@@ -280,6 +385,8 @@ serve(async (req) => {
       invitationId: responseData.invitation_id || responseData.id,
       status: 'pending', // Invites are always pending until accepted
       message: 'Connection request sent successfully',
+      providerId,
+      publicIdentifier,
       usage: {
         action: usageAction,
         current: newUsage || currentUsage + 1,

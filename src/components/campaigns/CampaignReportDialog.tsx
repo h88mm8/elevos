@@ -75,6 +75,55 @@ export function CampaignReportDialog({
     return leads.filter(lead => lead.status === statusFilter);
   }, [leads, statusFilter]);
 
+  // Calculate time metrics
+  const timeMetrics = useMemo(() => {
+    if (!leads || leads.length === 0) return null;
+
+    const timesToSeen: number[] = [];
+    const timesToReply: number[] = [];
+
+    leads.forEach(lead => {
+      if (lead.sent_at && lead.seen_at) {
+        const sentTime = new Date(lead.sent_at).getTime();
+        const seenTime = new Date(lead.seen_at).getTime();
+        timesToSeen.push(seenTime - sentTime);
+      }
+      if (lead.sent_at && lead.replied_at) {
+        const sentTime = new Date(lead.sent_at).getTime();
+        const repliedTime = new Date(lead.replied_at).getTime();
+        timesToReply.push(repliedTime - sentTime);
+      }
+    });
+
+    const avgTimeToSeen = timesToSeen.length > 0 
+      ? timesToSeen.reduce((a, b) => a + b, 0) / timesToSeen.length 
+      : null;
+    const avgTimeToReply = timesToReply.length > 0 
+      ? timesToReply.reduce((a, b) => a + b, 0) / timesToReply.length 
+      : null;
+
+    return {
+      avgTimeToSeen,
+      avgTimeToReply,
+      seenCount: timesToSeen.length,
+      replyCount: timesToReply.length,
+    };
+  }, [leads]);
+
+  // Format milliseconds to human readable string
+  function formatDuration(ms: number | null): string {
+    if (ms === null) return '-';
+    const seconds = Math.floor(ms / 1000);
+    const minutes = Math.floor(seconds / 60);
+    const hours = Math.floor(minutes / 60);
+    const days = Math.floor(hours / 24);
+
+    if (days > 0) return `${days}d ${hours % 24}h`;
+    if (hours > 0) return `${hours}h ${minutes % 60}m`;
+    if (minutes > 0) return `${minutes}m`;
+    return `${seconds}s`;
+  }
+
   // Generate timeline chart data from events
   const chartData = useMemo(() => {
     if (!events || events.length === 0) return [];
@@ -235,6 +284,44 @@ export function CampaignReportDialog({
                       highlight
                     />
                   </div>
+
+                  {/* Time Metrics */}
+                  {timeMetrics && (timeMetrics.avgTimeToSeen !== null || timeMetrics.avgTimeToReply !== null) && (
+                    <Card>
+                      <CardHeader>
+                        <CardTitle className="text-base">Métricas de Tempo</CardTitle>
+                        <CardDescription>Tempo médio de resposta e visualização</CardDescription>
+                      </CardHeader>
+                      <CardContent>
+                        <div className="grid grid-cols-2 gap-4">
+                          <div className="p-4 rounded-lg bg-purple-50 dark:bg-purple-950/20">
+                            <div className="flex items-center gap-2 mb-2">
+                              <Eye className="h-4 w-4 text-purple-600" />
+                              <span className="text-sm font-medium">Tempo até visualização</span>
+                            </div>
+                            <p className="text-2xl font-bold text-purple-600">
+                              {formatDuration(timeMetrics.avgTimeToSeen)}
+                            </p>
+                            <p className="text-xs text-muted-foreground mt-1">
+                              Baseado em {timeMetrics.seenCount} visualizações
+                            </p>
+                          </div>
+                          <div className="p-4 rounded-lg bg-emerald-50 dark:bg-emerald-950/20">
+                            <div className="flex items-center gap-2 mb-2">
+                              <MessageCircle className="h-4 w-4 text-emerald-600" />
+                              <span className="text-sm font-medium">Tempo até resposta</span>
+                            </div>
+                            <p className="text-2xl font-bold text-emerald-600">
+                              {formatDuration(timeMetrics.avgTimeToReply)}
+                            </p>
+                            <p className="text-xs text-muted-foreground mt-1">
+                              Baseado em {timeMetrics.replyCount} respostas
+                            </p>
+                          </div>
+                        </div>
+                      </CardContent>
+                    </Card>
+                  )}
 
                   {/* Funnel visualization */}
                   <Card>

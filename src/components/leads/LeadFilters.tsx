@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
 import {
   Select,
   SelectContent,
@@ -9,9 +10,16 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { X, Filter, Plus } from 'lucide-react';
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from '@/components/ui/popover';
+import { Checkbox } from '@/components/ui/checkbox';
+import { X, Filter, Plus, Tag } from 'lucide-react';
 import { Lead, LeadList, LeadFilters as LeadFiltersType } from '@/types';
 import { CreateListDialog } from './CreateListDialog';
+import { useTags, Tag as TagType } from '@/hooks/useTags';
 
 interface LeadFiltersProps {
   filters: LeadFiltersType;
@@ -24,6 +32,7 @@ interface LeadFiltersProps {
 export function LeadFilters({ filters, onFiltersChange, leads, lists, onCreateList }: LeadFiltersProps) {
   const [createListOpen, setCreateListOpen] = useState(false);
   const [isCreating, setIsCreating] = useState(false);
+  const { tags } = useTags();
 
   // Extract unique values from leads for select options
   const uniqueIndustries = useMemo(() => {
@@ -40,7 +49,7 @@ export function LeadFilters({ filters, onFiltersChange, leads, lists, onCreateLi
     return [...new Set(countries)].sort();
   }, [leads]);
 
-  const hasFilters = filters.company || filters.jobTitle || filters.industry || filters.country || filters.listId;
+  const hasFilters = filters.company || filters.jobTitle || filters.industry || filters.country || filters.listId || filters.tagIds.length > 0;
 
   function clearFilters() {
     onFiltersChange({
@@ -49,7 +58,15 @@ export function LeadFilters({ filters, onFiltersChange, leads, lists, onCreateLi
       industry: '',
       country: '',
       listId: null,
+      tagIds: [],
     });
+  }
+
+  function toggleTagFilter(tagId: string) {
+    const newTagIds = filters.tagIds.includes(tagId)
+      ? filters.tagIds.filter(id => id !== tagId)
+      : [...filters.tagIds, tagId];
+    onFiltersChange({ ...filters, tagIds: newTagIds });
   }
 
   async function handleCreateList(name: string, description?: string) {
@@ -62,6 +79,8 @@ export function LeadFilters({ filters, onFiltersChange, leads, lists, onCreateLi
       setIsCreating(false);
     }
   }
+
+  const selectedTags = tags.filter(t => filters.tagIds.includes(t.id));
 
   return (
     <>
@@ -91,6 +110,71 @@ export function LeadFilters({ filters, onFiltersChange, leads, lists, onCreateLi
             </SelectContent>
           </Select>
         </div>
+
+        {/* Tag Filter */}
+        <div className="space-y-1">
+          <Label className="text-xs">Tags</Label>
+          <Popover>
+            <PopoverTrigger asChild>
+              <Button variant="outline" className="h-9 min-w-[120px] justify-start">
+                <Tag className="h-4 w-4 mr-2" />
+                {selectedTags.length > 0 ? (
+                  <span>{selectedTags.length} tag{selectedTags.length > 1 ? 's' : ''}</span>
+                ) : (
+                  <span className="text-muted-foreground">Todas</span>
+                )}
+              </Button>
+            </PopoverTrigger>
+            <PopoverContent className="w-64 p-3" align="start">
+              <div className="space-y-2">
+                <p className="text-sm font-medium">Filtrar por tags</p>
+                {tags.length === 0 ? (
+                  <p className="text-sm text-muted-foreground">Nenhuma tag criada</p>
+                ) : (
+                  <div className="space-y-2 max-h-48 overflow-auto">
+                    {tags.map(tag => (
+                      <label
+                        key={tag.id}
+                        className="flex items-center gap-2 cursor-pointer hover:bg-muted/50 p-1.5 rounded"
+                      >
+                        <Checkbox
+                          checked={filters.tagIds.includes(tag.id)}
+                          onCheckedChange={() => toggleTagFilter(tag.id)}
+                        />
+                        <div
+                          className="w-3 h-3 rounded-full"
+                          style={{ backgroundColor: tag.color }}
+                        />
+                        <span className="text-sm">{tag.name}</span>
+                      </label>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </PopoverContent>
+          </Popover>
+        </div>
+
+        {/* Display selected tags */}
+        {selectedTags.length > 0 && (
+          <div className="flex flex-wrap gap-1">
+            {selectedTags.map(tag => (
+              <Badge
+                key={tag.id}
+                variant="secondary"
+                className="text-xs cursor-pointer hover:opacity-80"
+                style={{
+                  backgroundColor: `${tag.color}20`,
+                  color: tag.color,
+                }}
+                onClick={() => toggleTagFilter(tag.id)}
+              >
+                {tag.name}
+                <X className="h-3 w-3 ml-1" />
+              </Badge>
+            ))}
+          </div>
+        )}
 
         {onCreateList && (
           <Button

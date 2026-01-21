@@ -19,7 +19,12 @@ interface WebhookEvent {
     sender?: {
       attendee_id?: string;
       attendee_name?: string;
+      attendee_provider_id?: string;
     };
+    account_info?: {
+      user_id?: string;
+    };
+    is_sender?: boolean;
     timestamp?: string;
     attachments?: unknown[];
     status?: string;
@@ -483,10 +488,20 @@ serve(async (req) => {
             const messageText = data.message || data.text || null;
             const messageId = data.message_id || data.id;
             const senderId = data.sender?.attendee_id || data.sender_id;
-            const isSentByMe = senderId === data.account_id || 
+            
+            // Determine if message was sent by me:
+            // 1. Check is_sender field (from API/sync)
+            // 2. Compare account_info.user_id with sender.attendee_provider_id (webhook)
+            // 3. Check event type for explicit sent events
+            const accountUserId = data.account_info?.user_id;
+            const senderProviderId = data.sender?.attendee_provider_id;
+            const isSentByMe = data.is_sender === true ||
+                               (accountUserId && senderProviderId && accountUserId === senderProviderId) ||
+                               senderId === data.account_id || 
                                eventType === 'message.sent' || 
                                eventType === 'message_sent';
 
+            console.log(`Message sender check: is_sender=${data.is_sender}, accountUserId=${accountUserId}, senderProviderId=${senderProviderId}, result=${isSentByMe ? 'me' : 'them'}`);
             console.log(`Message text: "${messageText?.slice(0, 50) || '(empty)'}", sender: ${isSentByMe ? 'me' : 'them'}`);
 
             // Insert message with cached attachments

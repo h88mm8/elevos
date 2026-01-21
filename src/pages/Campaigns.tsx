@@ -21,6 +21,7 @@ import { useToast } from '@/hooks/use-toast';
 import { supabase } from '@/integrations/supabase/client';
 import { CampaignReportDialog } from '@/components/campaigns/CampaignReportDialog';
 import { EditScheduledCampaignDialog } from '@/components/campaigns/EditScheduledCampaignDialog';
+import { CampaignLeadsDialog } from '@/components/campaigns/CampaignLeadsDialog';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { 
   Send, 
@@ -44,6 +45,7 @@ import {
   MessageSquare,
   Sparkles,
   Info,
+  Users,
 } from 'lucide-react';
 import {
   AlertDialog,
@@ -104,6 +106,7 @@ export default function Campaigns() {
   const [reportCampaign, setReportCampaign] = useState<{ id: string; name: string } | null>(null);
   const [editingCampaign, setEditingCampaign] = useState<Campaign | null>(null);
   const [cancelCampaignId, setCancelCampaignId] = useState<string | null>(null);
+  const [viewLeadsCampaign, setViewLeadsCampaign] = useState<{ id: string; name: string } | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   // Form state
@@ -300,16 +303,46 @@ export default function Campaigns() {
 
       if (error) throw error;
 
+      // Safe fallbacks for counts
+      const sent = data?.sentCount ?? 0;
+      const failed = data?.failedCount ?? 0;
+      const deferred = data?.deferredCount ?? 0;
+
+      // Build description based on results
+      let description = `${sent} mensagens enviadas`;
+      if (failed > 0) {
+        description += `, ${failed} falhas`;
+      }
+      if (deferred > 0) {
+        description += `, ${deferred} agendadas`;
+      }
+
       toast({
-        title: 'Campanha enviada',
-        description: `${data.sentCount} mensagens enviadas, ${data.failedCount} falhas.`,
+        title: data?.status === 'queued' ? 'Campanha na fila' : 'Campanha enviada',
+        description,
       });
+
+      // Show first error if there are failures
+      if (failed > 0 && data?.results?.length > 0) {
+        const firstError = data.results.find((r: { success: boolean; error?: string }) => !r.success && r.error);
+        if (firstError?.error) {
+          setTimeout(() => {
+            toast({
+              title: 'Detalhe da falha',
+              description: firstError.error.length > 200 
+                ? firstError.error.substring(0, 200) + '...' 
+                : firstError.error,
+              variant: 'destructive',
+            });
+          }, 500);
+        }
+      }
 
       refetchCampaigns();
     } catch (error: any) {
       toast({
         title: 'Erro ao enviar campanha',
-        description: error.message,
+        description: error.message || 'Erro desconhecido',
         variant: 'destructive',
       });
     } finally {
@@ -894,6 +927,16 @@ export default function Campaigns() {
                         </TableCell>
                         <TableCell className="text-center">
                           <div className="flex items-center justify-center gap-1">
+                            {/* View leads button - always visible */}
+                            <Button
+                              size="icon"
+                              variant="ghost"
+                              className="h-8 w-8"
+                              onClick={() => setViewLeadsCampaign({ id: campaign.id, name: campaign.name })}
+                              title="Ver leads"
+                            >
+                              <Users className="h-4 w-4" />
+                            </Button>
                             {/* Report button - always visible for sent campaigns */}
                             {campaign.sent_count > 0 && (
                               <Button
@@ -1012,6 +1055,14 @@ export default function Campaigns() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {/* View Campaign Leads Dialog */}
+      <CampaignLeadsDialog
+        campaignId={viewLeadsCampaign?.id || null}
+        campaignName={viewLeadsCampaign?.name || ''}
+        open={!!viewLeadsCampaign}
+        onOpenChange={(open) => !open && setViewLeadsCampaign(null)}
+      />
     </AppLayout>
   );
 }

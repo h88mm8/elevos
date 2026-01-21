@@ -421,6 +421,10 @@ serve(async (req) => {
         success: true,
         campaignId,
         status: 'queued',
+        sentCount: 0,
+        failedCount: 0,
+        deferredCount: totalLeads,
+        results: [],
         reason: 'DAILY_LIMIT_REACHED',
         nextRunAt: getNextDayAt9AM(workspaceTimezone),
         currentUsage,
@@ -861,9 +865,9 @@ serve(async (req) => {
       success: true,
       campaignId,
       status: finalStatus,
-      sentToday: sentCount,
-      failed: failedCount,
-      deferred: idsToDefer.length,
+      sentCount: sentCount,
+      failedCount: failedCount,
+      deferredCount: idsToDefer.length,
       results,
       hasQueuedEntries,
       currentUsage: currentUsage + sentCount,
@@ -872,7 +876,14 @@ serve(async (req) => {
 
   } catch (error) {
     console.error('Error in send-campaign:', error);
-    return new Response(JSON.stringify({ error: String(error) }), { status: 500, headers: corsHeaders });
+    return new Response(JSON.stringify({ 
+      success: false,
+      error: String(error),
+      sentCount: 0,
+      failedCount: 0,
+      deferredCount: 0,
+      results: [],
+    }), { status: 500, headers: corsHeaders });
   }
 });
 

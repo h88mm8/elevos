@@ -103,6 +103,42 @@ export type Database = {
           },
         ]
       }
+      campaign_queue: {
+        Row: {
+          campaign_id: string
+          created_at: string
+          id: string
+          leads_sent: number
+          leads_to_send: number
+          processed_at: string | null
+          scheduled_date: string
+          status: string
+          workspace_id: string
+        }
+        Insert: {
+          campaign_id: string
+          created_at?: string
+          id?: string
+          leads_sent?: number
+          leads_to_send?: number
+          processed_at?: string | null
+          scheduled_date: string
+          status?: string
+          workspace_id: string
+        }
+        Update: {
+          campaign_id?: string
+          created_at?: string
+          id?: string
+          leads_sent?: number
+          leads_to_send?: number
+          processed_at?: string | null
+          scheduled_date?: string
+          status?: string
+          workspace_id?: string
+        }
+        Relationships: []
+      }
       campaigns: {
         Row: {
           account_id: string | null
@@ -581,6 +617,33 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
+      }
+      workspace_settings: {
+        Row: {
+          created_at: string
+          daily_message_limit: number
+          id: string
+          message_interval_seconds: number
+          updated_at: string
+          workspace_id: string
+        }
+        Insert: {
+          created_at?: string
+          daily_message_limit?: number
+          id?: string
+          message_interval_seconds?: number
+          updated_at?: string
+          workspace_id: string
+        }
+        Update: {
+          created_at?: string
+          daily_message_limit?: number
+          id?: string
+          message_interval_seconds?: number
+          updated_at?: string
+          workspace_id?: string
+        }
+        Relationships: []
       }
       workspaces: {
         Row: {

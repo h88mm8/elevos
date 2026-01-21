@@ -3,6 +3,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { useCredits } from '@/hooks/useCredits';
 import { useWorkspaceMembers } from '@/hooks/useWorkspaceMembers';
 import { useAccounts } from '@/hooks/useAccounts';
+import { useWorkspaceSettings } from '@/hooks/useWorkspaceSettings';
 import AppLayout from '@/components/layout/AppLayout';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -15,6 +16,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { useToast } from '@/hooks/use-toast';
 import { supabase } from '@/integrations/supabase/client';
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { 
   Building2, 
   Users, 
@@ -36,6 +38,9 @@ import {
   Copy,
   Check,
   AlertCircle,
+  AlertTriangle,
+  Clock,
+  Save,
 } from 'lucide-react';
 import { MESSAGE_VARIABLES } from '@/lib/messageVariables';
 import { format } from 'date-fns';
@@ -46,7 +51,49 @@ export default function Settings() {
   const { credits, creditHistory, isLoading: creditsLoading } = useCredits();
   const { members, isLoading: membersLoading, removeMember, updateRole } = useWorkspaceMembers();
   const { accounts, isLoading: accountsLoading, syncAccounts, isSyncing, refetchAccounts, deleteAccount, isDeleting, updateAccountName, isUpdatingName } = useAccounts();
+  const { settings, updateSettings, isUpdating: isUpdatingSettings } = useWorkspaceSettings();
   const { toast } = useToast();
+
+  // States for sending limits
+  const [dailyLimit, setDailyLimit] = useState<number>(50);
+  const [intervalSeconds, setIntervalSeconds] = useState<number>(15);
+  const [settingsChanged, setSettingsChanged] = useState(false);
+
+  // Initialize settings from hook
+  useEffect(() => {
+    if (settings) {
+      setDailyLimit(settings.daily_message_limit);
+      setIntervalSeconds(settings.message_interval_seconds);
+    }
+  }, [settings]);
+
+  // Track settings changes
+  useEffect(() => {
+    if (settings) {
+      const changed = dailyLimit !== settings.daily_message_limit || 
+                      intervalSeconds !== settings.message_interval_seconds;
+      setSettingsChanged(changed);
+    }
+  }, [dailyLimit, intervalSeconds, settings]);
+
+  async function handleSaveSettings() {
+    try {
+      await updateSettings({
+        daily_message_limit: dailyLimit,
+        message_interval_seconds: intervalSeconds,
+      });
+      toast({
+        title: 'Configurações salvas',
+        description: 'Os limites de envio foram atualizados com sucesso.',
+      });
+    } catch (error: any) {
+      toast({
+        title: 'Erro ao salvar',
+        description: error.message,
+        variant: 'destructive',
+      });
+    }
+  }
 
   const [createWorkspaceOpen, setCreateWorkspaceOpen] = useState(false);
   const [inviteMemberOpen, setInviteMemberOpen] = useState(false);
@@ -934,6 +981,127 @@ export default function Settings() {
           </TabsContent>
 
           <TabsContent value="preferences" className="space-y-4">
+            {/* Card de Limites de Envio */}
+            <Card>
+              <CardHeader>
+                <div className="flex items-center justify-between">
+                  <div>
+                    <CardTitle className="flex items-center gap-2">
+                      <Clock className="h-5 w-5" />
+                      Limites de Envio
+                    </CardTitle>
+                    <CardDescription>
+                      Configure os limites diários e intervalos para evitar bloqueios de conta
+                    </CardDescription>
+                  </div>
+                  {settingsChanged && (
+                    <Button onClick={handleSaveSettings} disabled={isUpdatingSettings}>
+                      {isUpdatingSettings ? (
+                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      ) : (
+                        <Save className="mr-2 h-4 w-4" />
+                      )}
+                      Salvar
+                    </Button>
+                  )}
+                </div>
+              </CardHeader>
+              <CardContent className="space-y-6">
+                <div className="grid gap-6 md:grid-cols-2">
+                  <div className="space-y-3">
+                    <Label htmlFor="dailyLimit">Limite diário de mensagens</Label>
+                    <div className="flex items-center gap-2">
+                      <Input
+                        id="dailyLimit"
+                        type="number"
+                        min={1}
+                        max={500}
+                        value={dailyLimit}
+                        onChange={(e) => setDailyLimit(parseInt(e.target.value) || 50)}
+                        className="w-32"
+                      />
+                      <span className="text-sm text-muted-foreground">mensagens/dia</span>
+                    </div>
+                    <Alert variant="default" className="border-yellow-500/50 bg-yellow-500/10">
+                      <AlertTriangle className="h-4 w-4 text-yellow-600" />
+                      <AlertTitle className="text-yellow-700 text-sm">Contas novas</AlertTitle>
+                      <AlertDescription className="text-yellow-600 text-xs">
+                        Contas novas do WhatsApp podem ser bloqueadas após 2-3 novos chats. Aumente gradualmente o limite para "aquecer" a conta durante dias com poucos chats ativos.
+                      </AlertDescription>
+                    </Alert>
+                  </div>
+
+                  <div className="space-y-3">
+                    <Label htmlFor="intervalSeconds">Intervalo entre mensagens</Label>
+                    <div className="flex items-center gap-2">
+                      <Input
+                        id="intervalSeconds"
+                        type="number"
+                        min={5}
+                        max={120}
+                        value={intervalSeconds}
+                        onChange={(e) => setIntervalSeconds(parseInt(e.target.value) || 15)}
+                        className="w-32"
+                      />
+                      <span className="text-sm text-muted-foreground">segundos</span>
+                    </div>
+                    <Alert variant="default" className="border-yellow-500/50 bg-yellow-500/10">
+                      <AlertTriangle className="h-4 w-4 text-yellow-600" />
+                      <AlertTitle className="text-yellow-700 text-sm">Comportamento humano</AlertTitle>
+                      <AlertDescription className="text-yellow-600 text-xs">
+                        Evite intervalos menores que 10-20 segundos para imitar comportamento humano e se alinhar com padrões naturais de conversação.
+                      </AlertDescription>
+                    </Alert>
+                  </div>
+                </div>
+
+                <div className="text-sm text-muted-foreground bg-muted/50 p-3 rounded-lg">
+                  <p>
+                    Se uma campanha tiver mais leads que o limite diário, ela será enviada em múltiplos dias automaticamente.
+                  </p>
+                </div>
+              </CardContent>
+            </Card>
+
+            {/* Card de Boas Práticas */}
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <AlertCircle className="h-5 w-5" />
+                  Boas Práticas do WhatsApp
+                </CardTitle>
+                <CardDescription>
+                  Siga estas recomendações para evitar suspensão da conta
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                <Alert variant="default" className="border-blue-500/50 bg-blue-500/10">
+                  <MessageCircle className="h-4 w-4 text-blue-600" />
+                  <AlertTitle className="text-blue-700 text-sm">Contas com histórico</AlertTitle>
+                  <AlertDescription className="text-blue-600 text-xs">
+                    Use contas WhatsApp com atividade histórica de usuários reais. Evite usar contas novas exclusivamente para automação.
+                  </AlertDescription>
+                </Alert>
+
+                <Alert variant="default" className="border-green-500/50 bg-green-500/10">
+                  <CheckCircle2 className="h-4 w-4 text-green-600" />
+                  <AlertTitle className="text-green-700 text-sm">Engaje os usuários</AlertTitle>
+                  <AlertDescription className="text-green-600 text-xs">
+                    Projete mensagens para iniciar interação e incentivar respostas. A primeira mensagem deve solicitar uma resposta para manter conversas ativas.
+                  </AlertDescription>
+                </Alert>
+
+                <Alert variant="default" className="border-red-500/50 bg-red-500/10">
+                  <XCircle className="h-4 w-4 text-red-600" />
+                  <AlertTitle className="text-red-700 text-sm">Evite spam</AlertTitle>
+                  <AlertDescription className="text-red-600 text-xs">
+                    Se iniciar muitos chats sem receber respostas ou houver sinais de spam/bloqueio, sua conta pode ser restringida temporariamente pelo WhatsApp.
+                  </AlertDescription>
+                </Alert>
+              </CardContent>
+            </Card>
+
+            {/* Card de Variáveis de Mensagem */}
             <Card>
               <CardHeader>
                 <CardTitle>Variáveis de Mensagem</CardTitle>

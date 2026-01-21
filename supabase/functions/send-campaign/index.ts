@@ -53,6 +53,16 @@ interface CampaignLead {
   };
 }
 
+interface WorkspaceSettings {
+  daily_message_limit: number;
+  message_interval_seconds: number;
+}
+
+const DEFAULT_SETTINGS: WorkspaceSettings = {
+  daily_message_limit: 50,
+  message_interval_seconds: 15,
+};
+
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
@@ -107,6 +117,18 @@ serve(async (req) => {
     if (!memberCheck) {
       return new Response(JSON.stringify({ error: 'Access denied to this campaign' }), { status: 403, headers: corsHeaders });
     }
+
+    // ============================================
+    // GET WORKSPACE SETTINGS
+    // ============================================
+    const { data: workspaceSettings } = await supabase
+      .from('workspace_settings')
+      .select('daily_message_limit, message_interval_seconds')
+      .eq('workspace_id', campaign.workspace_id)
+      .maybeSingle();
+
+    const settings: WorkspaceSettings = workspaceSettings || DEFAULT_SETTINGS;
+    console.log(`Using settings: ${settings.daily_message_limit} msgs/day, ${settings.message_interval_seconds}s interval`);
 
     // ============================================
     // GET MESSAGING PROVIDER CREDENTIALS
@@ -187,7 +209,67 @@ serve(async (req) => {
       return new Response(JSON.stringify({ error: 'No leads to send' }), { status: 400, headers: corsHeaders });
     }
 
-    console.log(`Starting campaign ${campaignId} with ${campaignLeads.length} leads`);
+    const totalLeads = campaignLeads.length;
+    const dailyLimit = settings.daily_message_limit;
+
+    console.log(`Campaign ${campaignId}: ${totalLeads} leads, daily limit: ${dailyLimit}`);
+
+    // ============================================
+    // CHECK IF QUEUE IS NEEDED
+    // ============================================
+    if (totalLeads > dailyLimit) {
+      console.log(`Campaign exceeds daily limit. Creating queue entries...`);
+
+      // Calculate number of days needed
+      const daysNeeded = Math.ceil(totalLeads / dailyLimit);
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+
+      // Create queue entries for each day
+      const queueEntries = [];
+      for (let day = 0; day < daysNeeded; day++) {
+        const scheduledDate = new Date(today);
+        scheduledDate.setDate(scheduledDate.getDate() + day);
+        
+        const leadsForDay = day === daysNeeded - 1 
+          ? totalLeads - (dailyLimit * day) 
+          : dailyLimit;
+
+        queueEntries.push({
+          campaign_id: campaignId,
+          workspace_id: campaign.workspace_id,
+          scheduled_date: scheduledDate.toISOString().split('T')[0],
+          leads_to_send: leadsForDay,
+          leads_sent: 0,
+          status: day === 0 ? 'processing' : 'queued',
+        });
+      }
+
+      // Insert queue entries
+      const { error: queueError } = await supabase
+        .from('campaign_queue')
+        .insert(queueEntries);
+
+      if (queueError) {
+        console.error('Error creating queue entries:', queueError);
+        return new Response(JSON.stringify({ error: 'Failed to create queue' }), { status: 500, headers: corsHeaders });
+      }
+
+      // Update campaign status to 'queued'
+      await supabase
+        .from('campaigns')
+        .update({ status: 'queued' })
+        .eq('id', campaignId);
+
+      // Continue to send today's batch
+      console.log(`Queue created for ${daysNeeded} days. Sending first batch of ${dailyLimit} leads...`);
+    }
+
+    // Determine how many leads to send now
+    const leadsToSendNow = Math.min(totalLeads, dailyLimit);
+    const leadsToProcess = (campaignLeads as unknown as CampaignLead[]).slice(0, leadsToSendNow);
+
+    console.log(`Starting campaign ${campaignId} with ${leadsToProcess.length} leads (of ${totalLeads} total)`);
 
     // Update campaign status to 'sending'
     await supabase
@@ -202,7 +284,8 @@ serve(async (req) => {
     let failedCount = 0;
     const results: { leadId: string; success: boolean; error?: string }[] = [];
 
-    for (const cl of campaignLeads as unknown as CampaignLead[]) {
+    for (let i = 0; i < leadsToProcess.length; i++) {
+      const cl = leadsToProcess[i];
       const lead = cl.lead;
       
       if (!lead) {
@@ -319,8 +402,10 @@ serve(async (req) => {
           results.push({ leadId: cl.lead_id, success: false, error: sendError });
         }
 
-        // Small delay between messages to avoid rate limiting
-        await new Promise(resolve => setTimeout(resolve, 1000));
+        // Use configured delay between messages (except for last message)
+        if (i < leadsToProcess.length - 1) {
+          await new Promise(resolve => setTimeout(resolve, settings.message_interval_seconds * 1000));
+        }
 
       } catch (error) {
         const errorMessage = error instanceof Error ? error.message : 'Unknown error';
@@ -337,10 +422,41 @@ serve(async (req) => {
     }
 
     // ============================================
+    // UPDATE QUEUE ENTRY IF EXISTS
+    // ============================================
+    const today = new Date().toISOString().split('T')[0];
+    await supabase
+      .from('campaign_queue')
+      .update({ 
+        leads_sent: sentCount, 
+        status: 'completed',
+        processed_at: new Date().toISOString()
+      })
+      .eq('campaign_id', campaignId)
+      .eq('scheduled_date', today);
+
+    // ============================================
     // UPDATE CAMPAIGN FINAL STATUS
     // ============================================
-    const finalStatus = failedCount === campaignLeads.length ? 'failed' : 
-                        sentCount === campaignLeads.length ? 'completed' : 'partial';
+    // Check if there are more queued items
+    const { data: pendingQueue } = await supabase
+      .from('campaign_queue')
+      .select('id')
+      .eq('campaign_id', campaignId)
+      .eq('status', 'queued');
+
+    const hasMoreInQueue = pendingQueue && pendingQueue.length > 0;
+
+    let finalStatus: string;
+    if (hasMoreInQueue) {
+      finalStatus = 'queued';
+    } else if (failedCount === leadsToProcess.length) {
+      finalStatus = 'failed';
+    } else if (sentCount === totalLeads) {
+      finalStatus = 'completed';
+    } else {
+      finalStatus = totalLeads > dailyLimit ? 'queued' : 'partial';
+    }
 
     await supabase
       .from('campaigns')
@@ -351,14 +467,16 @@ serve(async (req) => {
       })
       .eq('id', campaignId);
 
-    console.log(`Campaign ${campaignId} completed: ${sentCount} sent, ${failedCount} failed`);
+    console.log(`Campaign ${campaignId} batch completed: ${sentCount} sent, ${failedCount} failed. Status: ${finalStatus}`);
 
     return new Response(JSON.stringify({
       success: true,
       campaignId,
       sentCount,
       failedCount,
+      totalLeads,
       status: finalStatus,
+      hasMoreInQueue,
       results,
     }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
 

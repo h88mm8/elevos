@@ -275,12 +275,23 @@ serve(async (req) => {
     });
 
     // ============================================
+    // FILTER OUT GHOST CHATS (empty conversations)
+    // ============================================
+    const validChats = mappedChats.filter((chat: any) => {
+      // Only include chats that have a real last_message with content
+      const hasMessage = chat.last_message && chat.last_message.trim().length > 0;
+      return hasMessage;
+    });
+
+    console.log(`Filtered ${mappedChats.length} chats to ${validChats.length} valid chats (removed ${mappedChats.length - validChats.length} empty)`);
+
+    // ============================================
     // DEDUPLICATE CHATS BY PHONE NUMBER
     // Keep only the most recent chat for each unique phone number
     // ============================================
     const chatMap = new Map<string, any>();
     
-    for (const chat of mappedChats) {
+    for (const chat of validChats) {
       const key = chat.attendee_identifier || chat.id;
       const existing = chatMap.get(key);
       

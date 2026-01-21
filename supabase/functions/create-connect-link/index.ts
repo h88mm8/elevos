@@ -121,10 +121,17 @@ serve(async (req) => {
     // ============================================
     const expiresAt = new Date(Date.now() + 10 * 60 * 1000).toISOString(); // 10 minutes
 
-    // Store both workspaceId and accountName in the name field (JSON encoded)
+    // Build redirect URLs back to the app
+    const appUrl = Deno.env.get('APP_URL') || 'https://elevos.lovable.app';
+    const successRedirectUrl = `${appUrl}/settings?tab=integrations&connected=true`;
+    const failureRedirectUrl = `${appUrl}/settings?tab=integrations&connected=false`;
+
+    // Store workspaceId, accountName, AND channel in the name field (JSON encoded)
+    // Channel is included so webhook can use it as fallback if provider doesn't return type
     const namePayload = JSON.stringify({ 
       workspaceId, 
-      accountName: accountName || null 
+      accountName: accountName || null,
+      channel: channel, // Include channel for correlation
     });
 
     const requestBody = {
@@ -134,6 +141,8 @@ serve(async (req) => {
       expiresOn: expiresAt,
       notify_url: webhookUrl,
       name: namePayload, // Used to correlate in webhook
+      success_redirect_url: successRedirectUrl,
+      failure_redirect_url: failureRedirectUrl,
     };
 
     console.log('Provider request:', JSON.stringify(requestBody));

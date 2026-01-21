@@ -223,23 +223,29 @@ export default function Settings() {
       // Open the hosted auth link in a new tab
       window.open(url, '_blank');
 
-      // Show waiting state and start polling for new accounts
+      // Show waiting state
       setWaitingForConnection(true);
       toast({
         title: 'Link aberto',
-        description: `Complete a conexão do ${selectedChannel === 'whatsapp' ? 'WhatsApp' : 'LinkedIn'} na nova aba. A conta aparecerá automaticamente.`,
+        description: `Complete a conexão do ${selectedChannel === 'whatsapp' ? 'WhatsApp' : 'LinkedIn'} na nova aba. Se a aba não redirecionar, pode fechar — a conta aparecerá automaticamente quando conectar.`,
       });
 
-      // Poll for new accounts for 2 minutes
-      const pollInterval = setInterval(async () => {
+      // Poll for new accounts for 2 minutes as fallback
+      const pollIntervalId = setInterval(async () => {
         await refetchAccounts();
       }, 5000);
 
-      setTimeout(() => {
-        clearInterval(pollInterval);
+      // Store interval ID for cleanup
+      const timeoutId = setTimeout(() => {
+        clearInterval(pollIntervalId);
         setWaitingForConnection(false);
         setConnectingChannel(null);
+        setConnectingWhatsApp(false);
+        setConnectingLinkedIn(false);
       }, 120000); // Stop polling after 2 minutes
+
+      // Cleanup on success (handled by realtime subscription)
+      // The realtime subscription will clear these states when account is connected
 
     } catch (error: any) {
       console.error(`Error connecting ${selectedChannel}:`, error);
@@ -248,7 +254,9 @@ export default function Settings() {
         description: error.message,
         variant: 'destructive',
       });
-    } finally {
+      // Reset all states on error
+      setWaitingForConnection(false);
+      setConnectingChannel(null);
       setConnectingWhatsApp(false);
       setConnectingLinkedIn(false);
     }
@@ -304,11 +312,16 @@ export default function Settings() {
           // Check if the event is INSERT or UPDATE with connected status
           if (payload.eventType === 'INSERT' || 
               (payload.eventType === 'UPDATE' && (payload.new as any)?.status === 'connected')) {
+            // Clear all waiting states
             setWaitingForConnection(false);
             setConnectingWhatsApp(false);
+            setConnectingLinkedIn(false);
+            setConnectingChannel(null);
+            
+            const connectedChannel = (payload.new as any)?.channel || 'conta';
             toast({
               title: 'Conta conectada!',
-              description: 'Uma nova conta foi adicionada com sucesso.',
+              description: `${connectedChannel === 'whatsapp' ? 'WhatsApp' : connectedChannel === 'linkedin' ? 'LinkedIn' : 'Conta'} conectado com sucesso.`,
             });
           }
         }
@@ -325,6 +338,8 @@ export default function Settings() {
     if (waitingForConnection && accounts.some(acc => acc.status === 'connected')) {
       setWaitingForConnection(false);
       setConnectingWhatsApp(false);
+      setConnectingLinkedIn(false);
+      setConnectingChannel(null);
     }
   }, [accounts, waitingForConnection]);
 

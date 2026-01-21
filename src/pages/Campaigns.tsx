@@ -29,6 +29,7 @@ import {
   AlertCircle,
   Variable,
   Eye,
+  Trash2,
 } from 'lucide-react';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
@@ -230,6 +231,30 @@ export default function Campaigns() {
       });
     } finally {
       setSendingCampaignId(null);
+    }
+  }
+
+  async function handleDeleteCampaign(campaignId: string) {
+    try {
+      const { error } = await supabase
+        .from('campaigns')
+        .delete()
+        .eq('id', campaignId);
+
+      if (error) throw error;
+
+      toast({
+        title: 'Campanha excluída',
+        description: 'A campanha foi removida com sucesso.',
+      });
+
+      refetchCampaigns();
+    } catch (error: any) {
+      toast({
+        title: 'Erro ao excluir campanha',
+        description: error.message,
+        variant: 'destructive',
+      });
     }
   }
 
@@ -569,25 +594,35 @@ export default function Campaigns() {
                           {format(new Date(campaign.created_at), 'dd/MM/yyyy', { locale: ptBR })}
                         </TableCell>
                         <TableCell className="text-center">
-                          {canSend && (
+                          <div className="flex items-center justify-center gap-1">
+                            {canSend && (
+                              <Button
+                                size="sm"
+                                onClick={() => handleSendCampaign(campaign.id)}
+                                disabled={isSending}
+                              >
+                                {isSending ? (
+                                  <Loader2 className="h-4 w-4 animate-spin" />
+                                ) : (
+                                  <>
+                                    <Send className="h-4 w-4 mr-1" />
+                                    Enviar
+                                  </>
+                                )}
+                              </Button>
+                            )}
+                            {campaign.status === 'completed' && (
+                              <span className="text-sm text-muted-foreground">Concluído</span>
+                            )}
                             <Button
-                              size="sm"
-                              onClick={() => handleSendCampaign(campaign.id)}
-                              disabled={isSending}
+                              size="icon"
+                              variant="ghost"
+                              className="h-8 w-8 text-muted-foreground hover:text-destructive"
+                              onClick={() => handleDeleteCampaign(campaign.id)}
                             >
-                              {isSending ? (
-                                <Loader2 className="h-4 w-4 animate-spin" />
-                              ) : (
-                                <>
-                                  <Send className="h-4 w-4 mr-1" />
-                                  Enviar
-                                </>
-                              )}
+                              <Trash2 className="h-4 w-4" />
                             </Button>
-                          )}
-                          {campaign.status === 'completed' && (
-                            <span className="text-sm text-muted-foreground">Concluído</span>
-                          )}
+                          </div>
                         </TableCell>
                       </TableRow>
                     );

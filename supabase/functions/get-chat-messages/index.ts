@@ -111,15 +111,17 @@ serve(async (req) => {
     //  "original":"{\"key\":{...\"fromMe\":true,...},...}
     // The "fromMe" field in original.key indicates if the message was sent by us
     const mappedMessages = (providerData.items || []).map((msg: any) => {
-      // Parse is_sender from the original JSON if available
+      // Parse is_sender and media from the original JSON if available
       let isSender = false;
+      let originalData: any = null;
       try {
         if (msg.original) {
-          const original = typeof msg.original === 'string' ? JSON.parse(msg.original) : msg.original;
-          isSender = original?.key?.fromMe === true;
+          originalData = typeof msg.original === 'string' ? JSON.parse(msg.original) : msg.original;
+          isSender = originalData?.key?.fromMe === true;
         }
       } catch (e) {
         // If parsing fails, default to false
+        console.warn('Failed to parse original:', e);
       }
       
       // Determine message status based on provider fields
@@ -140,11 +142,76 @@ serve(async (req) => {
       }
       
       // Map attachments (audio, video, images, documents)
-      // Provider structure: msg.attachments = [{ type, url, mime_type, filename, size, duration }]
-      // Or may come as individual fields: msg.media, msg.audio, msg.document, msg.image, msg.video
+      // Provider stores media info in original.message.{audioMessage, imageMessage, videoMessage, documentMessage}
       let attachments: any[] = [];
       
-      if (msg.attachments && Array.isArray(msg.attachments)) {
+      // First check the original.message object for WhatsApp-style attachments
+      const originalMessage = originalData?.message;
+      if (originalMessage) {
+        // Audio message
+        if (originalMessage.audioMessage) {
+          const audio = originalMessage.audioMessage;
+          attachments.push({
+            type: 'audio',
+            url: audio.url,
+            mime_type: audio.mimetype || 'audio/ogg',
+            filename: audio.fileName,
+            duration: audio.seconds,
+            size: audio.fileLength,
+          });
+        }
+        
+        // Image message
+        if (originalMessage.imageMessage) {
+          const image = originalMessage.imageMessage;
+          attachments.push({
+            type: 'image',
+            url: image.url,
+            mime_type: image.mimetype || 'image/jpeg',
+            filename: image.fileName,
+          });
+        }
+        
+        // Video message
+        if (originalMessage.videoMessage) {
+          const video = originalMessage.videoMessage;
+          attachments.push({
+            type: 'video',
+            url: video.url,
+            mime_type: video.mimetype || 'video/mp4',
+            filename: video.fileName,
+            duration: video.seconds,
+          });
+        }
+        
+        // Document message
+        if (originalMessage.documentMessage || originalMessage.documentWithCaptionMessage) {
+          const doc = originalMessage.documentMessage || originalMessage.documentWithCaptionMessage?.message?.documentMessage;
+          if (doc) {
+            attachments.push({
+              type: 'document',
+              url: doc.url,
+              mime_type: doc.mimetype,
+              filename: doc.fileName || doc.title,
+              size: doc.fileLength,
+            });
+          }
+        }
+        
+        // Sticker message
+        if (originalMessage.stickerMessage) {
+          const sticker = originalMessage.stickerMessage;
+          attachments.push({
+            type: 'image',
+            url: sticker.url,
+            mime_type: sticker.mimetype || 'image/webp',
+            filename: 'sticker.webp',
+          });
+        }
+      }
+      
+      // Also check top-level msg.attachments array (some providers use this)
+      if (msg.attachments && Array.isArray(msg.attachments) && attachments.length === 0) {
         attachments = msg.attachments.map((att: any) => ({
           type: att.type || getAttachmentType(att.mime_type),
           url: att.url || att.link || att.media_url,
@@ -155,52 +222,57 @@ serve(async (req) => {
         }));
       }
       
-      // Check individual media fields
-      if (msg.audio || msg.voice) {
-        const audio = msg.audio || msg.voice;
-        attachments.push({
-          type: 'audio',
-          url: audio.url || audio.link || audio.media_url,
-          mime_type: audio.mime_type || audio.mimetype || 'audio/ogg',
-          filename: audio.filename,
-          duration: audio.duration || audio.seconds,
-        });
+      // Check individual media fields at top level
+      if (attachments.length === 0) {
+        if (msg.audio || msg.voice) {
+          const audio = msg.audio || msg.voice;
+          attachments.push({
+            type: 'audio',
+            url: audio.url || audio.link || audio.media_url,
+            mime_type: audio.mime_type || audio.mimetype || 'audio/ogg',
+            filename: audio.filename,
+            duration: audio.duration || audio.seconds,
+          });
+        }
+        
+        if (msg.image) {
+          attachments.push({
+            type: 'image',
+            url: msg.image.url || msg.image.link,
+            mime_type: msg.image.mime_type || 'image/jpeg',
+            filename: msg.image.filename,
+          });
+        }
+        
+        if (msg.video) {
+          attachments.push({
+            type: 'video',
+            url: msg.video.url || msg.video.link,
+            mime_type: msg.video.mime_type || 'video/mp4',
+            filename: msg.video.filename,
+            duration: msg.video.duration,
+          });
+        }
+        
+        if (msg.document) {
+          attachments.push({
+            type: 'document',
+            url: msg.document.url || msg.document.link,
+            mime_type: msg.document.mime_type,
+            filename: msg.document.filename || msg.document.name,
+            size: msg.document.size,
+          });
+        }
       }
       
-      if (msg.image) {
-        attachments.push({
-          type: 'image',
-          url: msg.image.url || msg.image.link,
-          mime_type: msg.image.mime_type || 'image/jpeg',
-          filename: msg.image.filename,
-        });
-      }
-      
-      if (msg.video) {
-        attachments.push({
-          type: 'video',
-          url: msg.video.url || msg.video.link,
-          mime_type: msg.video.mime_type || 'video/mp4',
-          filename: msg.video.filename,
-          duration: msg.video.duration,
-        });
-      }
-      
-      if (msg.document) {
-        attachments.push({
-          type: 'document',
-          url: msg.document.url || msg.document.link,
-          mime_type: msg.document.mime_type,
-          filename: msg.document.filename || msg.document.name,
-          size: msg.document.size,
-        });
-      }
+      // Filter out attachments without valid URLs
+      attachments = attachments.filter(att => att.url);
       
       // Log for debugging when there are attachments
       if (attachments.length > 0) {
         console.log('Message with attachments:', { 
           msgId: msg.id, 
-          attachments: attachments.map(a => ({ type: a.type, mime_type: a.mime_type, hasUrl: !!a.url }))
+          attachments: attachments.map(a => ({ type: a.type, mime_type: a.mime_type, hasUrl: !!a.url, url: a.url?.slice(0, 60) }))
         });
       }
       

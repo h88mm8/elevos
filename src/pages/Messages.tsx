@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import AppLayout from '@/components/layout/AppLayout';
 import { Button } from '@/components/ui/button';
@@ -9,9 +10,12 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { useToast } from '@/hooks/use-toast';
 import { useNotificationSettings } from '@/hooks/useNotificationSettings';
 import { useMediaPreCache } from '@/hooks/useMediaPreCache';
+import { useAccounts } from '@/hooks/useAccounts';
 import { supabase } from '@/integrations/supabase/client';
 import { MessageAttachments } from '@/components/messages/MessageAttachments';
 import { VoiceRecorder } from '@/components/messages/VoiceRecorder';
+import { StartConversationDialog } from '@/components/messages/StartConversationDialog';
+import { Lead, Chat, Message } from '@/types';
 import { 
   MessageSquare, 
   Send, 
@@ -28,11 +32,11 @@ import {
   Music,
   Check,
   CheckCheck,
+  Plus,
 } from 'lucide-react';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import { cn } from '@/lib/utils';
-import { Chat, Message } from '@/types';
 
 const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
 const ALLOWED_TYPES = [
@@ -85,6 +89,9 @@ export default function Messages() {
   const { currentWorkspace, session } = useAuth();
   const { toast } = useToast();
   const { soundEnabled, filterByLeads } = useNotificationSettings();
+  const { accounts } = useAccounts('whatsapp');
+  const [searchParams, setSearchParams] = useSearchParams();
+  
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const messagesTopRef = useRef<HTMLDivElement>(null);
   const scrollAreaRef = useRef<HTMLDivElement>(null);
@@ -132,6 +139,10 @@ export default function Messages() {
   const [hasNewMessages, setHasNewMessages] = useState(false);
   const [isScrolledToBottom, setIsScrolledToBottom] = useState(true);
   const audioContextRef = useRef<AudioContext | null>(null);
+  
+  // Start new conversation dialog
+  const [startConversationOpen, setStartConversationOpen] = useState(false);
+  const [startingNewConversation, setStartingNewConversation] = useState(false);
 
   // Keep refs in sync with state for realtime callbacks
   useEffect(() => { chatsRef.current = chats; }, [chats]);
@@ -408,6 +419,20 @@ export default function Messages() {
     
     fetchLeadsPhoneNumbers();
   }, [currentWorkspace, filterByLeads]);
+
+  // Handle URL params for starting conversation from lead details
+  useEffect(() => {
+    const phoneNumber = searchParams.get('startConversation');
+    const leadName = searchParams.get('leadName');
+    
+    if (phoneNumber && currentWorkspace && accounts.length > 0) {
+      // Clear params immediately
+      setSearchParams({});
+      
+      // Start conversation with this phone number
+      handleStartConversationWithPhone(phoneNumber, leadName || undefined);
+    }
+  }, [searchParams, currentWorkspace, accounts]);
 
   useEffect(() => {
     if (currentWorkspace) {
@@ -747,6 +772,89 @@ export default function Messages() {
     }
   }
 
+  // Start a new conversation with a lead (from dialog or URL param)
+  async function handleStartConversationWithPhone(phoneNumber: string, leadName?: string) {
+    if (!currentWorkspace || accounts.length === 0) {
+      toast({
+        title: 'Conta WhatsApp não conectada',
+        description: 'Conecte uma conta WhatsApp nas configurações para iniciar conversas.',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    setStartingNewConversation(true);
+    
+    try {
+      // Normalize phone number (remove non-digits, ensure has country code)
+      let normalizedPhone = phoneNumber.replace(/\D/g, '');
+      
+      // Check if there's already a chat with this phone number
+      const existingChat = chats.find(chat => {
+        const chatPhone = chat.attendee_identifier?.replace(/\D/g, '') || '';
+        return chatPhone.includes(normalizedPhone) || normalizedPhone.includes(chatPhone);
+      });
+
+      if (existingChat) {
+        // Select existing chat
+        handleSelectChat(existingChat);
+        toast({
+          title: 'Conversa existente',
+          description: `Abrindo conversa com ${existingChat.attendee_name || leadName || normalizedPhone}`,
+        });
+      } else {
+        // Create a new chat entry (it will be confirmed when first message is sent)
+        const whatsappAccount = accounts[0];
+        
+        // Create a temporary chat for the new conversation
+        const tempChat: Chat = {
+          id: `new-${normalizedPhone}`,
+          account_id: whatsappAccount.account_id,
+          attendee_identifier: normalizedPhone,
+          attendee_name: leadName || `+${normalizedPhone}`,
+          attendee_picture: null,
+          attendee_email: undefined,
+          last_message: '',
+          last_message_at: new Date().toISOString(),
+          unread_count: 0,
+        };
+        
+        // Add to chat list and select it
+        setChats(prev => [tempChat, ...prev]);
+        setSelectedChat(tempChat);
+        setMessages([]);
+        
+        toast({
+          title: 'Nova conversa',
+          description: `Iniciando conversa com ${leadName || `+${normalizedPhone}`}. Envie uma mensagem para começar.`,
+        });
+      }
+    } catch (error: any) {
+      toast({
+        title: 'Erro ao iniciar conversa',
+        description: error.message,
+        variant: 'destructive',
+      });
+    } finally {
+      setStartingNewConversation(false);
+    }
+  }
+
+  // Handle selecting a lead from the dialog
+  function handleSelectLeadForConversation(lead: Lead) {
+    const phoneNumber = lead.mobile_number || lead.phone;
+    if (!phoneNumber) {
+      toast({
+        title: 'Lead sem telefone',
+        description: 'Este lead não possui número de telefone cadastrado.',
+        variant: 'destructive',
+      });
+      return;
+    }
+    
+    handleStartConversationWithPhone(phoneNumber, lead.full_name || undefined);
+  }
+
   // Filter chats by search and optionally by leads
   const filteredChats = useMemo(() => {
     let filtered = chats.filter(chat => 
@@ -781,7 +889,23 @@ export default function Messages() {
           {/* Chat List */}
           <Card className="md:col-span-1 flex flex-col min-h-0 overflow-hidden">
             <CardHeader className="pb-3">
-              <CardTitle className="text-lg">Conversas</CardTitle>
+              <div className="flex items-center justify-between">
+                <CardTitle className="text-lg">Conversas</CardTitle>
+                <Button 
+                  size="sm" 
+                  onClick={() => setStartConversationOpen(true)}
+                  disabled={startingNewConversation || accounts.length === 0}
+                >
+                  {startingNewConversation ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <>
+                      <Plus className="h-4 w-4 mr-1" />
+                      Nova
+                    </>
+                  )}
+                </Button>
+              </div>
               <div className="relative">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                 <Input
@@ -1178,6 +1302,13 @@ export default function Messages() {
           </Card>
         </div>
       </div>
+      
+      {/* Start Conversation Dialog */}
+      <StartConversationDialog
+        open={startConversationOpen}
+        onOpenChange={setStartConversationOpen}
+        onSelectLead={handleSelectLeadForConversation}
+      />
     </AppLayout>
   );
 }

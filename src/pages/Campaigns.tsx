@@ -330,8 +330,9 @@ export default function Campaigns() {
         description += `, ${deferred} agendadas`;
       }
 
+      const finalStatus = data?.finalStatus ?? data?.status;
       toast({
-        title: data?.status === 'queued' ? 'Campanha na fila' : 'Campanha enviada',
+        title: finalStatus === 'queued' ? 'Campanha na fila' : 'Campanha enviada',
         description,
       });
 

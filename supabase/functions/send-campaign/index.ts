@@ -229,6 +229,11 @@ serve(async (req) => {
     return new Response(null, { headers: corsHeaders });
   }
 
+  // Keep these outside try/catch so we can finalize status on any failure
+  let campaignId: string | null = null;
+  let startedSending = false;
+  let serviceClient: any = null;
+
   try {
     const authHeader = req.headers.get('Authorization');
     if (!authHeader?.startsWith('Bearer ')) {
@@ -241,8 +246,8 @@ serve(async (req) => {
       { global: { headers: { Authorization: authHeader } } }
     );
 
-    // Service client for RPC calls (bypasses RLS)
-    const serviceClient = createClient(
+    // Service client for privileged ops (bypasses RLS)
+    serviceClient = createClient(
       Deno.env.get('SUPABASE_URL')!,
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
     );
@@ -253,7 +258,8 @@ serve(async (req) => {
       return new Response(JSON.stringify({ error: 'Unauthorized' }), { status: 401, headers: corsHeaders });
     }
 
-    const { campaignId } = await req.json();
+    const body = await req.json();
+    campaignId = body?.campaignId ?? null;
 
     if (!campaignId) {
       return new Response(JSON.stringify({ error: 'Campaign ID is required' }), { status: 400, headers: corsHeaders });
@@ -578,11 +584,12 @@ serve(async (req) => {
 
     console.log(`Starting campaign ${campaignId}: sending ${leadsToProcess.length} of ${totalLeads} leads today`);
 
-    // Update campaign status to 'sending'
+    // Update campaign status to 'running' (UI label: Enviando)
     await supabase
       .from('campaigns')
-      .update({ status: 'sending' })
+      .update({ status: 'running' })
       .eq('id', campaignId);
+    startedSending = true;
 
     // ============================================
     // SEND MESSAGES TO EACH LEAD
@@ -929,6 +936,7 @@ serve(async (req) => {
       success: true,
       campaignId,
       status: finalStatus,
+      finalStatus,
       sentCount: sentCount,
       failedCount: failedCount,
       deferredCount: idsToDefer.length,
@@ -944,16 +952,15 @@ serve(async (req) => {
     // Try to finalize campaign status even on error (prevent stuck 'sending')
     let finalStatus = 'queued'; // safe default
     try {
-      const { campaignId: extractedCampaignId } = await req.clone().json().catch(() => ({}));
-      if (extractedCampaignId) {
-        // Create service client for finalization (may work even if user client failed)
-        const serviceClient = createClient(
+      const idToFinalize = campaignId;
+      if (idToFinalize && (startedSending || true)) {
+        const client = serviceClient ?? createClient(
           Deno.env.get('SUPABASE_URL')!,
           Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
         );
-        console.log(`[send-campaign CATCH] Attempting to finalize campaign ${extractedCampaignId} after error`);
-        finalStatus = await finalizeCampaignStatus(serviceClient, extractedCampaignId);
-        console.log(`[send-campaign CATCH] Campaign ${extractedCampaignId} finalized to: ${finalStatus}`);
+        console.log(`[send-campaign CATCH] Attempting to finalize campaignId=${idToFinalize} after error`);
+        finalStatus = await finalizeCampaignStatus(client, idToFinalize);
+        console.log(`[send-campaign CATCH] campaignId=${idToFinalize} finalized to: ${finalStatus}`);
       }
     } catch (finalizeError) {
       console.error('[send-campaign CATCH] Failed to finalize campaign status:', finalizeError);

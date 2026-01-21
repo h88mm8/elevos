@@ -60,7 +60,7 @@ export function useWorkspaceSettings() {
         validatedSettings.daily_message_limit = Math.max(1, Math.min(500, settings.daily_message_limit));
       }
       if (settings.message_interval_seconds !== undefined) {
-        validatedSettings.message_interval_seconds = Math.max(5, Math.min(120, settings.message_interval_seconds));
+        validatedSettings.message_interval_seconds = Math.max(10, Math.min(120, settings.message_interval_seconds));
       }
       if (settings.max_retries !== undefined) {
         validatedSettings.max_retries = Math.max(0, Math.min(10, settings.max_retries));
@@ -73,6 +73,16 @@ export function useWorkspaceSettings() {
       }
       if (settings.linkedin_message_interval_seconds !== undefined) {
         validatedSettings.linkedin_message_interval_seconds = Math.max(10, Math.min(300, settings.linkedin_message_interval_seconds));
+      }
+
+      // Skip update if no changes
+      if (Object.keys(validatedSettings).length === 0) {
+        const { data: current } = await supabase
+          .from('workspace_settings')
+          .select('*')
+          .eq('workspace_id', currentWorkspace.id)
+          .maybeSingle();
+        return current;
       }
 
       // Check if settings exist

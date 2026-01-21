@@ -823,6 +823,15 @@ export default function Settings() {
                     <TableBody>
                       {accounts.map((account) => {
                         const ChannelIcon = channelIcons[account.channel] || Link2;
+                        // LinkedIn feature badge labels
+                        const linkedinFeatureLabels: Record<string, string> = {
+                          classic: 'Classic',
+                          sales_navigator: 'Sales Navigator',
+                          recruiter: 'Recruiter',
+                        };
+                        const linkedinFeature = (account as any).linkedin_feature;
+                        const featureLabel = linkedinFeature ? linkedinFeatureLabels[linkedinFeature] || linkedinFeature : null;
+                        
                         return (
                           <TableRow key={account.id}>
                             <TableCell className="font-medium">
@@ -832,6 +841,11 @@ export default function Settings() {
                               <div className="flex items-center gap-2">
                                 <ChannelIcon className="h-4 w-4" />
                                 {channelLabels[account.channel] || account.channel}
+                                {account.channel === 'linkedin' && featureLabel && (
+                                  <Badge variant="outline" className="text-xs">
+                                    {featureLabel}
+                                  </Badge>
+                                )}
                               </div>
                             </TableCell>
                             <TableCell>

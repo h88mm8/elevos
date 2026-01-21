@@ -49,7 +49,7 @@ serve(async (req) => {
     // ============================================
     // PARSE REQUEST
     // ============================================
-    const { workspaceId, channel = 'whatsapp' } = await req.json();
+    const { workspaceId, channel = 'whatsapp', accountName } = await req.json();
 
     if (!workspaceId) {
       return new Response(JSON.stringify({ error: 'workspaceId is required' }), {
@@ -58,7 +58,7 @@ serve(async (req) => {
       });
     }
 
-    console.log(`Creating connect link for workspace: ${workspaceId}, channel: ${channel}`);
+    console.log(`Creating connect link for workspace: ${workspaceId}, channel: ${channel}, accountName: ${accountName}`);
 
     // ============================================
     // VERIFY ADMIN MEMBERSHIP
@@ -121,13 +121,19 @@ serve(async (req) => {
     // ============================================
     const expiresAt = new Date(Date.now() + 10 * 60 * 1000).toISOString(); // 10 minutes
 
+    // Store both workspaceId and accountName in the name field (JSON encoded)
+    const namePayload = JSON.stringify({ 
+      workspaceId, 
+      accountName: accountName || null 
+    });
+
     const requestBody = {
       type: 'create',
       providers: [providerChannel],
       api_url: `https://${providerDsn}`,
       expiresOn: expiresAt,
       notify_url: webhookUrl,
-      name: workspaceId, // Used to correlate in webhook
+      name: namePayload, // Used to correlate in webhook
     };
 
     console.log('Provider request:', JSON.stringify(requestBody));

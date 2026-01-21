@@ -74,6 +74,25 @@ export function useAccounts(channel?: string) {
     },
   });
 
+  const updateAccountNameMutation = useMutation({
+    mutationFn: async ({ accountId, name }: { accountId: string; name: string }) => {
+      if (!currentWorkspace) throw new Error('No workspace selected');
+      
+      const { error } = await supabase
+        .from('accounts')
+        .update({ name })
+        .eq('id', accountId)
+        .eq('workspace_id', currentWorkspace.id);
+      
+      if (error) throw error;
+      
+      return { success: true };
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['accounts', currentWorkspace?.id] });
+    },
+  });
+
   return {
     accounts: accountsQuery.data ?? [],
     isLoading: accountsQuery.isLoading,
@@ -83,6 +102,8 @@ export function useAccounts(channel?: string) {
     isSyncing: syncAccountsMutation.isPending,
     deleteAccount: deleteAccountMutation.mutateAsync,
     isDeleting: deleteAccountMutation.isPending,
+    updateAccountName: updateAccountNameMutation.mutateAsync,
+    isUpdatingName: updateAccountNameMutation.isPending,
     refetchAccounts: () => queryClient.invalidateQueries({ queryKey: ['accounts', currentWorkspace?.id] }),
   };
 }

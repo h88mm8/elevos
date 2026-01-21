@@ -84,7 +84,7 @@ function highlightText(text: string, query: string): React.ReactNode {
 export default function Messages() {
   const { currentWorkspace, session } = useAuth();
   const { toast } = useToast();
-  const { soundEnabled } = useNotificationSettings();
+  const { soundEnabled, filterByLeads } = useNotificationSettings();
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const messagesTopRef = useRef<HTMLDivElement>(null);
   const scrollAreaRef = useRef<HTMLDivElement>(null);
@@ -110,6 +110,10 @@ export default function Messages() {
   const [cursor, setCursor] = useState<string | null>(null);
   const [hasMore, setHasMore] = useState(true);
   const [typingChats, setTypingChats] = useState<Record<string, boolean>>({});
+  
+  // Leads phone numbers for filtering
+  const [leadsPhoneNumbers, setLeadsPhoneNumbers] = useState<Set<string>>(new Set());
+  const [loadingLeads, setLoadingLeads] = useState(false);
   
   // Attachment state
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
@@ -365,6 +369,45 @@ export default function Messages() {
       supabase.removeChannel(channel);
     };
   }, [currentWorkspace, toast, playNotificationSound]);
+
+  // Fetch leads phone numbers when filter is enabled
+  useEffect(() => {
+    async function fetchLeadsPhoneNumbers() {
+      if (!currentWorkspace || !filterByLeads) {
+        setLeadsPhoneNumbers(new Set());
+        return;
+      }
+      
+      setLoadingLeads(true);
+      try {
+        const { data, error } = await supabase
+          .from('leads')
+          .select('phone, mobile_number')
+          .eq('workspace_id', currentWorkspace.id);
+        
+        if (error) throw error;
+        
+        const phoneSet = new Set<string>();
+        data?.forEach(lead => {
+          // Normalize phone numbers - remove non-digits
+          if (lead.phone) {
+            phoneSet.add(lead.phone.replace(/\D/g, ''));
+          }
+          if (lead.mobile_number) {
+            phoneSet.add(lead.mobile_number.replace(/\D/g, ''));
+          }
+        });
+        
+        setLeadsPhoneNumbers(phoneSet);
+      } catch (error) {
+        console.error('Error fetching leads phone numbers:', error);
+      } finally {
+        setLoadingLeads(false);
+      }
+    }
+    
+    fetchLeadsPhoneNumbers();
+  }, [currentWorkspace, filterByLeads]);
 
   useEffect(() => {
     if (currentWorkspace) {
@@ -704,10 +747,30 @@ export default function Messages() {
     }
   }
 
-  const filteredChats = chats.filter(chat => 
-    (chat.attendee_name?.toLowerCase() || '').includes(searchQuery.toLowerCase()) ||
-    (chat.attendee_email?.toLowerCase() || '').includes(searchQuery.toLowerCase())
-  );
+  // Filter chats by search and optionally by leads
+  const filteredChats = useMemo(() => {
+    let filtered = chats.filter(chat => 
+      (chat.attendee_name?.toLowerCase() || '').includes(searchQuery.toLowerCase()) ||
+      (chat.attendee_email?.toLowerCase() || '').includes(searchQuery.toLowerCase())
+    );
+    
+    // Apply leads filter if enabled
+    if (filterByLeads && leadsPhoneNumbers.size > 0) {
+      filtered = filtered.filter(chat => {
+        // Extract phone from attendee_identifier (usually the phone number)
+        const chatPhone = chat.attendee_identifier?.replace(/\D/g, '') || '';
+        // Check if any part of the phone number matches leads
+        return Array.from(leadsPhoneNumbers).some(leadPhone => 
+          chatPhone.includes(leadPhone) || leadPhone.includes(chatPhone)
+        );
+      });
+    } else if (filterByLeads && leadsPhoneNumbers.size === 0 && !loadingLeads) {
+      // If filter is on but no leads have phone numbers, show empty
+      return [];
+    }
+    
+    return filtered;
+  }, [chats, searchQuery, filterByLeads, leadsPhoneNumbers, loadingLeads]);
 
   const FileIcon = selectedFile ? getFileIcon(selectedFile.type) : FileText;
 

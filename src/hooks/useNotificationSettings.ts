@@ -4,10 +4,12 @@ const STORAGE_KEY = 'notification_settings';
 
 interface NotificationSettings {
   soundEnabled: boolean;
+  filterByLeads: boolean;
 }
 
 const defaultSettings: NotificationSettings = {
   soundEnabled: true,
+  filterByLeads: false,
 };
 
 export function useNotificationSettings() {
@@ -32,8 +34,14 @@ export function useNotificationSettings() {
     setSettings(prev => ({ ...prev, soundEnabled: enabled }));
   }, []);
 
+  const setFilterByLeads = useCallback((enabled: boolean) => {
+    setSettings(prev => ({ ...prev, filterByLeads: enabled }));
+  }, []);
+
   return {
     soundEnabled: settings.soundEnabled,
     setSoundEnabled,
+    filterByLeads: settings.filterByLeads,
+    setFilterByLeads,
   };
 }

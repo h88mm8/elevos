@@ -190,6 +190,7 @@ export interface CreateCampaignRequest {
 export interface Chat {
   id: string;
   account_id: string;
+  attendee_identifier?: string;
   attendee_name: string;
   attendee_email?: string;
   attendee_picture?: string | null;

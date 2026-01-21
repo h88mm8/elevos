@@ -1,10 +1,8 @@
 import { MessageAttachment } from '@/types';
 import { AudioPlayer } from './AudioPlayer';
-import { FileText, ExternalLink, RefreshCw } from 'lucide-react';
+import { FileText, ExternalLink } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useState, useCallback } from 'react';
-import { supabase } from '@/integrations/supabase/client';
-import { Button } from '@/components/ui/button';
 
 interface MessageAttachmentsProps {
   attachments: MessageAttachment[];
@@ -16,41 +14,12 @@ interface MessageAttachmentsProps {
 export function MessageAttachments({ attachments, messageId, workspaceId, variant = 'received' }: MessageAttachmentsProps) {
   const isSent = variant === 'sent';
   const [imageErrors, setImageErrors] = useState<Record<number, boolean>>({});
-  const [cachingIndex, setCachingIndex] = useState<number | null>(null);
   // Local state to store cached URLs without reloading the page
   const [cachedUrls, setCachedUrls] = useState<Record<number, string>>({});
 
   const handleImageError = useCallback((index: number) => {
     setImageErrors(prev => ({ ...prev, [index]: true }));
   }, []);
-
-  const handleCacheImage = useCallback(async (index: number, attachment: MessageAttachment) => {
-    setCachingIndex(index);
-    try {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!session) return;
-
-      const response = await supabase.functions.invoke('cache-media', {
-        body: {
-          workspaceId,
-          mediaUrl: attachment.url,
-          messageId: `${messageId}-${index}`,
-          mediaType: attachment.type,
-          mimeType: attachment.mime_type || 'image/jpeg',
-        },
-      });
-
-      if (response.data?.success && response.data?.url) {
-        // Update local state with cached URL - no reload needed
-        setCachedUrls(prev => ({ ...prev, [index]: response.data.url }));
-        setImageErrors(prev => ({ ...prev, [index]: false }));
-      }
-    } catch (err) {
-      console.error('Failed to cache image:', err);
-    } finally {
-      setCachingIndex(null);
-    }
-  }, [workspaceId, messageId]);
 
   return (
     <div className="space-y-2">
@@ -83,15 +52,7 @@ export function MessageAttachments({ attachments, messageId, workspaceId, varian
                     isSent ? 'bg-primary-foreground/10' : 'bg-muted'
                   )}
                 >
-                  <span className="text-sm">🖼️ Imagem expirada</span>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => handleCacheImage(index, attachment)}
-                    disabled={cachingIndex === index}
-                  >
-                    <RefreshCw className={cn('h-4 w-4', cachingIndex === index && 'animate-spin')} />
-                  </Button>
+                  <span className="text-sm text-muted-foreground">🖼️ Mídia não disponível</span>
                 </div>
               );
             }

@@ -147,6 +147,20 @@ serve(async (req) => {
       // Create new chat and send message
       url = `https://${PROVIDER_DSN}/api/v1/chats`;
       
+      // Format phone numbers for WhatsApp (requires phone@s.whatsapp.net format)
+      const formattedAttendeesIds = attendeesIds.map((id: string) => {
+        // Remove any non-digit characters first
+        const digitsOnly = id.replace(/\D/g, '');
+        // If it already has the @s.whatsapp.net suffix, return as-is
+        if (id.includes('@s.whatsapp.net')) {
+          return id;
+        }
+        // Add the WhatsApp suffix
+        return `${digitsOnly}@s.whatsapp.net`;
+      });
+      
+      console.log('Creating new chat with attendees:', { original: attendeesIds, formatted: formattedAttendeesIds });
+      
       if (attachmentUrl) {
         // New chat with attachment
         console.log('Creating new chat with attachment:', { attachmentUrl, attachmentType, attachmentName });
@@ -163,8 +177,8 @@ serve(async (req) => {
         const formData = new FormData();
         formData.append('account_id', accountId);
         
-        // Add each attendee ID
-        for (const attendeeId of attendeesIds) {
+        // Add each attendee ID with proper format
+        for (const attendeeId of formattedAttendeesIds) {
           formData.append('attendees_ids', attendeeId);
         }
         
@@ -193,7 +207,7 @@ serve(async (req) => {
           },
           body: JSON.stringify({
             account_id: accountId,
-            attendees_ids: attendeesIds,
+            attendees_ids: formattedAttendeesIds,
             text: text || '',
           }),
         });

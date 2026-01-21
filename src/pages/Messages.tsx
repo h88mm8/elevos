@@ -1481,6 +1481,7 @@ export default function Messages() {
                                     messageId={msg.id}
                                     workspaceId={currentWorkspace.id}
                                     variant={msg.sender === 'me' ? 'sent' : 'received'}
+                                    externalMessageId={msg.id}
                                   />
                                 )}
                                 

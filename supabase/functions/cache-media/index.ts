@@ -6,8 +6,54 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
+// Fetch attachment from Unipile API using attachment_id (fallback when URL expires)
+async function fetchAttachmentFromUnipile(
+  messageId: string,
+  attachmentId: string
+): Promise<{ arrayBuffer: ArrayBuffer; contentType: string } | null> {
+  try {
+    let UNIPILE_DSN = Deno.env.get('UNIPILE_DSN');
+    const UNIPILE_API_KEY = Deno.env.get('UNIPILE_API_KEY');
+    
+    if (!UNIPILE_DSN || !UNIPILE_API_KEY) {
+      console.warn('Unipile credentials not configured for attachment fetch');
+      return null;
+    }
+    
+    // Ensure DSN has protocol
+    if (!UNIPILE_DSN.startsWith('http://') && !UNIPILE_DSN.startsWith('https://')) {
+      UNIPILE_DSN = `https://${UNIPILE_DSN}`;
+    }
+    
+    const url = `${UNIPILE_DSN}/api/v1/messages/${messageId}/attachments/${attachmentId}`;
+    console.log(`Fetching attachment from Unipile API: ${url}`);
+    
+    const response = await fetch(url, {
+      headers: {
+        'X-API-KEY': UNIPILE_API_KEY,
+        'Accept': '*/*',
+      },
+    });
+    
+    if (!response.ok) {
+      console.error(`Unipile attachment fetch failed: ${response.status} ${response.statusText}`);
+      return null;
+    }
+    
+    const arrayBuffer = await response.arrayBuffer();
+    const contentType = response.headers.get('content-type') || 'application/octet-stream';
+    
+    console.log(`Fetched attachment from Unipile: ${arrayBuffer.byteLength} bytes, type: ${contentType}`);
+    return { arrayBuffer, contentType };
+  } catch (error) {
+    console.error('Error fetching attachment from Unipile:', error);
+    return null;
+  }
+}
+
 /**
  * Downloads media from external URL and caches it in Supabase Storage.
+ * Falls back to Unipile API if direct URL is expired (403/404).
  * Returns the public URL of the cached file.
  */
 serve(async (req) => {
@@ -33,10 +79,10 @@ serve(async (req) => {
       return new Response(JSON.stringify({ error: 'Unauthorized' }), { status: 401, headers: corsHeaders });
     }
 
-    const { workspaceId, mediaUrl, messageId, mediaType, mimeType } = await req.json();
+    const { workspaceId, mediaUrl, messageId, mediaType, mimeType, attachmentId, externalMessageId } = await req.json();
 
-    if (!workspaceId || !mediaUrl || !messageId) {
-      return new Response(JSON.stringify({ error: 'workspaceId, mediaUrl, and messageId are required' }), { 
+    if (!workspaceId || !messageId) {
+      return new Response(JSON.stringify({ error: 'workspaceId and messageId are required' }), { 
         status: 400, 
         headers: corsHeaders 
       });
@@ -61,7 +107,6 @@ serve(async (req) => {
     );
 
     // Check if already cached
-    
     const { data: existingFile } = await supabaseAdmin.storage
       .from('message-attachments')
       .list(`${workspaceId}/media`, {
@@ -82,26 +127,48 @@ serve(async (req) => {
       }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
     }
 
-    // Download media from original URL
-    console.log(`Downloading media from: ${mediaUrl.slice(0, 80)}...`);
-    const mediaResponse = await fetch(mediaUrl);
-    
-    if (!mediaResponse.ok) {
-      console.error(`Failed to download media: ${mediaResponse.status}`);
+    let mediaBytes: Uint8Array | null = null;
+    let responseContentType: string | null = null;
+
+    // Try to download from direct URL first
+    if (mediaUrl) {
+      console.log(`Downloading media from: ${mediaUrl.slice(0, 80)}...`);
+      const mediaResponse = await fetch(mediaUrl);
+      
+      if (mediaResponse.ok) {
+        const mediaArrayBuffer = await mediaResponse.arrayBuffer();
+        mediaBytes = new Uint8Array(mediaArrayBuffer);
+        responseContentType = mediaResponse.headers.get('content-type');
+        console.log(`Downloaded ${mediaBytes.byteLength} bytes, response type: ${responseContentType}`);
+      } else {
+        console.warn(`Direct URL failed with status ${mediaResponse.status}, will try Unipile API fallback`);
+      }
+    }
+
+    // Fallback: try Unipile API if direct URL failed or wasn't provided
+    if (!mediaBytes && attachmentId && externalMessageId) {
+      console.log(`Trying Unipile API fallback for attachment ${attachmentId}...`);
+      const unipileResult = await fetchAttachmentFromUnipile(externalMessageId, attachmentId);
+      
+      if (unipileResult) {
+        mediaBytes = new Uint8Array(unipileResult.arrayBuffer);
+        responseContentType = unipileResult.contentType;
+        console.log(`Unipile fallback successful: ${mediaBytes.byteLength} bytes`);
+      }
+    }
+
+    // If we still don't have media bytes, return error
+    if (!mediaBytes) {
+      console.error('Failed to download media from both direct URL and Unipile API');
       return new Response(JSON.stringify({
         success: false,
         error: 'Media URL expired or unavailable',
-        status: mediaResponse.status,
+        status: 403,
       }), { status: 404, headers: corsHeaders });
     }
 
-    const responseContentType = mediaResponse.headers.get('content-type');
-    const mediaArrayBuffer = await mediaResponse.arrayBuffer();
-    const mediaBytes = new Uint8Array(mediaArrayBuffer);
-    console.log(`Downloaded ${mediaBytes.byteLength} bytes, response type: ${responseContentType}`);
-
     // Determine the best content type to use
-    // Priority: provided mimeType > response content-type > blob type > infer from mediaType
+    // Priority: provided mimeType > response content-type > infer from mediaType
     let finalMimeType = mimeType;
     
     if (!finalMimeType || finalMimeType === 'application/octet-stream') {

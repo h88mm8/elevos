@@ -145,9 +145,27 @@ serve(async (req) => {
       // Provider stores media info in original.message.{audioMessage, imageMessage, videoMessage, documentMessage}
       let attachments: any[] = [];
       
-      // First check the original.message object for WhatsApp-style attachments
+      // The message ID from provider (used for attachment API fallback)
+      const providerMessageId = msg.id || msg.message_id;
+      
+      // First check if msg has top-level attachments array from Unipile (preferred - has attachment_id)
+      if (msg.attachments && Array.isArray(msg.attachments) && msg.attachments.length > 0) {
+        attachments = msg.attachments.map((att: any) => ({
+          type: att.attachment_type || att.type || getAttachmentType(att.attachment_mime_type || att.mime_type),
+          url: att.attachment_url || att.url || att.link || att.media_url,
+          mime_type: att.attachment_mime_type || att.mime_type || att.mimetype,
+          filename: att.attachment_name || att.filename || att.name,
+          size: att.attachment_size || att.size,
+          duration: att.attachment_duration || att.duration || att.seconds,
+          attachment_id: att.attachment_id, // Preserve for API fallback
+          external_message_id: providerMessageId, // Preserve message ID for API fallback
+          voice_note: att.voice_note,
+        }));
+      }
+      
+      // If no attachments from top-level, check the original.message object for WhatsApp-style attachments
       const originalMessage = originalData?.message;
-      if (originalMessage) {
+      if (attachments.length === 0 && originalMessage) {
         // Audio message
         if (originalMessage.audioMessage) {
           const audio = originalMessage.audioMessage;
@@ -158,6 +176,7 @@ serve(async (req) => {
             filename: audio.fileName,
             duration: audio.seconds,
             size: audio.fileLength,
+            external_message_id: providerMessageId,
           });
         }
         
@@ -169,6 +188,7 @@ serve(async (req) => {
             url: image.url,
             mime_type: image.mimetype || 'image/jpeg',
             filename: image.fileName,
+            external_message_id: providerMessageId,
           });
         }
         
@@ -181,6 +201,7 @@ serve(async (req) => {
             mime_type: video.mimetype || 'video/mp4',
             filename: video.fileName,
             duration: video.seconds,
+            external_message_id: providerMessageId,
           });
         }
         
@@ -194,6 +215,7 @@ serve(async (req) => {
               mime_type: doc.mimetype,
               filename: doc.fileName || doc.title,
               size: doc.fileLength,
+              external_message_id: providerMessageId,
             });
           }
         }
@@ -206,20 +228,9 @@ serve(async (req) => {
             url: sticker.url,
             mime_type: sticker.mimetype || 'image/webp',
             filename: 'sticker.webp',
+            external_message_id: providerMessageId,
           });
         }
-      }
-      
-      // Also check top-level msg.attachments array (some providers use this)
-      if (msg.attachments && Array.isArray(msg.attachments) && attachments.length === 0) {
-        attachments = msg.attachments.map((att: any) => ({
-          type: att.type || getAttachmentType(att.mime_type),
-          url: att.url || att.link || att.media_url,
-          mime_type: att.mime_type || att.mimetype,
-          filename: att.filename || att.name,
-          size: att.size,
-          duration: att.duration,
-        }));
       }
       
       // Check individual media fields at top level
@@ -232,6 +243,7 @@ serve(async (req) => {
             mime_type: audio.mime_type || audio.mimetype || 'audio/ogg',
             filename: audio.filename,
             duration: audio.duration || audio.seconds,
+            external_message_id: providerMessageId,
           });
         }
         
@@ -241,6 +253,7 @@ serve(async (req) => {
             url: msg.image.url || msg.image.link,
             mime_type: msg.image.mime_type || 'image/jpeg',
             filename: msg.image.filename,
+            external_message_id: providerMessageId,
           });
         }
         
@@ -251,6 +264,7 @@ serve(async (req) => {
             mime_type: msg.video.mime_type || 'video/mp4',
             filename: msg.video.filename,
             duration: msg.video.duration,
+            external_message_id: providerMessageId,
           });
         }
         
@@ -261,6 +275,7 @@ serve(async (req) => {
             mime_type: msg.document.mime_type,
             filename: msg.document.filename || msg.document.name,
             size: msg.document.size,
+            external_message_id: providerMessageId,
           });
         }
       }

@@ -9,9 +9,10 @@ interface MessageAttachmentsProps {
   messageId: string;
   workspaceId: string;
   variant?: 'sent' | 'received';
+  externalMessageId?: string; // Provider message ID for API fallback
 }
 
-export function MessageAttachments({ attachments, messageId, workspaceId, variant = 'received' }: MessageAttachmentsProps) {
+export function MessageAttachments({ attachments, messageId, workspaceId, variant = 'received', externalMessageId }: MessageAttachmentsProps) {
   const isSent = variant === 'sent';
   const [imageErrors, setImageErrors] = useState<Record<number, boolean>>({});
   // Local state to store cached URLs without reloading the page
@@ -39,6 +40,8 @@ export function MessageAttachments({ attachments, messageId, workspaceId, varian
                 filename={attachment.filename}
                 mimeType={attachment.mime_type}
                 variant={variant}
+                attachmentId={attachment.attachment_id}
+                externalMessageId={externalMessageId || attachment.external_message_id}
               />
             );
 

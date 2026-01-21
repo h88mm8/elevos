@@ -156,32 +156,49 @@ async function resolveLinkedInProviderId(
   publicIdentifier: string
 ): Promise<string | null> {
   try {
-    const response = await fetch(
-      `https://${unipileDsn}/api/v1/users/${encodeURIComponent(publicIdentifier)}?account_id=${accountId}`,
-      {
-        method: 'GET',
-        headers: {
-          'X-API-KEY': unipileApiKey,
-          'Accept': 'application/json',
-        },
-      }
-    );
+    const lookupUrl = `https://${unipileDsn}/api/v1/users/${encodeURIComponent(publicIdentifier)}?account_id=${accountId}`;
+    console.log(`[LinkedIn Lookup] URL: ${lookupUrl}`);
+    
+    const response = await fetch(lookupUrl, {
+      method: 'GET',
+      headers: {
+        'X-API-KEY': unipileApiKey,
+        'Accept': 'application/json',
+      },
+    });
 
     if (!response.ok) {
       const errorText = await response.text().catch(() => '');
-      console.error(`LinkedIn lookup failed for ${publicIdentifier}: HTTP ${response.status} - ${errorText}`);
+      console.error(`[LinkedIn Lookup] Failed for ${publicIdentifier}: HTTP ${response.status} - ${errorText}`);
       return null;
     }
 
     const data = await response.json();
+    console.log(`[LinkedIn Lookup] Response for ${publicIdentifier}:`, JSON.stringify({
+      id: data.id,
+      provider_id: data.provider_id,
+      provider_messaging_id: data.provider_messaging_id,
+    }));
+    
+    // IMPORTANT: Use provider_id or id for invite endpoint
+    // DO NOT use provider_messaging_id - it doesn't work for /users/invite
     const providerId = data.provider_id || data.id;
-    if (providerId) {
-      console.log(`Resolved LinkedIn ${publicIdentifier} -> ${providerId}`);
-      return providerId;
+    
+    if (!providerId) {
+      console.error(`[LinkedIn Lookup] No valid provider_id found for ${publicIdentifier}. Available fields: ${Object.keys(data).join(', ')}`);
+      return null;
     }
-    return null;
+    
+    // Validate that we're not returning provider_messaging_id by mistake
+    if (providerId === data.provider_messaging_id && !data.provider_id && !data.id) {
+      console.error(`[LinkedIn Lookup] Only provider_messaging_id available for ${publicIdentifier}, which doesn't work for invites`);
+      return null;
+    }
+    
+    console.log(`[LinkedIn Lookup] Resolved ${publicIdentifier} -> provider_id: ${providerId}`);
+    return providerId;
   } catch (error) {
-    console.error(`Error resolving LinkedIn ${publicIdentifier}:`, error);
+    console.error(`[LinkedIn Lookup] Error for ${publicIdentifier}:`, error);
     return null;
   }
 }
@@ -525,29 +542,50 @@ serve(async (req) => {
             const apiValue = linkedinFeature.toLowerCase().replace(/\s+/g, '_');
 
             if (linkedinAction === 'invite') {
-              // LINKEDIN INVITE
-              const formData = new FormData();
-              formData.append('provider_id', providerId);
-              formData.append('account_id', unipileAccountId!);
-              if (personalizedMessage && personalizedMessage.trim().length > 0) {
-                formData.append('message', personalizedMessage.slice(0, 300));
+              // LINKEDIN INVITE - Uses JSON body, NOT FormData
+              
+              // Validate providerId before sending
+              if (!providerId) {
+                throw new Error('Could not resolve provider_id for LinkedIn invite');
               }
 
-              const response = await fetch(`https://${unipileDsn}/api/v1/users/invite`, {
+              // Build JSON body
+              const inviteBody: Record<string, string> = {
+                account_id: unipileAccountId!,
+                provider_id: providerId,
+              };
+              
+              if (personalizedMessage && personalizedMessage.trim().length > 0) {
+                inviteBody.message = personalizedMessage.slice(0, 300);
+              }
+
+              const inviteUrl = `https://${unipileDsn}/api/v1/users/invite`;
+              console.log(`[INVITE] account_id=${unipileAccountId}, provider_id=${providerId}, publicIdentifier=${publicIdentifier}`);
+              console.log(`[INVITE] Endpoint: ${inviteUrl}, Body: ${JSON.stringify(inviteBody)}`);
+
+              const response = await fetch(inviteUrl, {
                 method: 'POST',
-                headers: { 'X-API-KEY': unipileApiKey, 'Accept': 'application/json' },
-                body: formData,
+                headers: {
+                  'X-API-KEY': unipileApiKey,
+                  'Accept': 'application/json',
+                  'Content-Type': 'application/json',
+                },
+                body: JSON.stringify(inviteBody),
               });
 
               const responseText = await response.text().catch(() => '');
+              console.log(`[INVITE] Response: HTTP ${response.status} - ${responseText}`);
+              
               if (response.ok) {
                 sendSuccess = true;
                 try {
                   const responseData = JSON.parse(responseText);
                   providerMessageId = responseData.invitation_id || responseData.id || null;
                 } catch { /* ignore */ }
+                console.log(`[INVITE] Success: ${publicIdentifier}, invitationId: ${providerMessageId || 'unknown'}`);
               } else {
-                sendError = `HTTP ${response.status}: ${responseText}`;
+                sendError = `LinkedIn invite failed (HTTP ${response.status}): ${responseText}`;
+                console.error(`[INVITE] Failed: ${publicIdentifier} - ${sendError}`);
               }
             } else if (linkedinAction === 'inmail') {
               // LINKEDIN INMAIL

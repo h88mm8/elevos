@@ -216,6 +216,8 @@ export interface MessageAttachment {
   filename?: string;
   size?: number;
   duration?: number; // For audio/video in seconds
+  attachment_id?: string; // Provider attachment ID for API fallback
+  external_message_id?: string; // Provider message ID for API fallback
 }
 
 export interface Message {

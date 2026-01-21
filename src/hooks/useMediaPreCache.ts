@@ -47,6 +47,8 @@ export function useMediaPreCache({ workspaceId, messages, enabled = true }: PreC
           messageId: cacheKey,
           mediaType: attachment.type,
           mimeType: attachment.mime_type || getMimeType(attachment),
+          attachmentId: attachment.attachment_id,
+          externalMessageId: attachment.external_message_id,
         },
       });
 

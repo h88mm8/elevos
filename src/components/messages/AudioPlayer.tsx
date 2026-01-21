@@ -14,6 +14,8 @@ interface AudioPlayerProps {
   filename?: string;
   mimeType?: string;
   variant?: 'sent' | 'received';
+  attachmentId?: string; // Provider attachment ID for fallback
+  externalMessageId?: string; // Provider message ID for fallback
 }
 
 export function AudioPlayer({ 
@@ -23,7 +25,9 @@ export function AudioPlayer({
   duration, 
   filename, 
   mimeType,
-  variant = 'received' 
+  variant = 'received',
+  attachmentId,
+  externalMessageId
 }: AudioPlayerProps) {
   const audioRef = useRef<HTMLAudioElement>(null);
   const [audioUrl, setAudioUrl] = useState(url);
@@ -73,6 +77,8 @@ export function AudioPlayer({
           messageId,
           mediaType: 'audio',
           mimeType: mimeType || 'audio/ogg',
+          attachmentId,
+          externalMessageId,
         },
       });
 

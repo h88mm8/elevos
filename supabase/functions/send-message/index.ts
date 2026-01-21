@@ -144,21 +144,60 @@ serve(async (req) => {
         });
       }
     } else {
-      // Create new chat and send message (text only for new chats)
+      // Create new chat and send message
       url = `https://${PROVIDER_DSN}/api/v1/chats`;
-      providerResponse = await fetch(url, {
-        method: 'POST',
-        headers: {
-          'X-API-KEY': PROVIDER_API_KEY,
-          'accept': 'application/json',
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          account_id: accountId,
-          attendees_ids: attendeesIds,
-          text: text || '',
-        }),
-      });
+      
+      if (attachmentUrl) {
+        // New chat with attachment
+        console.log('Creating new chat with attachment:', { attachmentUrl, attachmentType, attachmentName });
+        
+        // Fetch the file from the signed URL
+        const fileResponse = await fetch(attachmentUrl);
+        if (!fileResponse.ok) {
+          throw new Error('Failed to fetch attachment file');
+        }
+        
+        const fileBlob = await fileResponse.blob();
+        
+        // Create FormData for multipart upload
+        const formData = new FormData();
+        formData.append('account_id', accountId);
+        
+        // Add each attendee ID
+        for (const attendeeId of attendeesIds) {
+          formData.append('attendees_ids', attendeeId);
+        }
+        
+        formData.append('attachments', fileBlob, attachmentName || 'attachment');
+        
+        if (text) {
+          formData.append('text', text);
+        }
+        
+        providerResponse = await fetch(url, {
+          method: 'POST',
+          headers: {
+            'X-API-KEY': PROVIDER_API_KEY,
+            'accept': 'application/json',
+          },
+          body: formData,
+        });
+      } else {
+        // New chat with text only
+        providerResponse = await fetch(url, {
+          method: 'POST',
+          headers: {
+            'X-API-KEY': PROVIDER_API_KEY,
+            'accept': 'application/json',
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            account_id: accountId,
+            attendees_ids: attendeesIds,
+            text: text || '',
+          }),
+        });
+      }
     }
 
     if (!providerResponse.ok) {

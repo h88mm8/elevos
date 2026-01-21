@@ -1011,8 +1011,8 @@ export default function Settings() {
                 </div>
               </CardHeader>
               <CardContent className="space-y-6">
-                <div className="grid gap-6 md:grid-cols-2">
-                  <div className="space-y-3">
+                <div className="grid gap-6 md:grid-cols-3">
+                  <div className="space-y-2">
                     <Label htmlFor="dailyLimit">Limite diário de mensagens</Label>
                     <div className="flex items-center gap-2">
                       <Input
@@ -1026,16 +1026,12 @@ export default function Settings() {
                       />
                       <span className="text-sm text-muted-foreground">mensagens/dia</span>
                     </div>
-                    <Alert variant="default" className="border-yellow-500/50 bg-yellow-500/10">
-                      <AlertTriangle className="h-4 w-4 text-yellow-600" />
-                      <AlertTitle className="text-yellow-700 text-sm">Contas novas</AlertTitle>
-                      <AlertDescription className="text-yellow-600 text-xs">
-                        Contas novas do WhatsApp podem ser bloqueadas após 2-3 novos chats. Aumente gradualmente o limite para "aquecer" a conta durante dias com poucos chats ativos.
-                      </AlertDescription>
-                    </Alert>
+                    <p className="text-xs text-muted-foreground">
+                      Campanhas maiores serão divididas em múltiplos dias.
+                    </p>
                   </div>
 
-                  <div className="space-y-3">
+                  <div className="space-y-2">
                     <Label htmlFor="intervalSeconds">Intervalo entre mensagens</Label>
                     <div className="flex items-center gap-2">
                       <Input
@@ -1049,16 +1045,12 @@ export default function Settings() {
                       />
                       <span className="text-sm text-muted-foreground">segundos</span>
                     </div>
-                    <Alert variant="default" className="border-yellow-500/50 bg-yellow-500/10">
-                      <AlertTriangle className="h-4 w-4 text-yellow-600" />
-                      <AlertTitle className="text-yellow-700 text-sm">Comportamento humano</AlertTitle>
-                      <AlertDescription className="text-yellow-600 text-xs">
-                        Evite intervalos menores que 10-20 segundos para imitar comportamento humano e se alinhar com padrões naturais de conversação.
-                      </AlertDescription>
-                    </Alert>
+                    <p className="text-xs text-muted-foreground">
+                      Mínimo recomendado: 10-20s para simular comportamento humano.
+                    </p>
                   </div>
 
-                  <div className="space-y-3">
+                  <div className="space-y-2">
                     <Label htmlFor="maxRetries">Tentativas de reenvio</Label>
                     <div className="flex items-center gap-2">
                       <Input
@@ -1072,20 +1064,10 @@ export default function Settings() {
                       />
                       <span className="text-sm text-muted-foreground">tentativas</span>
                     </div>
-                    <Alert variant="default" className="border-blue-500/50 bg-blue-500/10">
-                      <RefreshCw className="h-4 w-4 text-blue-600" />
-                      <AlertTitle className="text-blue-700 text-sm">Retry automático</AlertTitle>
-                      <AlertDescription className="text-blue-600 text-xs">
-                        Mensagens que falharem serão reenviadas automaticamente nas próximas execuções até atingir o limite de tentativas.
-                      </AlertDescription>
-                    </Alert>
+                    <p className="text-xs text-muted-foreground">
+                      Mensagens falhas serão reenviadas automaticamente.
+                    </p>
                   </div>
-                </div>
-
-                <div className="text-sm text-muted-foreground bg-muted/50 p-3 rounded-lg">
-                  <p>
-                    Se uma campanha tiver mais leads que o limite diário, ela será enviada em múltiplos dias automaticamente. Mensagens falhas serão retentadas até {maxRetries} vezes.
-                  </p>
                 </div>
               </CardContent>
             </Card>
@@ -1101,30 +1083,30 @@ export default function Settings() {
                   Siga estas recomendações para evitar suspensão da conta
                 </CardDescription>
               </CardHeader>
-              <CardContent className="space-y-3">
-                <Alert variant="default" className="border-blue-500/50 bg-blue-500/10">
-                  <MessageCircle className="h-4 w-4 text-blue-600" />
-                  <AlertTitle className="text-blue-700 text-sm">Contas com histórico</AlertTitle>
-                  <AlertDescription className="text-blue-600 text-xs">
-                    Use contas WhatsApp com atividade histórica de usuários reais. Evite usar contas novas exclusivamente para automação.
-                  </AlertDescription>
-                </Alert>
-
-                <Alert variant="default" className="border-green-500/50 bg-green-500/10">
-                  <CheckCircle2 className="h-4 w-4 text-green-600" />
-                  <AlertTitle className="text-green-700 text-sm">Engaje os usuários</AlertTitle>
-                  <AlertDescription className="text-green-600 text-xs">
-                    Projete mensagens para iniciar interação e incentivar respostas. A primeira mensagem deve solicitar uma resposta para manter conversas ativas.
-                  </AlertDescription>
-                </Alert>
-
-                <Alert variant="default" className="border-red-500/50 bg-red-500/10">
-                  <XCircle className="h-4 w-4 text-red-600" />
-                  <AlertTitle className="text-red-700 text-sm">Evite spam</AlertTitle>
-                  <AlertDescription className="text-red-600 text-xs">
-                    Se iniciar muitos chats sem receber respostas ou houver sinais de spam/bloqueio, sua conta pode ser restringida temporariamente pelo WhatsApp.
-                  </AlertDescription>
-                </Alert>
+              <CardContent>
+                <ul className="space-y-3 text-sm">
+                  <li className="flex items-start gap-3">
+                    <MessageCircle className="h-4 w-4 mt-0.5 text-muted-foreground shrink-0" />
+                    <div>
+                      <span className="font-medium">Use contas com histórico</span>
+                      <p className="text-muted-foreground">Evite contas novas exclusivamente para automação. Prefira contas com atividade real de usuários.</p>
+                    </div>
+                  </li>
+                  <li className="flex items-start gap-3">
+                    <CheckCircle2 className="h-4 w-4 mt-0.5 text-muted-foreground shrink-0" />
+                    <div>
+                      <span className="font-medium">Engaje os usuários</span>
+                      <p className="text-muted-foreground">A primeira mensagem deve solicitar uma resposta para manter conversas ativas.</p>
+                    </div>
+                  </li>
+                  <li className="flex items-start gap-3">
+                    <XCircle className="h-4 w-4 mt-0.5 text-muted-foreground shrink-0" />
+                    <div>
+                      <span className="font-medium">Evite spam</span>
+                      <p className="text-muted-foreground">Muitos chats sem resposta podem restringir sua conta temporariamente.</p>
+                    </div>
+                  </li>
+                </ul>
               </CardContent>
             </Card>
 

@@ -128,7 +128,9 @@ export default function Settings() {
   const [creating, setCreating] = useState(false);
   const [inviting, setInviting] = useState(false);
   const [connectingWhatsApp, setConnectingWhatsApp] = useState(false);
+  const [connectingLinkedIn, setConnectingLinkedIn] = useState(false);
   const [waitingForConnection, setWaitingForConnection] = useState(false);
+  const [connectingChannel, setConnectingChannel] = useState<'whatsapp' | 'linkedin' | null>(null);
   const [deleteAccountOpen, setDeleteAccountOpen] = useState(false);
   const [accountToDelete, setAccountToDelete] = useState<{ id: string; name: string } | null>(null);
   const [connectAccountOpen, setConnectAccountOpen] = useState(false);
@@ -136,6 +138,7 @@ export default function Settings() {
   const [editAccountOpen, setEditAccountOpen] = useState(false);
   const [accountToEdit, setAccountToEdit] = useState<{ id: string; name: string } | null>(null);
   const [editAccountName, setEditAccountName] = useState('');
+  const [selectedChannel, setSelectedChannel] = useState<'whatsapp' | 'linkedin'>('whatsapp');
 
   const currentMember = members.find(m => m.user_id === user?.id);
   const isAdmin = currentMember?.role === 'admin';
@@ -169,18 +172,26 @@ export default function Settings() {
   }
 
   // ============================================
-  // CONNECT WHATSAPP VIA HOSTED AUTH LINK
+  // CONNECT ACCOUNT VIA HOSTED AUTH LINK
   // ============================================
-  function openConnectModal() {
+  function openConnectModal(channel: 'whatsapp' | 'linkedin') {
+    setSelectedChannel(channel);
     setNewAccountName('');
     setConnectAccountOpen(true);
   }
 
-  async function handleConnectWhatsApp() {
+  async function handleConnectAccount() {
     if (!currentWorkspace || !newAccountName.trim()) return;
 
     setConnectAccountOpen(false);
-    setConnectingWhatsApp(true);
+    
+    if (selectedChannel === 'whatsapp') {
+      setConnectingWhatsApp(true);
+    } else {
+      setConnectingLinkedIn(true);
+    }
+    setConnectingChannel(selectedChannel);
+    
     try {
       const { data: { session } } = await supabase.auth.getSession();
       if (!session) {
@@ -195,7 +206,7 @@ export default function Settings() {
       const response = await supabase.functions.invoke('create-connect-link', {
         body: { 
           workspaceId: currentWorkspace.id, 
-          channel: 'whatsapp',
+          channel: selectedChannel,
           accountName: newAccountName.trim(),
         },
       });
@@ -216,7 +227,7 @@ export default function Settings() {
       setWaitingForConnection(true);
       toast({
         title: 'Link aberto',
-        description: 'Complete a conexão na nova aba. A conta aparecerá automaticamente.',
+        description: `Complete a conexão do ${selectedChannel === 'whatsapp' ? 'WhatsApp' : 'LinkedIn'} na nova aba. A conta aparecerá automaticamente.`,
       });
 
       // Poll for new accounts for 2 minutes
@@ -227,10 +238,11 @@ export default function Settings() {
       setTimeout(() => {
         clearInterval(pollInterval);
         setWaitingForConnection(false);
+        setConnectingChannel(null);
       }, 120000); // Stop polling after 2 minutes
 
     } catch (error: any) {
-      console.error('Error connecting WhatsApp:', error);
+      console.error(`Error connecting ${selectedChannel}:`, error);
       toast({
         title: 'Erro ao conectar',
         description: error.message,
@@ -238,6 +250,7 @@ export default function Settings() {
       });
     } finally {
       setConnectingWhatsApp(false);
+      setConnectingLinkedIn(false);
     }
   }
 
@@ -704,23 +717,46 @@ export default function Settings() {
                     <div className="flex items-center gap-2">
                       <Button 
                         size="sm" 
-                        onClick={openConnectModal}
-                        disabled={connectingWhatsApp || waitingForConnection}
+                        onClick={() => openConnectModal('whatsapp')}
+                        disabled={connectingWhatsApp || (waitingForConnection && connectingChannel === 'whatsapp')}
                       >
                         {connectingWhatsApp ? (
                           <>
                             <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                             Gerando link...
                           </>
-                        ) : waitingForConnection ? (
+                        ) : (waitingForConnection && connectingChannel === 'whatsapp') ? (
                           <>
                             <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                            Aguardando conexão...
+                            Aguardando...
                           </>
                         ) : (
                           <>
-                            <Plus className="mr-2 h-4 w-4" />
-                            Conectar WhatsApp
+                            <MessageCircle className="mr-2 h-4 w-4" />
+                            WhatsApp
+                            <ExternalLink className="ml-1 h-3 w-3" />
+                          </>
+                        )}
+                      </Button>
+                      <Button 
+                        size="sm" 
+                        onClick={() => openConnectModal('linkedin')}
+                        disabled={connectingLinkedIn || (waitingForConnection && connectingChannel === 'linkedin')}
+                      >
+                        {connectingLinkedIn ? (
+                          <>
+                            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                            Gerando link...
+                          </>
+                        ) : (waitingForConnection && connectingChannel === 'linkedin') ? (
+                          <>
+                            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                            Aguardando...
+                          </>
+                        ) : (
+                          <>
+                            <Linkedin className="mr-2 h-4 w-4" />
+                            LinkedIn
                             <ExternalLink className="ml-1 h-3 w-3" />
                           </>
                         )}
@@ -732,15 +768,9 @@ export default function Settings() {
                         disabled={isSyncing}
                       >
                         {isSyncing ? (
-                          <>
-                            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                            Sincronizando...
-                          </>
+                          <Loader2 className="h-4 w-4 animate-spin" />
                         ) : (
-                          <>
-                            <RefreshCw className="mr-2 h-4 w-4" />
-                            Sincronizar
-                          </>
+                          <RefreshCw className="h-4 w-4" />
                         )}
                       </Button>
                     </div>
@@ -875,9 +905,16 @@ export default function Settings() {
                 <Dialog open={connectAccountOpen} onOpenChange={setConnectAccountOpen}>
                   <DialogContent>
                     <DialogHeader>
-                      <DialogTitle>Conectar WhatsApp</DialogTitle>
+                      <DialogTitle className="flex items-center gap-2">
+                        {selectedChannel === 'whatsapp' ? (
+                          <MessageCircle className="h-5 w-5" />
+                        ) : (
+                          <Linkedin className="h-5 w-5" />
+                        )}
+                        Conectar {selectedChannel === 'whatsapp' ? 'WhatsApp' : 'LinkedIn'}
+                      </DialogTitle>
                       <DialogDescription>
-                        Digite um nome para identificar esta conta de WhatsApp
+                        Digite um nome para identificar esta conta de {selectedChannel === 'whatsapp' ? 'WhatsApp' : 'LinkedIn'}
                       </DialogDescription>
                     </DialogHeader>
                     <div className="space-y-4 py-4">
@@ -885,18 +922,27 @@ export default function Settings() {
                         <Label htmlFor="accountName">Nome da Conta</Label>
                         <Input
                           id="accountName"
-                          placeholder="Ex: WhatsApp Comercial"
+                          placeholder={selectedChannel === 'whatsapp' ? 'Ex: WhatsApp Comercial' : 'Ex: LinkedIn Vendas'}
                           value={newAccountName}
                           onChange={(e) => setNewAccountName(e.target.value)}
                         />
                       </div>
+                      {selectedChannel === 'linkedin' && (
+                        <Alert>
+                          <AlertCircle className="h-4 w-4" />
+                          <AlertTitle>Tipos de conta suportados</AlertTitle>
+                          <AlertDescription>
+                            Classic, Sales Navigator e Recruiter. A conexão abrirá em uma nova aba.
+                          </AlertDescription>
+                        </Alert>
+                      )}
                     </div>
                     <DialogFooter>
                       <Button variant="outline" onClick={() => setConnectAccountOpen(false)}>
                         Cancelar
                       </Button>
                       <Button 
-                        onClick={handleConnectWhatsApp}
+                        onClick={handleConnectAccount}
                         disabled={!newAccountName.trim()}
                       >
                         <ExternalLink className="mr-2 h-4 w-4" />
@@ -1077,16 +1123,16 @@ export default function Settings() {
                           <Input
                             id="intervalSeconds"
                             type="number"
-                            min={5}
+                            min={10}
                             max={120}
                             value={intervalSeconds}
-                            onChange={(e) => setIntervalSeconds(parseNumberInput(e.target.value, 15, 5, 120))}
+                            onChange={(e) => setIntervalSeconds(parseNumberInput(e.target.value, 15, 10, 120))}
                             className="w-32"
                           />
                           <span className="text-sm text-muted-foreground">segundos</span>
                         </div>
                         <p className="text-xs text-muted-foreground">
-                          Mínimo recomendado: 10-20s para simular comportamento humano.
+                          Mínimo: 10s. Recomendado: 15-30s para simular comportamento humano.
                         </p>
                       </div>
 

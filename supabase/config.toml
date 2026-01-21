@@ -12,6 +12,9 @@ verify_jwt = false
 [functions.create-campaign]
 verify_jwt = false
 
+[functions.send-campaign]
+verify_jwt = false
+
 [functions.get-credits]
 verify_jwt = false
 

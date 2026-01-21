@@ -115,7 +115,7 @@ export interface Campaign {
   workspace_id: string;
   name: string;
   type: 'email' | 'whatsapp' | 'linkedin';
-  status: 'draft' | 'scheduled' | 'running' | 'paused' | 'completed' | 'failed';
+  status: 'draft' | 'scheduled' | 'sending' | 'running' | 'paused' | 'completed' | 'partial' | 'failed';
   message: string;
   subject: string | null;
   account_id: string | null;

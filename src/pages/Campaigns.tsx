@@ -38,9 +38,11 @@ import { MESSAGE_VARIABLES, getMessagePreview } from '@/lib/messageVariables';
 const statusLabels: Record<string, { label: string; variant: 'default' | 'secondary' | 'destructive' | 'outline' }> = {
   draft: { label: 'Rascunho', variant: 'secondary' },
   scheduled: { label: 'Agendada', variant: 'outline' },
+  sending: { label: 'Enviando...', variant: 'default' },
   running: { label: 'Enviando', variant: 'default' },
   paused: { label: 'Pausada', variant: 'secondary' },
   completed: { label: 'Concluída', variant: 'default' },
+  partial: { label: 'Parcial', variant: 'outline' },
   failed: { label: 'Falhou', variant: 'destructive' },
 };
 
@@ -66,6 +68,7 @@ export default function Campaigns() {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [creating, setCreating] = useState(false);
   const [showPreview, setShowPreview] = useState(false);
+  const [sendingCampaignId, setSendingCampaignId] = useState<string | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   // Form state
@@ -198,6 +201,35 @@ export default function Campaigns() {
       });
     } finally {
       setCreating(false);
+    }
+  }
+
+  async function handleSendCampaign(campaignId: string) {
+    if (!currentWorkspace) return;
+    
+    setSendingCampaignId(campaignId);
+    
+    try {
+      const { data, error } = await supabase.functions.invoke('send-campaign', {
+        body: { campaignId },
+      });
+
+      if (error) throw error;
+
+      toast({
+        title: 'Campanha enviada',
+        description: `${data.sentCount} mensagens enviadas, ${data.failedCount} falhas.`,
+      });
+
+      refetchCampaigns();
+    } catch (error: any) {
+      toast({
+        title: 'Erro ao enviar campanha',
+        description: error.message,
+        variant: 'destructive',
+      });
+    } finally {
+      setSendingCampaignId(null);
     }
   }
 
@@ -502,11 +534,15 @@ export default function Campaigns() {
                     <TableHead className="text-right">Enviadas</TableHead>
                     <TableHead className="text-right">Falhas</TableHead>
                     <TableHead className="text-right">Data</TableHead>
+                    <TableHead className="text-center">Ações</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {campaigns.map((campaign) => {
                     const TypeIcon = typeIcons[campaign.type] || Mail;
+                    const canSend = campaign.status === 'draft' || campaign.status === 'partial';
+                    const isSending = sendingCampaignId === campaign.id || campaign.status === 'sending';
+                    
                     return (
                       <TableRow key={campaign.id}>
                         <TableCell className="font-medium">{campaign.name}</TableCell>
@@ -531,6 +567,27 @@ export default function Campaigns() {
                         </TableCell>
                         <TableCell className="text-right">
                           {format(new Date(campaign.created_at), 'dd/MM/yyyy', { locale: ptBR })}
+                        </TableCell>
+                        <TableCell className="text-center">
+                          {canSend && (
+                            <Button
+                              size="sm"
+                              onClick={() => handleSendCampaign(campaign.id)}
+                              disabled={isSending}
+                            >
+                              {isSending ? (
+                                <Loader2 className="h-4 w-4 animate-spin" />
+                              ) : (
+                                <>
+                                  <Send className="h-4 w-4 mr-1" />
+                                  Enviar
+                                </>
+                              )}
+                            </Button>
+                          )}
+                          {campaign.status === 'completed' && (
+                            <span className="text-sm text-muted-foreground">Concluído</span>
+                          )}
                         </TableCell>
                       </TableRow>
                     );

@@ -85,6 +85,7 @@ export default function Leads() {
     industry: '',
     country: '',
     listId: null,
+    tagIds: [],
   });
 
   // Dialog states
@@ -94,6 +95,9 @@ export default function Leads() {
   const [isSearchingList, setIsSearchingList] = useState(false);
   const [isMoving, setIsMoving] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
+
+  // Get lead tags helper from useTags
+  const { getLeadTags } = useTags();
 
   // Filtered leads based on filter state
   const filteredLeads = useMemo(() => {
@@ -115,6 +119,12 @@ export default function Leads() {
       }
       if (filters.listId && filters.listId !== 'no-list' && lead.list_id !== filters.listId) {
         return false;
+      }
+      // Filter by tags
+      if (filters.tagIds.length > 0) {
+        const leadTagIds = getLeadTags(lead.id).map(t => t.id);
+        const hasAllTags = filters.tagIds.every(tagId => leadTagIds.includes(tagId));
+        if (!hasAllTags) return false;
       }
       return true;
     });

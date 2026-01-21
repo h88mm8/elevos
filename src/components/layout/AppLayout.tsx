@@ -19,7 +19,8 @@ import {
   ChevronDown,
   Building2,
   Menu,
-  Zap
+  Zap,
+  Tag
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useState } from 'react';
@@ -29,6 +30,7 @@ const navItems = [
   { href: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
   { href: '/leads', label: 'Leads', icon: Users },
   { href: '/campaigns', label: 'Campanhas', icon: Send },
+  { href: '/tags', label: 'Tags', icon: Tag },
   { href: '/settings', label: 'Configurações', icon: Settings },
 ];
 

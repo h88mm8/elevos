@@ -108,6 +108,7 @@ export interface LeadFilters {
   industry: string;
   country: string;
   listId: string | null;
+  tagIds: string[];
 }
 
 export interface Campaign {

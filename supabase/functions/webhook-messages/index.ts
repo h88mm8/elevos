@@ -57,12 +57,17 @@ async function fetchAttachmentFromUnipile(
   attachmentId: string
 ): Promise<{ blob: Blob; contentType: string } | null> {
   try {
-    const UNIPILE_DSN = Deno.env.get('UNIPILE_DSN');
+    let UNIPILE_DSN = Deno.env.get('UNIPILE_DSN');
     const UNIPILE_API_KEY = Deno.env.get('UNIPILE_API_KEY');
     
     if (!UNIPILE_DSN || !UNIPILE_API_KEY) {
       console.warn('Unipile credentials not configured for attachment fetch');
       return null;
+    }
+    
+    // Ensure DSN has protocol
+    if (!UNIPILE_DSN.startsWith('http://') && !UNIPILE_DSN.startsWith('https://')) {
+      UNIPILE_DSN = `https://${UNIPILE_DSN}`;
     }
     
     const url = `${UNIPILE_DSN}/api/v1/messages/${messageId}/attachments/${attachmentId}`;

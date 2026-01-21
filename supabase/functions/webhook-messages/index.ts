@@ -316,13 +316,16 @@ serve(async (req) => {
     for (const event of events) {
       try {
         const eventType = event.event || 'unknown';
+        // Unipile sends data at root level, not in event.data
         const data = event.data || event;
 
         console.log(`Processing event: ${eventType}, account_id: ${data.account_id}, chat_id: ${data.chat_id}`);
 
         switch (eventType) {
           case 'message.received':
+          case 'message_received':
           case 'message.sent':
+          case 'message_sent':
           case 'message': {
             // Find account by provider account_id
             const { data: account } = await supabase

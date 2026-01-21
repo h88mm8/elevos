@@ -1,6 +1,6 @@
 import { MessageAttachment } from '@/types';
 import { AudioPlayer } from './AudioPlayer';
-import { FileText, Download, ExternalLink, RefreshCw } from 'lucide-react';
+import { FileText, ExternalLink, RefreshCw } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useState, useCallback } from 'react';
 import { supabase } from '@/integrations/supabase/client';
@@ -17,8 +17,10 @@ export function MessageAttachments({ attachments, messageId, workspaceId, varian
   const isSent = variant === 'sent';
   const [imageErrors, setImageErrors] = useState<Record<number, boolean>>({});
   const [cachingIndex, setCachingIndex] = useState<number | null>(null);
+  // Local state to store cached URLs without reloading the page
+  const [cachedUrls, setCachedUrls] = useState<Record<number, string>>({});
 
-  const handleImageError = useCallback(async (index: number, attachment: MessageAttachment) => {
+  const handleImageError = useCallback((index: number) => {
     setImageErrors(prev => ({ ...prev, [index]: true }));
   }, []);
 
@@ -39,8 +41,9 @@ export function MessageAttachments({ attachments, messageId, workspaceId, varian
       });
 
       if (response.data?.success && response.data?.url) {
-        // Force reload by updating the attachment URL
-        window.location.reload();
+        // Update local state with cached URL - no reload needed
+        setCachedUrls(prev => ({ ...prev, [index]: response.data.url }));
+        setImageErrors(prev => ({ ...prev, [index]: false }));
       }
     } catch (err) {
       console.error('Failed to cache image:', err);
@@ -52,12 +55,15 @@ export function MessageAttachments({ attachments, messageId, workspaceId, varian
   return (
     <div className="space-y-2">
       {attachments.map((attachment, index) => {
+        // Use cached URL if available
+        const displayUrl = cachedUrls[index] || attachment.url;
+        
         switch (attachment.type) {
           case 'audio':
             return (
               <AudioPlayer
                 key={index}
-                url={attachment.url}
+                url={displayUrl}
                 messageId={messageId}
                 workspaceId={workspaceId}
                 duration={attachment.duration}
@@ -68,7 +74,7 @@ export function MessageAttachments({ attachments, messageId, workspaceId, varian
             );
 
           case 'image':
-            if (imageErrors[index]) {
+            if (imageErrors[index] && !cachedUrls[index]) {
               return (
                 <div
                   key={index}
@@ -92,17 +98,17 @@ export function MessageAttachments({ attachments, messageId, workspaceId, varian
             return (
               <a
                 key={index}
-                href={attachment.url}
+                href={displayUrl}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="block"
               >
                 <img
-                  src={attachment.url}
+                  src={displayUrl}
                   alt={attachment.filename || 'Imagem'}
                   className="max-w-[240px] max-h-[300px] rounded-lg object-cover"
                   loading="lazy"
-                  onError={() => handleImageError(index, attachment)}
+                  onError={() => handleImageError(index)}
                 />
               </a>
             );
@@ -111,7 +117,7 @@ export function MessageAttachments({ attachments, messageId, workspaceId, varian
             return (
               <video
                 key={index}
-                src={attachment.url}
+                src={displayUrl}
                 controls
                 className="max-w-[280px] max-h-[300px] rounded-lg"
                 preload="metadata"
@@ -124,7 +130,7 @@ export function MessageAttachments({ attachments, messageId, workspaceId, varian
             return (
               <a
                 key={index}
-                href={attachment.url}
+                href={displayUrl}
                 target="_blank"
                 rel="noopener noreferrer"
                 className={cn(

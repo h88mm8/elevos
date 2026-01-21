@@ -436,6 +436,16 @@ export default function Messages() {
                   }
                 : c
             ));
+          } else if (payload.eventType === 'DELETE') {
+            const deletedChat = payload.old as any;
+            console.log('Chat deleted:', deletedChat.external_id);
+            // Remove chat from list
+            setChats(prev => prev.filter(c => c.id !== deletedChat.external_id));
+            // If the deleted chat was selected, clear selection
+            if (selectedChatRef.current?.id === deletedChat.external_id) {
+              setSelectedChat(null);
+              setMessages([]);
+            }
           }
         }
       )

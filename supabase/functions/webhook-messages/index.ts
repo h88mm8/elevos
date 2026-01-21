@@ -10,10 +10,16 @@ interface WebhookEvent {
   event: string;
   data: {
     id?: string;
+    message_id?: string;
     chat_id?: string;
     account_id?: string;
     text?: string;
+    message?: string;
     sender_id?: string;
+    sender?: {
+      attendee_id?: string;
+      attendee_name?: string;
+    };
     timestamp?: string;
     attachments?: unknown[];
     status?: string;
@@ -356,6 +362,16 @@ serve(async (req) => {
               console.log(`Cached attachments:`, processedAttachments.map(a => ({ type: a.type, cached: a.url !== a.original_url })));
             }
 
+            // Extract message text - Unipile uses 'message' field, not 'text'
+            const messageText = data.message || data.text || null;
+            const messageId = data.message_id || data.id;
+            const senderId = data.sender?.attendee_id || data.sender_id;
+            const isSentByMe = senderId === data.account_id || 
+                               eventType === 'message.sent' || 
+                               eventType === 'message_sent';
+
+            console.log(`Message text: "${messageText?.slice(0, 50) || '(empty)'}", sender: ${isSentByMe ? 'me' : 'them'}`);
+
             // Insert message with cached attachments
             const { error: insertError } = await supabase
               .from('messages')
@@ -363,9 +379,9 @@ serve(async (req) => {
                 workspace_id: account.workspace_id,
                 account_id: account.id,
                 chat_id: data.chat_id || 'unknown',
-                external_id: data.id,
-                sender: data.sender_id === data.account_id || eventType === 'message.sent' ? 'me' : 'them',
-                text: data.text,
+                external_id: messageId,
+                sender: isSentByMe ? 'me' : 'them',
+                text: messageText,
                 attachments: processedAttachments.length > 0 ? processedAttachments : null,
                 timestamp: data.timestamp || new Date().toISOString(),
               });

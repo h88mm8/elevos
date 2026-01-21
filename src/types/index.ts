@@ -143,8 +143,14 @@ export interface CampaignQueue {
 export interface WorkspaceSettings {
   id: string;
   workspace_id: string;
+  // WhatsApp settings
   daily_message_limit: number;
   message_interval_seconds: number;
+  max_retries: number;
+  // LinkedIn settings
+  linkedin_daily_message_limit: number;
+  linkedin_daily_invite_limit: number;
+  linkedin_message_interval_seconds: number;
   created_at: string;
   updated_at: string;
 }

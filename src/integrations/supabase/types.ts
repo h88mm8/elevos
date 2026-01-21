@@ -763,6 +763,9 @@ export type Database = {
           created_at: string
           daily_message_limit: number
           id: string
+          linkedin_daily_invite_limit: number
+          linkedin_daily_message_limit: number
+          linkedin_message_interval_seconds: number
           max_retries: number
           message_interval_seconds: number
           updated_at: string
@@ -772,6 +775,9 @@ export type Database = {
           created_at?: string
           daily_message_limit?: number
           id?: string
+          linkedin_daily_invite_limit?: number
+          linkedin_daily_message_limit?: number
+          linkedin_message_interval_seconds?: number
           max_retries?: number
           message_interval_seconds?: number
           updated_at?: string
@@ -781,6 +787,9 @@ export type Database = {
           created_at?: string
           daily_message_limit?: number
           id?: string
+          linkedin_daily_invite_limit?: number
+          linkedin_daily_message_limit?: number
+          linkedin_message_interval_seconds?: number
           max_retries?: number
           message_interval_seconds?: number
           updated_at?: string

@@ -53,6 +53,28 @@ export function useWorkspaceSettings() {
     mutationFn: async (settings: Partial<Pick<WorkspaceSettings, 'daily_message_limit' | 'message_interval_seconds' | 'max_retries' | 'linkedin_daily_message_limit' | 'linkedin_daily_invite_limit' | 'linkedin_message_interval_seconds'>>) => {
       if (!currentWorkspace) throw new Error('No workspace selected');
 
+      // Validate and clamp values to safe ranges
+      const validatedSettings: typeof settings = {};
+      
+      if (settings.daily_message_limit !== undefined) {
+        validatedSettings.daily_message_limit = Math.max(1, Math.min(500, settings.daily_message_limit));
+      }
+      if (settings.message_interval_seconds !== undefined) {
+        validatedSettings.message_interval_seconds = Math.max(5, Math.min(120, settings.message_interval_seconds));
+      }
+      if (settings.max_retries !== undefined) {
+        validatedSettings.max_retries = Math.max(0, Math.min(10, settings.max_retries));
+      }
+      if (settings.linkedin_daily_message_limit !== undefined) {
+        validatedSettings.linkedin_daily_message_limit = Math.max(1, Math.min(100, settings.linkedin_daily_message_limit));
+      }
+      if (settings.linkedin_daily_invite_limit !== undefined) {
+        validatedSettings.linkedin_daily_invite_limit = Math.max(1, Math.min(50, settings.linkedin_daily_invite_limit));
+      }
+      if (settings.linkedin_message_interval_seconds !== undefined) {
+        validatedSettings.linkedin_message_interval_seconds = Math.max(10, Math.min(300, settings.linkedin_message_interval_seconds));
+      }
+
       // Check if settings exist
       const { data: existing } = await supabase
         .from('workspace_settings')
@@ -64,7 +86,7 @@ export function useWorkspaceSettings() {
         // Update existing
         const { data, error } = await supabase
           .from('workspace_settings')
-          .update(settings)
+          .update(validatedSettings)
           .eq('workspace_id', currentWorkspace.id)
           .select()
           .single();
@@ -78,7 +100,7 @@ export function useWorkspaceSettings() {
           .insert({
             workspace_id: currentWorkspace.id,
             ...DEFAULT_SETTINGS,
-            ...settings,
+            ...validatedSettings,
           })
           .select()
           .single();

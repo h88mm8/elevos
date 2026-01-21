@@ -46,6 +46,13 @@ import { MESSAGE_VARIABLES } from '@/lib/messageVariables';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 
+// Helper for safe number parsing (handles 0 correctly)
+function parseNumberInput(value: string, fallback: number, min: number, max: number): number {
+  const parsed = parseInt(value, 10);
+  if (Number.isNaN(parsed)) return fallback;
+  return Math.max(min, Math.min(max, parsed));
+}
+
 export default function Settings() {
   const { profile, workspaces, currentWorkspace, setCurrentWorkspace, user } = useAuth();
   const { credits, creditHistory, isLoading: creditsLoading } = useCredits();
@@ -1054,7 +1061,7 @@ export default function Settings() {
                             min={1}
                             max={500}
                             value={dailyLimit}
-                            onChange={(e) => setDailyLimit(parseInt(e.target.value) || 50)}
+                            onChange={(e) => setDailyLimit(parseNumberInput(e.target.value, 50, 1, 500))}
                             className="w-32"
                           />
                           <span className="text-sm text-muted-foreground">mensagens/dia</span>
@@ -1073,7 +1080,7 @@ export default function Settings() {
                             min={5}
                             max={120}
                             value={intervalSeconds}
-                            onChange={(e) => setIntervalSeconds(parseInt(e.target.value) || 15)}
+                            onChange={(e) => setIntervalSeconds(parseNumberInput(e.target.value, 15, 5, 120))}
                             className="w-32"
                           />
                           <span className="text-sm text-muted-foreground">segundos</span>
@@ -1092,7 +1099,7 @@ export default function Settings() {
                             min={0}
                             max={10}
                             value={maxRetries}
-                            onChange={(e) => setMaxRetries(parseInt(e.target.value) || 3)}
+                            onChange={(e) => setMaxRetries(parseNumberInput(e.target.value, 3, 0, 10))}
                             className="w-32"
                           />
                           <span className="text-sm text-muted-foreground">tentativas</span>
@@ -1263,7 +1270,7 @@ export default function Settings() {
                             min={1}
                             max={100}
                             value={linkedinDailyMessageLimit}
-                            onChange={(e) => setLinkedinDailyMessageLimit(parseInt(e.target.value) || 50)}
+                            onChange={(e) => setLinkedinDailyMessageLimit(parseNumberInput(e.target.value, 50, 1, 100))}
                             className="w-32"
                           />
                           <span className="text-sm text-muted-foreground">msg/dia</span>
@@ -1282,7 +1289,7 @@ export default function Settings() {
                             min={1}
                             max={50}
                             value={linkedinDailyInviteLimit}
-                            onChange={(e) => setLinkedinDailyInviteLimit(parseInt(e.target.value) || 25)}
+                            onChange={(e) => setLinkedinDailyInviteLimit(parseNumberInput(e.target.value, 25, 1, 50))}
                             className="w-32"
                           />
                           <span className="text-sm text-muted-foreground">convites/dia</span>
@@ -1301,7 +1308,7 @@ export default function Settings() {
                             min={10}
                             max={300}
                             value={linkedinIntervalSeconds}
-                            onChange={(e) => setLinkedinIntervalSeconds(parseInt(e.target.value) || 30)}
+                            onChange={(e) => setLinkedinIntervalSeconds(parseNumberInput(e.target.value, 30, 10, 300))}
                             className="w-32"
                           />
                           <span className="text-sm text-muted-foreground">segundos</span>

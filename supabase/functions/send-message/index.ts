@@ -116,9 +116,8 @@ serve(async (req) => {
         // Create FormData for multipart upload
         const formData = new FormData();
         
-        // Just append the file - WhatsApp automatically detects voice notes from OGG/Opus format
-        // The 'voice_message' field is NOT supported on the /chats/{chat_id}/messages endpoint
-        formData.append('file', fileBlob, attachmentName || 'attachment');
+        // Unipile expects the field name to be 'attachments', not 'file'
+        formData.append('attachments', fileBlob, attachmentName || 'attachment');
         
         if (text) {
           formData.append('text', text);

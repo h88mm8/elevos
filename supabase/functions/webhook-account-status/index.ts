@@ -69,15 +69,15 @@ serve(async (req) => {
     // ============================================
     // Provider webhook formats:
     // 1. QR flow: { AccountStatus: { account_id, message, account_type }, reason? }
-    // 2. Hosted Auth: { event, account_id, name (workspaceId), ... }
+    // 2. Hosted Auth: { event, account_id, name (JSON with workspaceId and accountName), ... }
     const accountStatusData = payload.AccountStatus || payload.accountStatus || {};
     const eventData = payload.data || payload.object || payload;
     
     // Extract account ID from various possible locations
     const accountId = accountStatusData.account_id || eventData.account_id || eventData.id || payload.account_id;
     
-    // Name field contains the workspaceId in Hosted Auth flow
-    const accountName = accountStatusData.name || eventData.name || eventData.display_name || payload.name;
+    // Name field contains either workspaceId (old) or JSON with workspaceId and accountName (new)
+    const rawName = accountStatusData.name || eventData.name || eventData.display_name || payload.name;
     
     // Extract status/message from AccountStatus or other fields
     const accountMessage = accountStatusData.message || '';
@@ -89,21 +89,42 @@ serve(async (req) => {
     const qrCode = eventData.qrCodeString || eventData.qr_code || eventData.qrcode;
     const errorMessage = payload.reason || eventData.error || payload.error;
 
-    console.log(`Event: ${eventType}, Account: ${accountId}, Status: ${accountStatus}, Message: ${accountMessage}, Name: ${accountName}`);
+    // ============================================
+    // PARSE NAME FIELD (may be JSON or plain UUID)
+    // ============================================
+    let parsedWorkspaceId: string | null = null;
+    let parsedAccountName: string | null = null;
+    
+    // Try to parse as JSON first (new format)
+    if (rawName) {
+      try {
+        const parsed = JSON.parse(rawName);
+        if (parsed.workspaceId) {
+          parsedWorkspaceId = parsed.workspaceId;
+          parsedAccountName = parsed.accountName || null;
+          console.log(`Parsed JSON name: workspaceId=${parsedWorkspaceId}, accountName=${parsedAccountName}`);
+        }
+      } catch {
+        // Not JSON, treat as plain value (old format - workspaceId only)
+        console.log(`Name is not JSON, treating as plain value: ${rawName}`);
+      }
+    }
+
+    console.log(`Event: ${eventType}, Account: ${accountId}, Status: ${accountStatus}, Message: ${accountMessage}, RawName: ${rawName}`);
 
     // ============================================
     // DETERMINE WORKSPACE ID
     // ============================================
-    // In Hosted Auth flow, the 'name' field contains the workspaceId
+    // In Hosted Auth flow, the 'name' field contains the workspaceId (or JSON with it)
     // In QR flow, we look up the session
-    let workspaceId: string | null = null;
+    let workspaceId: string | null = parsedWorkspaceId;
     let session = null;
 
-    // Check if name is a valid UUID (workspaceId from Hosted Auth)
+    // Check if name is a valid UUID (workspaceId from Hosted Auth - old format)
     const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-    if (accountName && uuidRegex.test(accountName)) {
-      workspaceId = accountName;
-      console.log(`Workspace ID from Hosted Auth name: ${workspaceId}`);
+    if (!workspaceId && rawName && uuidRegex.test(rawName)) {
+      workspaceId = rawName;
+      console.log(`Workspace ID from plain name: ${workspaceId}`);
     }
 
     // Fallback: Try to find by account_id in qr_sessions (legacy QR flow)
@@ -123,8 +144,8 @@ serve(async (req) => {
     }
 
     // Fallback: Try by account name pattern (workspaceId-timestamp)
-    if (!workspaceId && accountName && accountName.includes('-')) {
-      const possibleWorkspaceId = accountName.split('-')[0];
+    if (!workspaceId && rawName && rawName.includes('-')) {
+      const possibleWorkspaceId = rawName.split('-')[0];
       if (possibleWorkspaceId && uuidRegex.test(possibleWorkspaceId)) {
         workspaceId = possibleWorkspaceId;
         console.log(`Workspace ID from name pattern: ${workspaceId}`);
@@ -140,6 +161,9 @@ serve(async (req) => {
         session = data?.[0];
       }
     }
+
+    // Final account name to use (from JSON or fallback)
+    const finalAccountName = parsedAccountName || `Account ${accountId?.slice(0, 8) || 'Unknown'}`;
 
     // ============================================
     // DETERMINE NEW STATUS
@@ -175,9 +199,9 @@ serve(async (req) => {
       updateData = {
         status: newStatus,
         account_id: accountId,
-        account_name: accountName || `Account ${accountId?.slice(0, 8) || 'Unknown'}`,
+        account_name: finalAccountName,
       };
-      console.log(`Account connected: ${accountId}`);
+      console.log(`Account connected: ${accountId}, name: ${finalAccountName}`);
     }
     // Account Failed / Error
     else if (
@@ -275,7 +299,7 @@ serve(async (req) => {
           workspace_id: workspaceId,
           channel: channel,
           status: 'connected',
-          name: `Account ${accountId.slice(0, 8)}`,
+          name: finalAccountName,
           provider: 'messaging',
           updated_at: new Date().toISOString(),
         }, {

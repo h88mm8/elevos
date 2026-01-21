@@ -31,6 +31,7 @@ import {
   CheckCircle2,
   XCircle,
   ExternalLink,
+  Pencil,
 } from 'lucide-react';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
@@ -39,7 +40,7 @@ export default function Settings() {
   const { profile, workspaces, currentWorkspace, setCurrentWorkspace, user } = useAuth();
   const { credits, creditHistory, isLoading: creditsLoading } = useCredits();
   const { members, isLoading: membersLoading, removeMember, updateRole } = useWorkspaceMembers();
-  const { accounts, isLoading: accountsLoading, syncAccounts, isSyncing, refetchAccounts, deleteAccount, isDeleting } = useAccounts();
+  const { accounts, isLoading: accountsLoading, syncAccounts, isSyncing, refetchAccounts, deleteAccount, isDeleting, updateAccountName, isUpdatingName } = useAccounts();
   const { toast } = useToast();
 
   const [createWorkspaceOpen, setCreateWorkspaceOpen] = useState(false);
@@ -52,6 +53,11 @@ export default function Settings() {
   const [waitingForConnection, setWaitingForConnection] = useState(false);
   const [deleteAccountOpen, setDeleteAccountOpen] = useState(false);
   const [accountToDelete, setAccountToDelete] = useState<{ id: string; name: string } | null>(null);
+  const [connectAccountOpen, setConnectAccountOpen] = useState(false);
+  const [newAccountName, setNewAccountName] = useState('');
+  const [editAccountOpen, setEditAccountOpen] = useState(false);
+  const [accountToEdit, setAccountToEdit] = useState<{ id: string; name: string } | null>(null);
+  const [editAccountName, setEditAccountName] = useState('');
 
   const currentMember = members.find(m => m.user_id === user?.id);
   const isAdmin = currentMember?.role === 'admin';
@@ -87,9 +93,15 @@ export default function Settings() {
   // ============================================
   // CONNECT WHATSAPP VIA HOSTED AUTH LINK
   // ============================================
-  async function handleConnectWhatsApp() {
-    if (!currentWorkspace) return;
+  function openConnectModal() {
+    setNewAccountName('');
+    setConnectAccountOpen(true);
+  }
 
+  async function handleConnectWhatsApp() {
+    if (!currentWorkspace || !newAccountName.trim()) return;
+
+    setConnectAccountOpen(false);
     setConnectingWhatsApp(true);
     try {
       const { data: { session } } = await supabase.auth.getSession();
@@ -103,7 +115,11 @@ export default function Settings() {
       }
 
       const response = await supabase.functions.invoke('create-connect-link', {
-        body: { workspaceId: currentWorkspace.id, channel: 'whatsapp' },
+        body: { 
+          workspaceId: currentWorkspace.id, 
+          channel: 'whatsapp',
+          accountName: newAccountName.trim(),
+        },
       });
 
       if (response.error) {
@@ -144,6 +160,35 @@ export default function Settings() {
       });
     } finally {
       setConnectingWhatsApp(false);
+    }
+  }
+
+  // ============================================
+  // EDIT ACCOUNT NAME
+  // ============================================
+  function openEditModal(account: { id: string; name: string | null }) {
+    setAccountToEdit({ id: account.id, name: account.name || '' });
+    setEditAccountName(account.name || '');
+    setEditAccountOpen(true);
+  }
+
+  async function handleUpdateAccountName() {
+    if (!accountToEdit || !editAccountName.trim()) return;
+
+    try {
+      await updateAccountName({ accountId: accountToEdit.id, name: editAccountName.trim() });
+      toast({
+        title: 'Nome atualizado',
+        description: 'O nome da conta foi atualizado com sucesso.',
+      });
+      setEditAccountOpen(false);
+      setAccountToEdit(null);
+    } catch (error: any) {
+      toast({
+        title: 'Erro ao atualizar',
+        description: error.message,
+        variant: 'destructive',
+      });
     }
   }
 
@@ -577,7 +622,7 @@ export default function Settings() {
                     <div className="flex items-center gap-2">
                       <Button 
                         size="sm" 
-                        onClick={handleConnectWhatsApp}
+                        onClick={openConnectModal}
                         disabled={connectingWhatsApp || waitingForConnection}
                       >
                         {connectingWhatsApp ? (
@@ -680,20 +725,29 @@ export default function Settings() {
                             </TableCell>
                             {isAdmin && (
                               <TableCell className="text-right">
-                                <Button
-                                  variant="ghost"
-                                  size="sm"
-                                  className="text-destructive hover:text-destructive hover:bg-destructive/10"
-                                  onClick={() => {
-                                    setAccountToDelete({
-                                      id: account.id,
-                                      name: account.name || account.account_id.slice(0, 12),
-                                    });
-                                    setDeleteAccountOpen(true);
-                                  }}
-                                >
-                                  <Trash2 className="h-4 w-4" />
-                                </Button>
+                                <div className="flex items-center justify-end gap-1">
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    onClick={() => openEditModal(account)}
+                                  >
+                                    <Pencil className="h-4 w-4" />
+                                  </Button>
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    className="text-destructive hover:text-destructive hover:bg-destructive/10"
+                                    onClick={() => {
+                                      setAccountToDelete({
+                                        id: account.id,
+                                        name: account.name || account.account_id.slice(0, 12),
+                                      });
+                                      setDeleteAccountOpen(true);
+                                    }}
+                                  >
+                                    <Trash2 className="h-4 w-4" />
+                                  </Button>
+                                </div>
                               </TableCell>
                             )}
                           </TableRow>
@@ -729,6 +783,82 @@ export default function Settings() {
                           </>
                         ) : (
                           'Remover'
+                        )}
+                      </Button>
+                    </DialogFooter>
+                  </DialogContent>
+                </Dialog>
+
+                {/* Connect Account Modal */}
+                <Dialog open={connectAccountOpen} onOpenChange={setConnectAccountOpen}>
+                  <DialogContent>
+                    <DialogHeader>
+                      <DialogTitle>Conectar WhatsApp</DialogTitle>
+                      <DialogDescription>
+                        Digite um nome para identificar esta conta de WhatsApp
+                      </DialogDescription>
+                    </DialogHeader>
+                    <div className="space-y-4 py-4">
+                      <div className="space-y-2">
+                        <Label htmlFor="accountName">Nome da Conta</Label>
+                        <Input
+                          id="accountName"
+                          placeholder="Ex: WhatsApp Comercial"
+                          value={newAccountName}
+                          onChange={(e) => setNewAccountName(e.target.value)}
+                        />
+                      </div>
+                    </div>
+                    <DialogFooter>
+                      <Button variant="outline" onClick={() => setConnectAccountOpen(false)}>
+                        Cancelar
+                      </Button>
+                      <Button 
+                        onClick={handleConnectWhatsApp}
+                        disabled={!newAccountName.trim()}
+                      >
+                        <ExternalLink className="mr-2 h-4 w-4" />
+                        Continuar
+                      </Button>
+                    </DialogFooter>
+                  </DialogContent>
+                </Dialog>
+
+                {/* Edit Account Name Modal */}
+                <Dialog open={editAccountOpen} onOpenChange={setEditAccountOpen}>
+                  <DialogContent>
+                    <DialogHeader>
+                      <DialogTitle>Editar Nome da Conta</DialogTitle>
+                      <DialogDescription>
+                        Altere o nome de identificação desta conta
+                      </DialogDescription>
+                    </DialogHeader>
+                    <div className="space-y-4 py-4">
+                      <div className="space-y-2">
+                        <Label htmlFor="editAccountName">Nome da Conta</Label>
+                        <Input
+                          id="editAccountName"
+                          placeholder="Ex: WhatsApp Comercial"
+                          value={editAccountName}
+                          onChange={(e) => setEditAccountName(e.target.value)}
+                        />
+                      </div>
+                    </div>
+                    <DialogFooter>
+                      <Button variant="outline" onClick={() => setEditAccountOpen(false)}>
+                        Cancelar
+                      </Button>
+                      <Button 
+                        onClick={handleUpdateAccountName}
+                        disabled={!editAccountName.trim() || isUpdatingName}
+                      >
+                        {isUpdatingName ? (
+                          <>
+                            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                            Salvando...
+                          </>
+                        ) : (
+                          'Salvar'
                         )}
                       </Button>
                     </DialogFooter>

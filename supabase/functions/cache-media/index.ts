@@ -95,9 +95,10 @@ serve(async (req) => {
       }), { status: 404, headers: corsHeaders });
     }
 
-    const mediaBlob = await mediaResponse.blob();
     const responseContentType = mediaResponse.headers.get('content-type');
-    console.log(`Downloaded ${mediaBlob.size} bytes, response type: ${responseContentType}, blob type: ${mediaBlob.type}`);
+    const mediaArrayBuffer = await mediaResponse.arrayBuffer();
+    const mediaBytes = new Uint8Array(mediaArrayBuffer);
+    console.log(`Downloaded ${mediaBytes.byteLength} bytes, response type: ${responseContentType}`);
 
     // Determine the best content type to use
     // Priority: provided mimeType > response content-type > blob type > infer from mediaType
@@ -108,10 +109,6 @@ serve(async (req) => {
     }
     
     if (!finalMimeType || finalMimeType === 'application/octet-stream') {
-      finalMimeType = mediaBlob.type;
-    }
-    
-    if (!finalMimeType || finalMimeType === 'application/octet-stream') {
       // Infer from mediaType parameter
       const typeDefaults: Record<string, string> = {
         'audio': 'audio/ogg',
@@ -119,7 +116,19 @@ serve(async (req) => {
         'video': 'video/mp4',
         'document': 'application/pdf',
       };
-      finalMimeType = typeDefaults[mediaType] || 'application/octet-stream';
+      finalMimeType = typeDefaults[mediaType] || '';
+    }
+
+    if (!finalMimeType || finalMimeType === 'application/octet-stream') {
+      return new Response(JSON.stringify({
+        success: false,
+        error: 'Unable to determine a supported mime type for this media',
+        debug: {
+          responseContentType,
+          mediaType,
+          providedMimeType: mimeType,
+        },
+      }), { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
     }
 
     // Clean mime type - remove parameters like "; codecs=opus" that storage doesn't accept
@@ -133,7 +142,7 @@ serve(async (req) => {
     // Upload to storage with clean mime type
     const { error: uploadError } = await supabaseAdmin.storage
       .from('message-attachments')
-      .upload(uploadPath, mediaBlob, {
+      .upload(uploadPath, mediaBytes, {
         contentType: cleanMimeType,
         upsert: true,
       });

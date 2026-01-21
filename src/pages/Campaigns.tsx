@@ -507,40 +507,45 @@ export default function Campaigns() {
                   </div>
                   
                   {scheduleEnabled && (
-                    <div className="grid grid-cols-2 gap-4 pl-6">
-                      <div className="space-y-2">
-                        <Label>Data</Label>
-                        <Popover>
-                          <PopoverTrigger asChild>
-                            <Button
-                              variant="outline"
-                              className="w-full justify-start text-left font-normal"
-                            >
-                              <Calendar className="mr-2 h-4 w-4" />
-                              {scheduleDate ? format(scheduleDate, 'dd/MM/yyyy', { locale: ptBR }) : 'Selecionar data'}
-                            </Button>
-                          </PopoverTrigger>
-                          <PopoverContent className="w-auto p-0" align="start">
-                            <CalendarComponent
-                              mode="single"
-                              selected={scheduleDate}
-                              onSelect={setScheduleDate}
-                              disabled={(date) => date < new Date(new Date().setHours(0, 0, 0, 0))}
-                              initialFocus
-                            />
-                          </PopoverContent>
-                        </Popover>
+                    <>
+                      <div className="grid grid-cols-2 gap-4 pl-6">
+                        <div className="space-y-2">
+                          <Label>Data</Label>
+                          <Popover>
+                            <PopoverTrigger asChild>
+                              <Button
+                                variant="outline"
+                                className="w-full justify-start text-left font-normal"
+                              >
+                                <Calendar className="mr-2 h-4 w-4" />
+                                {scheduleDate ? format(scheduleDate, 'dd/MM/yyyy', { locale: ptBR }) : 'Selecionar data'}
+                              </Button>
+                            </PopoverTrigger>
+                            <PopoverContent className="w-auto p-0" align="start">
+                              <CalendarComponent
+                                mode="single"
+                                selected={scheduleDate}
+                                onSelect={setScheduleDate}
+                                disabled={(date) => date < new Date(new Date().setHours(0, 0, 0, 0))}
+                                initialFocus
+                              />
+                            </PopoverContent>
+                          </Popover>
+                        </div>
+                        <div className="space-y-2">
+                          <Label htmlFor="schedule-time">Horário</Label>
+                          <Input
+                            id="schedule-time"
+                            type="time"
+                            value={scheduleTime}
+                            onChange={(e) => setScheduleTime(e.target.value)}
+                          />
+                        </div>
                       </div>
-                      <div className="space-y-2">
-                        <Label htmlFor="schedule-time">Horário</Label>
-                        <Input
-                          id="schedule-time"
-                          type="time"
-                          value={scheduleTime}
-                          onChange={(e) => setScheduleTime(e.target.value)}
-                        />
-                      </div>
-                    </div>
+                      <p className="text-xs text-muted-foreground pl-6">
+                        Fuso horário: {Intl.DateTimeFormat().resolvedOptions().timeZone}
+                      </p>
+                    </>
                   )}
                 </div>
 

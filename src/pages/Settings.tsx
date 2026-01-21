@@ -4,6 +4,7 @@ import { useCredits } from '@/hooks/useCredits';
 import { useWorkspaceMembers } from '@/hooks/useWorkspaceMembers';
 import { useAccounts } from '@/hooks/useAccounts';
 import { useWorkspaceSettings } from '@/hooks/useWorkspaceSettings';
+import { useDailyUsage } from '@/hooks/useDailyUsage';
 import AppLayout from '@/components/layout/AppLayout';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -59,6 +60,7 @@ export default function Settings() {
   const { members, isLoading: membersLoading, removeMember, updateRole } = useWorkspaceMembers();
   const { accounts, isLoading: accountsLoading, syncAccounts, isSyncing, refetchAccounts, deleteAccount, isDeleting, updateAccountName, isUpdatingName } = useAccounts();
   const { settings, updateSettings, isUpdating: isUpdatingSettings } = useWorkspaceSettings();
+  const { linkedinMessagesToday, linkedinInvitesToday, whatsappMessagesToday, isLoading: usageLoading, refetch: refetchUsage } = useDailyUsage();
   const { toast } = useToast();
 
   // States for WhatsApp sending limits
@@ -1309,6 +1311,89 @@ export default function Settings() {
 
               {/* LinkedIn Preferences */}
               <TabsContent value="linkedin" className="space-y-4">
+                {/* Card de Uso de Hoje */}
+                <Card>
+                  <CardHeader>
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <CardTitle className="flex items-center gap-2">
+                          <History className="h-5 w-5" />
+                          Uso de Hoje
+                        </CardTitle>
+                        <CardDescription>
+                          Ações realizadas hoje em todas as contas LinkedIn
+                        </CardDescription>
+                      </div>
+                      <Button 
+                        variant="outline" 
+                        size="sm" 
+                        onClick={() => refetchUsage()}
+                        disabled={usageLoading}
+                      >
+                        {usageLoading ? (
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                        ) : (
+                          <RefreshCw className="h-4 w-4" />
+                        )}
+                      </Button>
+                    </div>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="grid gap-4 md:grid-cols-2">
+                      <div className="flex items-center justify-between p-4 border rounded-lg">
+                        <div className="flex items-center gap-3">
+                          <div className="p-2 rounded-full bg-primary/10">
+                            <MessageCircle className="h-5 w-5 text-primary" />
+                          </div>
+                          <div>
+                            <p className="text-sm font-medium">Mensagens</p>
+                            <p className="text-xs text-muted-foreground">DMs enviadas hoje</p>
+                          </div>
+                        </div>
+                        <div className="text-right">
+                          <p className="text-2xl font-bold">
+                            {usageLoading ? (
+                              <Skeleton className="h-8 w-16 inline-block" />
+                            ) : (
+                              <>
+                                {linkedinMessagesToday}
+                                <span className="text-sm font-normal text-muted-foreground">
+                                  /{settings.linkedin_daily_message_limit ?? 50}
+                                </span>
+                              </>
+                            )}
+                          </p>
+                        </div>
+                      </div>
+                      <div className="flex items-center justify-between p-4 border rounded-lg">
+                        <div className="flex items-center gap-3">
+                          <div className="p-2 rounded-full bg-secondary/50">
+                            <Users className="h-5 w-5 text-secondary-foreground" />
+                          </div>
+                          <div>
+                            <p className="text-sm font-medium">Convites</p>
+                            <p className="text-xs text-muted-foreground">Conexões enviadas hoje</p>
+                          </div>
+                        </div>
+                        <div className="text-right">
+                          <p className="text-2xl font-bold">
+                            {usageLoading ? (
+                              <Skeleton className="h-8 w-16 inline-block" />
+                            ) : (
+                              <>
+                                {linkedinInvitesToday}
+                                <span className="text-sm font-normal text-muted-foreground">
+                                  /{settings.linkedin_daily_invite_limit ?? 25}
+                                </span>
+                              </>
+                            )}
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+
                 {/* Card de Limites de Envio LinkedIn */}
                 <Card>
                   <CardHeader>

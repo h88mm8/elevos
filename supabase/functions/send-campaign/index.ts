@@ -38,6 +38,19 @@ function applyJitter(baseSeconds: number, minSeconds: number = 10): number {
   return Math.max(jitteredValue, minSeconds);
 }
 
+// Get today's date in YYYY-MM-DD format
+function getTodayDate(): string {
+  return new Date().toISOString().split('T')[0];
+}
+
+// Get next day at 09:00 UTC for rescheduling
+function getNextDayAt9AM(): string {
+  const tomorrow = new Date();
+  tomorrow.setDate(tomorrow.getDate() + 1);
+  tomorrow.setUTCHours(9, 0, 0, 0);
+  return tomorrow.toISOString();
+}
+
 interface CampaignLead {
   id: string;
   lead_id: string;
@@ -83,6 +96,9 @@ const DEFAULT_SETTINGS: WorkspaceSettings = {
   linkedin_message_interval_seconds: 30,
 };
 
+// Action types for usage tracking
+type UsageAction = 'linkedin_message' | 'linkedin_invite' | 'whatsapp_message';
+
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
@@ -98,6 +114,12 @@ serve(async (req) => {
       Deno.env.get('SUPABASE_URL')!,
       Deno.env.get('SUPABASE_ANON_KEY')!,
       { global: { headers: { Authorization: authHeader } } }
+    );
+
+    // Service client for RPC calls (bypasses RLS)
+    const serviceClient = createClient(
+      Deno.env.get('SUPABASE_URL')!,
+      Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
     );
 
     const token = authHeader.replace('Bearer ', '');
@@ -156,9 +178,13 @@ serve(async (req) => {
     // SELECT CHANNEL-SPECIFIC SETTINGS
     // ============================================
     const isLinkedIn = campaign.type === 'linkedin';
+    const isWhatsApp = campaign.type === 'whatsapp';
     const dailyLimit = isLinkedIn ? settings.linkedin_daily_message_limit : settings.daily_message_limit;
     const baseIntervalSeconds = isLinkedIn ? settings.linkedin_message_interval_seconds : settings.message_interval_seconds;
-    const minIntervalSeconds = isLinkedIn ? 10 : 10; // Both have 10s minimum
+    const minIntervalSeconds = 10; // Both have 10s minimum
+
+    // Determine usage action type
+    const usageAction: UsageAction = isLinkedIn ? 'linkedin_message' : isWhatsApp ? 'whatsapp_message' : 'whatsapp_message';
 
     console.log(`Using ${isLinkedIn ? 'LinkedIn' : 'WhatsApp'} settings: ${dailyLimit} msgs/day, ${baseIntervalSeconds}s base interval (with ±20% jitter)`);
 
@@ -177,6 +203,7 @@ serve(async (req) => {
     // VALIDATE ACCOUNT FOR WHATSAPP/LINKEDIN CAMPAIGNS
     // ============================================
     let accountId: string | null = null;
+    let unipileAccountId: string | null = null;
 
     if (campaign.type === 'whatsapp' || campaign.type === 'linkedin') {
       if (!campaign.account_id) {
@@ -186,7 +213,7 @@ serve(async (req) => {
       // Verify account belongs to workspace (campaign.account_id stores the internal UUID)
       const { data: account, error: accountError } = await supabase
         .from('accounts')
-        .select('account_id, status')
+        .select('id, account_id, status')
         .eq('id', campaign.account_id)
         .eq('workspace_id', campaign.workspace_id)
         .single();
@@ -200,8 +227,36 @@ serve(async (req) => {
         return new Response(JSON.stringify({ error: 'Account is not connected. Please reconnect.' }), { status: 400, headers: corsHeaders });
       }
 
-      accountId = account.account_id;
+      accountId = account.id; // Internal UUID for usage tracking
+      unipileAccountId = account.account_id; // Unipile account ID for API calls
     }
+
+    // ============================================
+    // CHECK CURRENT DAILY USAGE
+    // ============================================
+    const todayDate = getTodayDate();
+    let currentUsage = 0;
+
+    if (accountId) {
+      const { data: usageData, error: usageError } = await serviceClient
+        .rpc('get_daily_usage', {
+          p_workspace_id: campaign.workspace_id,
+          p_account_id: unipileAccountId,
+          p_action: usageAction,
+          p_usage_date: todayDate,
+        });
+
+      if (usageError) {
+        console.error('Error fetching daily usage:', usageError);
+      } else {
+        currentUsage = usageData || 0;
+      }
+      
+      console.log(`Current daily usage for ${usageAction}: ${currentUsage}/${dailyLimit}`);
+    }
+
+    // Calculate remaining capacity for today
+    const remainingCapacity = Math.max(0, dailyLimit - currentUsage);
 
     // ============================================
     // GET PENDING LEADS FOR THIS CAMPAIGN
@@ -248,61 +303,126 @@ serve(async (req) => {
     console.log(`Campaign ${campaignId}: ${totalLeads} leads, daily limit: ${dailyLimit}`);
 
     // ============================================
-    // CHECK IF QUEUE IS NEEDED
+    // CHECK DAILY LIMIT - DEFER IF EXCEEDED
     // ============================================
-    if (totalLeads > dailyLimit) {
-      console.log(`Campaign exceeds daily limit. Creating queue entries...`);
+    if (remainingCapacity === 0) {
+      console.log(`Daily limit reached for ${usageAction}. Deferring campaign to next day.`);
+      
+      // Update all pending leads to DEFERRED status
+      await supabase
+        .from('campaign_leads')
+        .update({ 
+          status: 'deferred',
+          error: 'DEFERRED_DAILY_LIMIT',
+        })
+        .eq('campaign_id', campaignId)
+        .eq('status', 'pending');
 
-      // Calculate number of days needed
-      const daysNeeded = Math.ceil(totalLeads / dailyLimit);
-      const today = new Date();
-      today.setHours(0, 0, 0, 0);
+      // Create or update queue entry for tomorrow
+      const tomorrowDate = new Date();
+      tomorrowDate.setDate(tomorrowDate.getDate() + 1);
+      const tomorrowDateStr = tomorrowDate.toISOString().split('T')[0];
 
-      // Create queue entries for each day
-      const queueEntries = [];
-      for (let day = 0; day < daysNeeded; day++) {
-        const scheduledDate = new Date(today);
-        scheduledDate.setDate(scheduledDate.getDate() + day);
-        
-        const leadsForDay = day === daysNeeded - 1 
-          ? totalLeads - (dailyLimit * day) 
-          : dailyLimit;
-
-        queueEntries.push({
-          campaign_id: campaignId,
-          workspace_id: campaign.workspace_id,
-          scheduled_date: scheduledDate.toISOString().split('T')[0],
-          leads_to_send: leadsForDay,
-          leads_sent: 0,
-          status: day === 0 ? 'processing' : 'queued',
-        });
-      }
-
-      // Insert queue entries
-      const { error: queueError } = await supabase
+      // Check if queue entry already exists for tomorrow
+      const { data: existingQueue } = await supabase
         .from('campaign_queue')
-        .insert(queueEntries);
+        .select('id')
+        .eq('campaign_id', campaignId)
+        .eq('scheduled_date', tomorrowDateStr)
+        .maybeSingle();
 
-      if (queueError) {
-        console.error('Error creating queue entries:', queueError);
-        return new Response(JSON.stringify({ error: 'Failed to create queue' }), { status: 500, headers: corsHeaders });
+      if (!existingQueue) {
+        await supabase
+          .from('campaign_queue')
+          .insert({
+            campaign_id: campaignId,
+            workspace_id: campaign.workspace_id,
+            scheduled_date: tomorrowDateStr,
+            leads_to_send: totalLeads,
+            leads_sent: 0,
+            status: 'queued',
+          });
       }
 
-      // Update campaign status to 'queued'
+      // Update campaign status
       await supabase
         .from('campaigns')
         .update({ status: 'queued' })
         .eq('id', campaignId);
 
-      // Continue to send today's batch
-      console.log(`Queue created for ${daysNeeded} days. Sending first batch of ${dailyLimit} leads...`);
+      return new Response(JSON.stringify({
+        success: true,
+        campaignId,
+        status: 'deferred',
+        reason: 'DAILY_LIMIT_REACHED',
+        nextRunAt: getNextDayAt9AM(),
+        currentUsage,
+        dailyLimit,
+      }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
     }
 
-    // Determine how many leads to send now
-    const leadsToSendNow = Math.min(totalLeads, dailyLimit);
+    // ============================================
+    // CHECK IF QUEUE IS NEEDED (campaign exceeds remaining capacity)
+    // ============================================
+    const effectiveDailyLimit = Math.min(remainingCapacity, dailyLimit);
+    
+    if (totalLeads > effectiveDailyLimit) {
+      console.log(`Campaign exceeds remaining capacity (${remainingCapacity}). Creating queue entries...`);
+
+      // Calculate number of days needed
+      const leadsAfterToday = totalLeads - effectiveDailyLimit;
+      const additionalDays = Math.ceil(leadsAfterToday / dailyLimit);
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+
+      // Create queue entries for subsequent days
+      const queueEntries = [];
+      for (let day = 1; day <= additionalDays; day++) {
+        const scheduledDate = new Date(today);
+        scheduledDate.setDate(scheduledDate.getDate() + day);
+        
+        const startIdx = effectiveDailyLimit + (day - 1) * dailyLimit;
+        const endIdx = Math.min(startIdx + dailyLimit, totalLeads);
+        const leadsForDay = endIdx - startIdx;
+
+        if (leadsForDay > 0) {
+          queueEntries.push({
+            campaign_id: campaignId,
+            workspace_id: campaign.workspace_id,
+            scheduled_date: scheduledDate.toISOString().split('T')[0],
+            leads_to_send: leadsForDay,
+            leads_sent: 0,
+            status: 'queued',
+          });
+        }
+      }
+
+      if (queueEntries.length > 0) {
+        // Insert queue entries
+        const { error: queueError } = await supabase
+          .from('campaign_queue')
+          .insert(queueEntries);
+
+        if (queueError) {
+          console.error('Error creating queue entries:', queueError);
+          return new Response(JSON.stringify({ error: 'Failed to create queue' }), { status: 500, headers: corsHeaders });
+        }
+
+        // Update campaign status to 'queued'
+        await supabase
+          .from('campaigns')
+          .update({ status: 'queued' })
+          .eq('id', campaignId);
+
+        console.log(`Queue created for ${additionalDays} additional days. Sending first batch of ${effectiveDailyLimit} leads...`);
+      }
+    }
+
+    // Determine how many leads to send now (respecting remaining capacity)
+    const leadsToSendNow = Math.min(totalLeads, effectiveDailyLimit);
     const leadsToProcess = (campaignLeads as unknown as CampaignLead[]).slice(0, leadsToSendNow);
 
-    console.log(`Starting campaign ${campaignId} with ${leadsToProcess.length} leads (of ${totalLeads} total)`);
+    console.log(`Starting campaign ${campaignId} with ${leadsToProcess.length} leads (of ${totalLeads} total), remaining capacity: ${remainingCapacity}`);
 
     // Update campaign status to 'sending'
     await supabase
@@ -315,7 +435,8 @@ serve(async (req) => {
     // ============================================
     let sentCount = 0;
     let failedCount = 0;
-    const results: { leadId: string; success: boolean; error?: string; retryCount?: number; willRetry?: boolean }[] = [];
+    let deferredCount = 0;
+    const results: { leadId: string; success: boolean; error?: string; retryCount?: number; willRetry?: boolean; deferred?: boolean }[] = [];
 
     for (let i = 0; i < leadsToProcess.length; i++) {
       const cl = leadsToProcess[i];
@@ -352,7 +473,7 @@ serve(async (req) => {
           }
 
           const formData = new FormData();
-          formData.append('account_id', accountId!);
+          formData.append('account_id', unipileAccountId!);
           formData.append('text', personalizedMessage);
           formData.append('attendees_ids', `${digits}@s.whatsapp.net`);
 
@@ -391,7 +512,7 @@ serve(async (req) => {
           // For now, we'll try with the URL - may need adjustment based on Unipile's requirements
           
           const formData = new FormData();
-          formData.append('account_id', accountId!);
+          formData.append('account_id', unipileAccountId!);
           formData.append('text', personalizedMessage);
           formData.append('attendees_ids', linkedinUrl); // May need profile ID
           formData.append('linkedin[api]', 'classic');
@@ -444,6 +565,26 @@ serve(async (req) => {
             .eq('id', cl.id);
           sentCount++;
           results.push({ leadId: cl.lead_id, success: true });
+
+          // ============================================
+          // INCREMENT DAILY USAGE (after successful send)
+          // ============================================
+          if (unipileAccountId) {
+            const { data: newUsage, error: incrementError } = await serviceClient
+              .rpc('increment_daily_usage', {
+                p_workspace_id: campaign.workspace_id,
+                p_account_id: unipileAccountId,
+                p_action: usageAction,
+                p_usage_date: todayDate,
+                p_increment: 1,
+              });
+            
+            if (incrementError) {
+              console.error(`Error incrementing usage for ${usageAction}:`, incrementError);
+            } else {
+              console.log(`Usage incremented for ${usageAction}: now ${newUsage}/${dailyLimit}`);
+            }
+          }
         } else {
           const newRetryCount = cl.retry_count + 1;
           const isFinalFailure = newRetryCount >= settings.max_retries;

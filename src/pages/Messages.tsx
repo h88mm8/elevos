@@ -9,6 +9,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { useToast } from '@/hooks/use-toast';
 import { useNotificationSettings } from '@/hooks/useNotificationSettings';
 import { supabase } from '@/integrations/supabase/client';
+import { MessageAttachments } from '@/components/messages/MessageAttachments';
 import { 
   MessageSquare, 
   Send, 
@@ -24,7 +25,8 @@ import {
   Film,
   Music,
   Check,
-  CheckCheck
+  CheckCheck,
+  Mic
 } from 'lucide-react';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
@@ -828,12 +830,34 @@ export default function Messages() {
                                   isCurrentMatch && 'ring-2 ring-accent ring-offset-2 ring-offset-background'
                                 )}
                               >
-                                <p className="text-sm whitespace-pre-wrap">
-                                  {messageSearchQuery && isMatch 
-                                    ? highlightText(msg.text || '', messageSearchQuery)
-                                    : msg.text
-                                  }
-                                </p>
+                                {/* Attachments (audio, images, video, files) */}
+                                {msg.attachments && msg.attachments.length > 0 && (
+                                  <MessageAttachments 
+                                    attachments={msg.attachments} 
+                                    variant={msg.sender === 'me' ? 'sent' : 'received'}
+                                  />
+                                )}
+                                
+                                {/* Text content */}
+                                {msg.text && (
+                                  <p className={cn(
+                                    'text-sm whitespace-pre-wrap',
+                                    msg.attachments?.length && 'mt-2'
+                                  )}>
+                                    {messageSearchQuery && isMatch 
+                                      ? highlightText(msg.text, messageSearchQuery)
+                                      : msg.text
+                                    }
+                                  </p>
+                                )}
+                                
+                                {/* Empty message with no text and no attachments */}
+                                {!msg.text && (!msg.attachments || msg.attachments.length === 0) && (
+                                  <p className="text-sm text-muted-foreground italic">
+                                    Mensagem vazia
+                                  </p>
+                                )}
+                                
                                 <div className={cn(
                                   'flex items-center gap-1 text-xs mt-1',
                                   msg.sender === 'me' ? 'text-primary-foreground/70 justify-end' : 'text-muted-foreground'

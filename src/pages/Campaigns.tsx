@@ -118,7 +118,7 @@ export default function Campaigns() {
   const [subject, setSubject] = useState('');
   const [selectedAccountId, setSelectedAccountId] = useState<string>('');
   const [selectedLeadIds, setSelectedLeadIds] = useState<Set<string>>(new Set());
-  const [linkedInAction, setLinkedInAction] = useState<LinkedInAction>('dm');
+  const [linkedInAction, setLinkedInAction] = useState<LinkedInAction>('invite');
   
   // Schedule state
   const [scheduleEnabled, setScheduleEnabled] = useState(false);
@@ -174,7 +174,7 @@ export default function Campaigns() {
     setScheduleEnabled(false);
     setScheduleDate(undefined);
     setScheduleTime('09:00');
-    setLinkedInAction('dm');
+    setLinkedInAction('invite');
   }
 
   function insertVariable(variable: string) {
@@ -607,25 +607,12 @@ export default function Campaigns() {
                       </SelectContent>
                     </Select>
 
-                    {/* Warning/Info for InMail */}
-                    {linkedInAction === 'inmail' && (
-                      <Alert className="bg-amber-500/10 border-amber-500/30">
-                        <Sparkles className="h-4 w-4 text-amber-500" />
-                        <AlertDescription className="text-amber-600 dark:text-amber-400 text-xs">
-                          InMail requer conta Premium/Sales Navigator e consome créditos InMail.
-                        </AlertDescription>
-                      </Alert>
-                    )}
-
-                    {/* Info for DM */}
-                    {linkedInAction === 'dm' && (
-                      <Alert className="bg-blue-500/10 border-blue-500/30">
-                        <Info className="h-4 w-4 text-blue-500" />
-                        <AlertDescription className="text-blue-600 dark:text-blue-400 text-xs">
-                          Mensagens diretas só podem ser enviadas para conexões. Se o lead não for conexão, a mensagem falhará.
-                        </AlertDescription>
-                      </Alert>
-                    )}
+                    {/* Contextual hint based on selected action */}
+                    <p className="text-xs text-muted-foreground">
+                      {linkedInAction === 'dm' && 'Só funciona para conexões (1º grau).'}
+                      {linkedInAction === 'inmail' && 'Requer Premium/Sales Navigator e pode consumir créditos.'}
+                      {linkedInAction === 'invite' && 'Funciona para 2º grau. Nota opcional (até 300 chars).'}
+                    </p>
                   </div>
                 )}
 
@@ -948,7 +935,14 @@ export default function Campaigns() {
                         <TableCell>
                           <div className="flex items-center gap-2">
                             <TypeIcon className="h-4 w-4" />
-                            {typeLabels[campaign.type]}
+                            <span>{typeLabels[campaign.type]}</span>
+                            {campaign.type === 'linkedin' && campaign.linkedin_action && (
+                              <Badge variant="outline" className="text-xs font-normal">
+                                {campaign.linkedin_action === 'dm' && 'DM'}
+                                {campaign.linkedin_action === 'inmail' && 'InMail'}
+                                {campaign.linkedin_action === 'invite' && 'Invite'}
+                              </Badge>
+                            )}
                           </div>
                         </TableCell>
                         <TableCell>

@@ -951,6 +951,10 @@ export type Database = {
         }
         Returns: boolean
       }
+      finalize_campaign_status: {
+        Args: { p_campaign_id: string }
+        Returns: string
+      }
       get_daily_usage: {
         Args: {
           p_account_id: string

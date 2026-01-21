@@ -74,7 +74,7 @@ export default function AppLayout({ children }: { children: ReactNode }) {
   };
 
   return (
-    <div className="min-h-screen bg-background">
+    <div className="h-screen overflow-hidden bg-background">
       {/* Desktop Sidebar */}
       <aside className="hidden lg:fixed lg:inset-y-0 lg:flex lg:w-64 lg:flex-col border-r bg-card">
         <div className="flex h-16 items-center gap-2 px-6 border-b">
@@ -115,9 +115,9 @@ export default function AppLayout({ children }: { children: ReactNode }) {
       </aside>
 
       {/* Main content */}
-      <div className="lg:pl-64">
+      <div className="lg:pl-64 h-full flex flex-col">
         {/* Header */}
-        <header className="sticky top-0 z-40 flex h-16 items-center gap-4 border-b bg-card px-4 lg:px-6">
+        <header className="flex-shrink-0 z-40 flex h-16 items-center gap-4 border-b bg-card px-4 lg:px-6">
           {/* Mobile menu */}
           <Sheet open={mobileOpen} onOpenChange={setMobileOpen}>
             <SheetTrigger asChild className="lg:hidden">
@@ -167,7 +167,7 @@ export default function AppLayout({ children }: { children: ReactNode }) {
         </header>
 
         {/* Page content */}
-        <main className="p-4 lg:p-6">
+        <main className="flex-1 overflow-auto p-4 lg:p-6">
           {children}
         </main>
       </div>

@@ -14,6 +14,36 @@ export type Database = {
   }
   public: {
     Tables: {
+      account_daily_usage: {
+        Row: {
+          account_id: string
+          action: string
+          count: number
+          id: string
+          updated_at: string
+          usage_date: string
+          workspace_id: string
+        }
+        Insert: {
+          account_id: string
+          action: string
+          count?: number
+          id?: string
+          updated_at?: string
+          usage_date: string
+          workspace_id: string
+        }
+        Update: {
+          account_id?: string
+          action?: string
+          count?: number
+          id?: string
+          updated_at?: string
+          usage_date?: string
+          workspace_id?: string
+        }
+        Relationships: []
+      }
       accounts: {
         Row: {
           account_id: string
@@ -851,6 +881,33 @@ export type Database = {
           p_workspace_id: string
         }
         Returns: boolean
+      }
+      get_daily_usage: {
+        Args: {
+          p_account_id: string
+          p_action: string
+          p_usage_date: string
+          p_workspace_id: string
+        }
+        Returns: number
+      }
+      get_workspace_daily_usage: {
+        Args: { p_usage_date: string; p_workspace_id: string }
+        Returns: {
+          account_id: string
+          action: string
+          count: number
+        }[]
+      }
+      increment_daily_usage: {
+        Args: {
+          p_account_id: string
+          p_action: string
+          p_increment?: number
+          p_usage_date: string
+          p_workspace_id: string
+        }
+        Returns: number
       }
       is_valid_phone: { Args: { identifier: string }; Returns: boolean }
       is_workspace_admin: { Args: { workspace_uuid: string }; Returns: boolean }

@@ -61,8 +61,6 @@ serve(async (req) => {
     );
 
     // Check if already cached
-    const extension = getExtensionFromMimeType(mimeType || 'application/octet-stream');
-    const filePath = `${workspaceId}/media/${messageId}.${extension}`;
     
     const { data: existingFile } = await supabaseAdmin.storage
       .from('message-attachments')
@@ -98,13 +96,43 @@ serve(async (req) => {
     }
 
     const mediaBlob = await mediaResponse.blob();
-    console.log(`Downloaded ${mediaBlob.size} bytes, type: ${mediaBlob.type}`);
+    const responseContentType = mediaResponse.headers.get('content-type');
+    console.log(`Downloaded ${mediaBlob.size} bytes, response type: ${responseContentType}, blob type: ${mediaBlob.type}`);
+
+    // Determine the best content type to use
+    // Priority: provided mimeType > response content-type > blob type > infer from mediaType
+    let finalMimeType = mimeType;
+    
+    if (!finalMimeType || finalMimeType === 'application/octet-stream') {
+      finalMimeType = responseContentType?.split(';')[0].trim();
+    }
+    
+    if (!finalMimeType || finalMimeType === 'application/octet-stream') {
+      finalMimeType = mediaBlob.type;
+    }
+    
+    if (!finalMimeType || finalMimeType === 'application/octet-stream') {
+      // Infer from mediaType parameter
+      const typeDefaults: Record<string, string> = {
+        'audio': 'audio/ogg',
+        'image': 'image/jpeg',
+        'video': 'video/mp4',
+        'document': 'application/pdf',
+      };
+      finalMimeType = typeDefaults[mediaType] || 'application/octet-stream';
+    }
+
+    console.log(`Using final mimeType: ${finalMimeType}`);
+
+    // Get extension for file path
+    const extension = getExtensionFromMimeType(finalMimeType);
+    const uploadPath = `${workspaceId}/media/${messageId}.${extension}`;
 
     // Upload to storage
     const { error: uploadError } = await supabaseAdmin.storage
       .from('message-attachments')
-      .upload(filePath, mediaBlob, {
-        contentType: mimeType || mediaBlob.type || 'application/octet-stream',
+      .upload(uploadPath, mediaBlob, {
+        contentType: finalMimeType,
         upsert: true,
       });
 
@@ -116,7 +144,7 @@ serve(async (req) => {
     // Get public URL
     const { data: publicUrlData } = supabaseAdmin.storage
       .from('message-attachments')
-      .getPublicUrl(filePath);
+      .getPublicUrl(uploadPath);
 
     console.log(`Media cached successfully: ${publicUrlData.publicUrl}`);
 

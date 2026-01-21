@@ -188,7 +188,7 @@ serve(async (req) => {
         email: (item.email || null) as string | null,
         personal_email: (item.personal_email || null) as string | null,
         mobile_number: (item.mobile_number || null) as string | null,
-        phone: (item.mobile_number || null) as string | null,
+        phone: (item.phone || null) as string | null,
         linkedin_url: (item.linkedin || null) as string | null,
         
         // Cargo e nível

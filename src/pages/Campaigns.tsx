@@ -88,7 +88,7 @@ export default function Campaigns() {
   // Filter leads based on campaign type
   const validLeads = leads.filter(lead => {
     if (type === 'email') return !!lead.email;
-    if (type === 'whatsapp') return !!(lead.phone || lead.mobile_number);
+    if (type === 'whatsapp') return !!lead.mobile_number;
     if (type === 'linkedin') return !!lead.linkedin_url;
     return false;
   });

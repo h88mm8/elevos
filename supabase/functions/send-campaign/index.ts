@@ -301,6 +301,7 @@ serve(async (req) => {
       try {
         let sendSuccess = false;
         let sendError = '';
+        let providerMessageId: string | null = null;
 
         if (campaign.type === 'whatsapp') {
           // Get phone number (prefer mobile_number, fallback to phone)
@@ -333,7 +334,12 @@ serve(async (req) => {
 
           if (response.ok) {
             sendSuccess = true;
-            console.log(`WhatsApp message sent to ${phoneNumber}`);
+            const responseData = await response.json().catch(() => ({}));
+            // Store provider message ID for tracking
+            if (responseData.message_id || responseData.id) {
+              providerMessageId = responseData.message_id || responseData.id;
+            }
+            console.log(`WhatsApp message sent to ${phoneNumber}, messageId: ${providerMessageId || 'unknown'}`);
           } else {
             const errorText = await response.text().catch(() => '');
             sendError = errorText || `HTTP ${response.status}`;
@@ -387,9 +393,16 @@ serve(async (req) => {
 
         // Update campaign_lead status
         if (sendSuccess) {
+          const updateData: Record<string, any> = { 
+            status: 'sent', 
+            sent_at: new Date().toISOString() 
+          };
+          if (providerMessageId) {
+            updateData.provider_message_id = providerMessageId;
+          }
           await supabase
             .from('campaign_leads')
-            .update({ status: 'sent', sent_at: new Date().toISOString() })
+            .update(updateData)
             .eq('id', cl.id);
           sentCount++;
           results.push({ leadId: cl.lead_id, success: true });

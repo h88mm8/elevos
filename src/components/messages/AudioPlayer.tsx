@@ -1,9 +1,10 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { Button } from '@/components/ui/button';
 import { Slider } from '@/components/ui/slider';
-import { Play, Pause, Download, Loader2 } from 'lucide-react';
+import { Play, Pause, Download, Loader2, FileText, ChevronDown, ChevronUp } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { supabase } from '@/integrations/supabase/client';
+import { useAudioTranscription } from '@/hooks/useAudioTranscription';
 
 interface AudioPlayerProps {
   url: string;
@@ -34,6 +35,18 @@ export function AudioPlayer({
   const [error, setError] = useState<string | null>(null);
   const [retryCount, setRetryCount] = useState(0);
   const [isDownloading, setIsDownloading] = useState(false);
+  const [showTranscription, setShowTranscription] = useState(false);
+
+  // Transcription hook - only for received messages
+  const isReceived = variant === 'received';
+  const { 
+    text: transcriptionText, 
+    status: transcriptionStatus, 
+    progress: transcriptionProgress,
+    error: transcriptionError,
+    transcribe,
+    reset: resetTranscription 
+  } = useAudioTranscription();
 
   // Check if URL is already from storage (cached)
   const isStorageUrl = useCallback((testUrl: string) => {
@@ -214,6 +227,23 @@ export function AudioPlayer({
 
   const isSent = variant === 'sent';
 
+  // Handle transcription toggle
+  const handleTranscriptionToggle = useCallback(async () => {
+    if (!isReceived) return;
+    
+    if (showTranscription) {
+      setShowTranscription(false);
+      return;
+    }
+    
+    setShowTranscription(true);
+    
+    // Only transcribe if we haven't already
+    if (transcriptionStatus === 'idle') {
+      await transcribe(audioUrl);
+    }
+  }, [isReceived, showTranscription, transcriptionStatus, transcribe, audioUrl]);
+
   if (error) {
     return (
       <div className={cn(
@@ -226,72 +256,125 @@ export function AudioPlayer({
   }
 
   return (
-    <div className={cn(
-      'flex items-center gap-2 min-w-[200px] max-w-[280px]',
-    )}>
-      <audio ref={audioRef} src={audioUrl} preload="metadata" crossOrigin="anonymous" />
-      
-      <Button
-        variant="ghost"
-        size="icon"
-        className={cn(
-          'h-10 w-10 rounded-full shrink-0',
-          isSent 
-            ? 'hover:bg-primary-foreground/20 text-primary-foreground' 
-            : 'hover:bg-muted-foreground/20'
-        )}
-        onClick={togglePlay}
-        disabled={isLoading || isCaching}
-      >
-        {isLoading || isCaching ? (
-          <div className={cn(
-            'h-4 w-4 animate-pulse rounded-full',
-            isSent ? 'bg-primary-foreground/50' : 'bg-muted-foreground/50'
-          )} />
-        ) : isPlaying ? (
-          <Pause className="h-5 w-5" />
-        ) : (
-          <Play className="h-5 w-5 ml-0.5" />
-        )}
-      </Button>
-
-      <div className="flex-1 flex flex-col gap-1">
-        <Slider
-          value={[currentTime]}
-          max={audioDuration || 100}
-          step={0.1}
-          onValueChange={handleSeek}
-          disabled={isLoading || isCaching}
+    <div className="flex flex-col gap-2">
+      <div className={cn(
+        'flex items-center gap-2 min-w-[200px] max-w-[280px]',
+      )}>
+        <audio ref={audioRef} src={audioUrl} preload="metadata" crossOrigin="anonymous" />
+        
+        <Button
+          variant="ghost"
+          size="icon"
           className={cn(
-            'w-full',
-            isSent && '[&_[role=slider]]:bg-primary-foreground [&_[role=slider]]:border-primary-foreground [&_.range]:bg-primary-foreground/70'
+            'h-10 w-10 rounded-full shrink-0',
+            isSent 
+              ? 'hover:bg-primary-foreground/20 text-primary-foreground' 
+              : 'hover:bg-muted-foreground/20'
           )}
-        />
-        <div className={cn(
-          'flex justify-between text-xs',
-          isSent ? 'text-primary-foreground/70' : 'text-muted-foreground'
-        )}>
-          <span>{formatTime(currentTime)}</span>
-          <span>{formatTime(audioDuration)}</span>
+          onClick={togglePlay}
+          disabled={isLoading || isCaching}
+        >
+          {isLoading || isCaching ? (
+            <div className={cn(
+              'h-4 w-4 animate-pulse rounded-full',
+              isSent ? 'bg-primary-foreground/50' : 'bg-muted-foreground/50'
+            )} />
+          ) : isPlaying ? (
+            <Pause className="h-5 w-5" />
+          ) : (
+            <Play className="h-5 w-5 ml-0.5" />
+          )}
+        </Button>
+
+        <div className="flex-1 flex flex-col gap-1">
+          <Slider
+            value={[currentTime]}
+            max={audioDuration || 100}
+            step={0.1}
+            onValueChange={handleSeek}
+            disabled={isLoading || isCaching}
+            className={cn(
+              'w-full',
+              isSent && '[&_[role=slider]]:bg-primary-foreground [&_[role=slider]]:border-primary-foreground [&_.range]:bg-primary-foreground/70'
+            )}
+          />
+          <div className={cn(
+            'flex justify-between text-xs',
+            isSent ? 'text-primary-foreground/70' : 'text-muted-foreground'
+          )}>
+            <span>{formatTime(currentTime)}</span>
+            <span>{formatTime(audioDuration)}</span>
+          </div>
+        </div>
+
+        <div className="flex items-center gap-1">
+          {/* Transcription button - only for received messages */}
+          {isReceived && (
+            <button
+              onClick={handleTranscriptionToggle}
+              disabled={transcriptionStatus === 'loading-model' || transcriptionStatus === 'transcribing'}
+              className={cn(
+                'shrink-0 p-1 rounded hover:bg-accent/20 disabled:opacity-50 text-muted-foreground',
+                showTranscription && 'bg-accent/20'
+              )}
+              title={showTranscription ? 'Ocultar transcrição' : 'Transcrever áudio'}
+            >
+              {transcriptionStatus === 'loading-model' || transcriptionStatus === 'transcribing' ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <FileText className="h-4 w-4" />
+              )}
+            </button>
+          )}
+
+          {audioUrl && (
+            <button
+              onClick={handleDownload}
+              disabled={isDownloading}
+              className={cn(
+                'shrink-0 p-1 rounded hover:bg-accent/20 disabled:opacity-50',
+                isSent ? 'text-primary-foreground/70' : 'text-muted-foreground'
+              )}
+              title="Baixar áudio"
+            >
+              {isDownloading ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <Download className="h-4 w-4" />
+              )}
+            </button>
+          )}
         </div>
       </div>
 
-      {audioUrl && (
-        <button
-          onClick={handleDownload}
-          disabled={isDownloading}
-          className={cn(
-            'shrink-0 p-1 rounded hover:bg-accent/20 disabled:opacity-50',
-            isSent ? 'text-primary-foreground/70' : 'text-muted-foreground'
-          )}
-          title="Baixar áudio"
-        >
-          {isDownloading ? (
-            <Loader2 className="h-4 w-4 animate-spin" />
-          ) : (
-            <Download className="h-4 w-4" />
-          )}
-        </button>
+      {/* Transcription panel */}
+      {isReceived && showTranscription && (
+        <div className="pl-12 pr-2">
+          <div className="bg-muted/50 rounded-lg p-2 text-sm">
+            {transcriptionStatus === 'loading-model' && (
+              <div className="flex items-center gap-2 text-muted-foreground">
+                <Loader2 className="h-3 w-3 animate-spin" />
+                <span>Carregando modelo ({transcriptionProgress}%)...</span>
+              </div>
+            )}
+            {transcriptionStatus === 'transcribing' && (
+              <div className="flex items-center gap-2 text-muted-foreground">
+                <Loader2 className="h-3 w-3 animate-spin" />
+                <span>Transcrevendo...</span>
+              </div>
+            )}
+            {transcriptionStatus === 'error' && (
+              <div className="text-destructive text-xs">
+                {transcriptionError || 'Erro na transcrição'}
+              </div>
+            )}
+            {transcriptionStatus === 'done' && (
+              <p className="text-foreground whitespace-pre-wrap">
+                {transcriptionText || <span className="text-muted-foreground italic">Sem fala detectada</span>}
+              </p>
+            )}
+          </div>
+        </div>
       )}
     </div>
   );

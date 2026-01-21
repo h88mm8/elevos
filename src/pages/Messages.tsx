@@ -662,14 +662,44 @@ export default function Messages() {
       setUploading(false);
 
       // Send voice message via edge function
-      const data = await invokeAuthedFunction('send-message', {
-        workspaceId: currentWorkspace.id,
-        chatId: selectedChat.id,
-        attachmentUrl: signedUrlData.signedUrl,
-        attachmentType: 'audio/ogg',
-        attachmentName: fileName,
-        isVoiceNote: true, // Flag to indicate this is a voice note
-      });
+      // Check if this is a new conversation (temporary chat)
+      const isNewConversation = selectedChat.id.startsWith('new-');
+      
+      let data;
+      if (isNewConversation) {
+        // For new conversations, use accountId + attendeesIds
+        const phoneNumber = selectedChat.attendee_identifier;
+        
+        data = await invokeAuthedFunction('send-message', {
+          workspaceId: currentWorkspace.id,
+          accountId: selectedChat.account_id,
+          attendeesIds: [phoneNumber],
+          attachmentUrl: signedUrlData.signedUrl,
+          attachmentType: 'audio/ogg',
+          attachmentName: fileName,
+          isVoiceNote: true,
+        });
+        
+        // Update the chat with the real chat ID from the response
+        if (data.chatId) {
+          const realChatId = data.chatId;
+          setChats(prev => prev.map(c => 
+            c.id === selectedChat.id 
+              ? { ...c, id: realChatId }
+              : c
+          ));
+          setSelectedChat(prev => prev ? { ...prev, id: realChatId } : null);
+        }
+      } else {
+        data = await invokeAuthedFunction('send-message', {
+          workspaceId: currentWorkspace.id,
+          chatId: selectedChat.id,
+          attachmentUrl: signedUrlData.signedUrl,
+          attachmentType: 'audio/ogg',
+          attachmentName: fileName,
+          isVoiceNote: true,
+        });
+      }
 
       // Update temp message with real ID
       setMessages(prev => prev.map(m => 
@@ -743,14 +773,46 @@ export default function Messages() {
         clearSelectedFile();
       }
 
-      const data = await invokeAuthedFunction('send-message', {
-        workspaceId: currentWorkspace?.id,
-        chatId: selectedChat.id,
-        text: messageText || undefined,
-        attachmentUrl,
-        attachmentType,
-        attachmentName,
-      });
+      // Check if this is a new conversation (temporary chat)
+      const isNewConversation = selectedChat.id.startsWith('new-');
+      
+      let data;
+      if (isNewConversation) {
+        // For new conversations, use accountId + attendeesIds
+        // The attendee_identifier contains the phone number
+        const phoneNumber = selectedChat.attendee_identifier;
+        
+        data = await invokeAuthedFunction('send-message', {
+          workspaceId: currentWorkspace?.id,
+          accountId: selectedChat.account_id,
+          attendeesIds: [phoneNumber],
+          text: messageText || undefined,
+          attachmentUrl,
+          attachmentType,
+          attachmentName,
+        });
+        
+        // Update the chat with the real chat ID from the response
+        if (data.chatId) {
+          const realChatId = data.chatId;
+          setChats(prev => prev.map(c => 
+            c.id === selectedChat.id 
+              ? { ...c, id: realChatId }
+              : c
+          ));
+          setSelectedChat(prev => prev ? { ...prev, id: realChatId } : null);
+        }
+      } else {
+        // For existing chats, use chatId
+        data = await invokeAuthedFunction('send-message', {
+          workspaceId: currentWorkspace?.id,
+          chatId: selectedChat.id,
+          text: messageText || undefined,
+          attachmentUrl,
+          attachmentType,
+          attachmentName,
+        });
+      }
 
       // Replace temp message with real one (mark as sent)
       setMessages(prev => prev.map(m => 

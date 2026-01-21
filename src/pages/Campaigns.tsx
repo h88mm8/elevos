@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useRef } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import { useCampaigns } from '@/hooks/useCampaigns';
 import { useLeads } from '@/hooks/useLeads';
@@ -15,6 +15,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { useToast } from '@/hooks/use-toast';
 import { supabase } from '@/integrations/supabase/client';
 import { 
@@ -25,11 +26,14 @@ import {
   MessageCircle,
   Linkedin,
   Calendar,
-  AlertCircle
+  AlertCircle,
+  Variable,
+  Eye,
 } from 'lucide-react';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import { Lead } from '@/types';
+import { MESSAGE_VARIABLES, getMessagePreview } from '@/lib/messageVariables';
 
 const statusLabels: Record<string, { label: string; variant: 'default' | 'secondary' | 'destructive' | 'outline' }> = {
   draft: { label: 'Rascunho', variant: 'secondary' },
@@ -61,6 +65,8 @@ export default function Campaigns() {
 
   const [dialogOpen, setDialogOpen] = useState(false);
   const [creating, setCreating] = useState(false);
+  const [showPreview, setShowPreview] = useState(false);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   // Form state
   const [name, setName] = useState('');
@@ -100,6 +106,26 @@ export default function Campaigns() {
     setSubject('');
     setSelectedAccountId('');
     setSelectedLeadIds(new Set());
+    setShowPreview(false);
+  }
+
+  function insertVariable(variable: string) {
+    const textarea = textareaRef.current;
+    if (!textarea) {
+      setMessage(prev => prev + variable);
+      return;
+    }
+    
+    const start = textarea.selectionStart;
+    const end = textarea.selectionEnd;
+    const newValue = message.substring(0, start) + variable + message.substring(end);
+    setMessage(newValue);
+    
+    // Set cursor position after inserted variable
+    setTimeout(() => {
+      textarea.focus();
+      textarea.setSelectionRange(start + variable.length, start + variable.length);
+    }, 0);
   }
 
   // Reset account when type changes
@@ -305,17 +331,77 @@ export default function Campaigns() {
                 )}
 
                 <div className="space-y-2">
-                  <Label htmlFor="message">Mensagem</Label>
-                  <Textarea
-                    id="message"
-                    placeholder="Escreva sua mensagem..."
-                    rows={5}
-                    value={message}
-                    onChange={(e) => setMessage(e.target.value)}
-                  />
-                  <p className="text-xs text-muted-foreground">
-                    Use {"{{nome}}"} para personalizar com o nome do lead
-                  </p>
+                  <div className="flex items-center justify-between">
+                    <Label htmlFor="message">Mensagem</Label>
+                    <div className="flex items-center gap-2">
+                      <Popover>
+                        <PopoverTrigger asChild>
+                          <Button variant="outline" size="sm" className="h-7 gap-1">
+                            <Variable className="h-3.5 w-3.5" />
+                            Variável
+                          </Button>
+                        </PopoverTrigger>
+                        <PopoverContent className="w-72 p-2" align="end">
+                          <div className="grid gap-1">
+                            {MESSAGE_VARIABLES.map((variable) => (
+                              <button
+                                key={variable.variable}
+                                onClick={() => insertVariable(variable.variable)}
+                                className="flex items-center justify-between w-full px-2 py-1.5 text-left text-sm rounded hover:bg-muted"
+                              >
+                                <span>{variable.label}</span>
+                                <code className="text-xs text-muted-foreground font-mono">
+                                  {variable.variable}
+                                </code>
+                              </button>
+                            ))}
+                          </div>
+                        </PopoverContent>
+                      </Popover>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="h-7 gap-1"
+                        onClick={() => setShowPreview(!showPreview)}
+                      >
+                        <Eye className="h-3.5 w-3.5" />
+                        {showPreview ? 'Editar' : 'Preview'}
+                      </Button>
+                    </div>
+                  </div>
+                  
+                  {showPreview ? (
+                    <div className="p-4 border rounded-lg bg-muted/30 min-h-[130px]">
+                      <p className="text-sm whitespace-pre-wrap">
+                        {getMessagePreview(message)}
+                      </p>
+                    </div>
+                  ) : (
+                    <Textarea
+                      ref={textareaRef}
+                      id="message"
+                      placeholder="Escreva sua mensagem... Use variáveis como {{primeiro_nome}} para personalizar"
+                      rows={5}
+                      value={message}
+                      onChange={(e) => setMessage(e.target.value)}
+                    />
+                  )}
+                  
+                  <div className="flex flex-wrap gap-1">
+                    {['{{primeiro_nome}}', '{{empresa}}', '{{cargo}}'].map((v) => (
+                      <Badge
+                        key={v}
+                        variant="outline"
+                        className="cursor-pointer hover:bg-muted text-xs"
+                        onClick={() => insertVariable(v)}
+                      >
+                        {v}
+                      </Badge>
+                    ))}
+                    <span className="text-xs text-muted-foreground self-center ml-1">
+                      Clique para inserir
+                    </span>
+                  </div>
                 </div>
 
                 <div className="space-y-2">

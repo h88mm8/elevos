@@ -39,8 +39,5 @@ verify_jwt = false
 [functions.create-connect-link]
 verify_jwt = false
 
-[functions.create-qr-session]
-verify_jwt = false
-
 [functions.delete-account]
 verify_jwt = false

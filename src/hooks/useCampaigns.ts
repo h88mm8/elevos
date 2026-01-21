@@ -11,14 +11,20 @@ export function useCampaigns() {
     queryKey: ['campaigns', currentWorkspace?.id],
     queryFn: async () => {
       if (!currentWorkspace) return [];
+      // Use view that aggregates stats from campaign_leads current state
       const { data, error } = await supabase
-        .from('campaigns')
+        .from('campaigns_with_stats')
         .select('*')
         .eq('workspace_id', currentWorkspace.id)
         .order('created_at', { ascending: false });
       
       if (error) throw error;
-      return data as Campaign[];
+      return data as (Campaign & {
+        actual_leads_count: number;
+        actual_sent_count: number;
+        actual_failed_count: number;
+        actual_pending_count: number;
+      })[];
     },
     enabled: !!currentWorkspace,
   });
@@ -65,3 +71,11 @@ export function useCampaigns() {
     refetchCampaigns: () => queryClient.invalidateQueries({ queryKey: ['campaigns', currentWorkspace?.id] }),
   };
 }
+
+// Extended type with aggregated stats from view
+export type CampaignWithStats = Campaign & {
+  actual_leads_count: number;
+  actual_sent_count: number;
+  actual_failed_count: number;
+  actual_pending_count: number;
+};

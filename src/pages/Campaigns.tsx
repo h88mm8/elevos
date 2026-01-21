@@ -907,20 +907,20 @@ export default function Campaigns() {
                                 {format(new Date(campaign.schedule), "dd/MM 'às' HH:mm", { locale: ptBR })}
                               </span>
                             )}
-                            {campaign.status === 'queued' && campaign.leads_count > 0 && (
+                            {campaign.status === 'queued' && (campaign as any).actual_leads_count > 0 && (
                               <span className="text-xs text-muted-foreground">
-                                {Math.ceil((campaign.leads_count - campaign.sent_count) / 50)} dias restantes
+                                {Math.ceil(((campaign as any).actual_leads_count - (campaign as any).actual_sent_count) / 50)} dias restantes
                               </span>
                             )}
                           </div>
                         </TableCell>
-                        <TableCell className="text-right">{campaign.leads_count}</TableCell>
-                        <TableCell className="text-right">{campaign.sent_count}</TableCell>
+                        <TableCell className="text-right">{(campaign as any).actual_leads_count ?? campaign.leads_count}</TableCell>
+                        <TableCell className="text-right">{(campaign as any).actual_sent_count ?? campaign.sent_count}</TableCell>
                         <TableCell className="text-right">
-                          {campaign.failed_count > 0 && (
-                            <span className="text-destructive">{campaign.failed_count}</span>
+                          {((campaign as any).actual_failed_count ?? campaign.failed_count) > 0 && (
+                            <span className="text-destructive">{(campaign as any).actual_failed_count ?? campaign.failed_count}</span>
                           )}
-                          {campaign.failed_count === 0 && '-'}
+                          {((campaign as any).actual_failed_count ?? campaign.failed_count) === 0 && '-'}
                         </TableCell>
                         <TableCell className="text-right">
                           {format(new Date(campaign.created_at), 'dd/MM/yyyy', { locale: ptBR })}
@@ -938,7 +938,7 @@ export default function Campaigns() {
                               <Users className="h-4 w-4" />
                             </Button>
                             {/* Report button - always visible for sent campaigns */}
-                            {campaign.sent_count > 0 && (
+                            {((campaign as any).actual_sent_count ?? campaign.sent_count) > 0 && (
                               <Button
                                 size="icon"
                                 variant="ghost"

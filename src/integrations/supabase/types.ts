@@ -131,6 +131,13 @@ export type Database = {
             referencedColumns: ["id"]
           },
           {
+            foreignKeyName: "campaign_events_campaign_id_fkey"
+            columns: ["campaign_id"]
+            isOneToOne: false
+            referencedRelation: "campaigns_with_stats"
+            referencedColumns: ["id"]
+          },
+          {
             foreignKeyName: "campaign_events_campaign_lead_id_fkey"
             columns: ["campaign_lead_id"]
             isOneToOne: false
@@ -188,6 +195,13 @@ export type Database = {
             columns: ["campaign_id"]
             isOneToOne: false
             referencedRelation: "campaigns"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "campaign_leads_campaign_id_fkey"
+            columns: ["campaign_id"]
+            isOneToOne: false
+            referencedRelation: "campaigns_with_stats"
             referencedColumns: ["id"]
           },
           {
@@ -868,7 +882,41 @@ export type Database = {
       }
     }
     Views: {
-      [_ in never]: never
+      campaigns_with_stats: {
+        Row: {
+          account_id: string | null
+          actual_failed_count: number | null
+          actual_leads_count: number | null
+          actual_pending_count: number | null
+          actual_sent_count: number | null
+          created_at: string | null
+          delivered_count: number | null
+          failed_count: number | null
+          id: string | null
+          leads_count: number | null
+          linkedin_action: string | null
+          message: string | null
+          name: string | null
+          replied_count: number | null
+          schedule: string | null
+          seen_count: number | null
+          sent_count: number | null
+          status: string | null
+          subject: string | null
+          type: string | null
+          updated_at: string | null
+          workspace_id: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "campaigns_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
     }
     Functions: {
       add_credits: {

@@ -505,6 +505,7 @@ serve(async (req) => {
             console.log(`Message text: "${messageText?.slice(0, 50) || '(empty)'}", sender: ${isSentByMe ? 'me' : 'them'}`);
 
             // Insert message with cached attachments
+            const messageTimestamp = data.timestamp || new Date().toISOString();
             const { error: insertError } = await supabase
               .from('messages')
               .insert({
@@ -515,7 +516,7 @@ serve(async (req) => {
                 sender: isSentByMe ? 'me' : 'them',
                 text: messageText,
                 attachments: processedAttachments.length > 0 ? processedAttachments : null,
-                timestamp: data.timestamp || new Date().toISOString(),
+                timestamp: messageTimestamp,
               });
 
             if (insertError) {
@@ -524,6 +525,50 @@ serve(async (req) => {
             } else {
               console.log(`Message inserted successfully: ${data.id}`);
               processedCount++;
+            }
+
+            // ============================================
+            // UPSERT CHAT CACHE: Update chats table for fast loading
+            // ============================================
+            const chatId = data.chat_id || 'unknown';
+            const attendeeIdentifier = data.sender?.attendee_provider_id?.split('@')[0] || 
+                                       data.sender?.attendee_id?.split('@')[0] || '';
+            const attendeeName = data.sender?.attendee_name || null;
+            
+            // Determine last message type from attachments
+            let lastMessageType: string | null = null;
+            let lastMessageDuration: number | null = null;
+            if (processedAttachments.length > 0) {
+              const firstAtt = processedAttachments[0];
+              lastMessageType = firstAtt.type || null;
+              lastMessageDuration = firstAtt.duration || null;
+            }
+            
+            // Upsert chat record
+            const { error: chatUpsertError } = await supabase
+              .from('chats')
+              .upsert({
+                workspace_id: account.workspace_id,
+                external_id: chatId,
+                account_id: data.account_id || '',
+                attendee_identifier: attendeeIdentifier,
+                attendee_name: attendeeName,
+                last_message: messageText || (lastMessageType ? `📎 ${lastMessageType}` : null),
+                last_message_type: lastMessageType,
+                last_message_duration: lastMessageDuration,
+                last_message_at: messageTimestamp,
+                // Only increment unread for incoming messages
+                unread_count: isSentByMe ? 0 : 1,
+                updated_at: new Date().toISOString(),
+              }, {
+                onConflict: 'workspace_id,external_id',
+                ignoreDuplicates: false,
+              });
+
+            if (chatUpsertError) {
+              console.error('Error upserting chat cache:', chatUpsertError);
+            } else {
+              console.log(`Chat cache updated for ${chatId}`);
             }
             break;
           }

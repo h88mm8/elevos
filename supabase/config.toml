@@ -62,3 +62,6 @@ verify_jwt = false
 
 [functions.cache-media]
 verify_jwt = false
+
+[functions.sync-chats]
+verify_jwt = false

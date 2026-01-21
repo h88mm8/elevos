@@ -382,6 +382,70 @@ export default function Messages() {
     };
   }, [currentWorkspace, toast, playNotificationSound]);
 
+  // Subscribe to chats table updates for real-time chat list refresh
+  useEffect(() => {
+    if (!currentWorkspace) return;
+
+    const chatsChannel = supabase.channel(`chats:${currentWorkspace.id}`)
+      .on(
+        'postgres_changes',
+        {
+          event: '*', // Listen to INSERT, UPDATE, DELETE
+          schema: 'public',
+          table: 'chats',
+          filter: `workspace_id=eq.${currentWorkspace.id}`,
+        },
+        (payload) => {
+          console.log('Realtime chat update:', payload.eventType);
+          
+          if (payload.eventType === 'INSERT') {
+            const newChat = payload.new as any;
+            // Add new chat to the list
+            const mappedChat: Chat = {
+              id: newChat.external_id,
+              account_id: newChat.account_id,
+              attendee_identifier: newChat.attendee_identifier,
+              attendee_name: newChat.attendee_name || `+${newChat.attendee_identifier}`,
+              attendee_picture: newChat.attendee_picture,
+              last_message: newChat.last_message || '',
+              last_message_type: newChat.last_message_type,
+              last_message_duration: newChat.last_message_duration,
+              last_message_at: newChat.last_message_at,
+              unread_count: newChat.unread_count || 0,
+            };
+            
+            setChats(prev => {
+              // Avoid duplicates
+              if (prev.some(c => c.id === mappedChat.id)) return prev;
+              // Add to beginning (most recent)
+              return [mappedChat, ...prev];
+            });
+          } else if (payload.eventType === 'UPDATE') {
+            const updatedChat = payload.new as any;
+            setChats(prev => prev.map(c => 
+              c.id === updatedChat.external_id
+                ? {
+                    ...c,
+                    attendee_name: updatedChat.attendee_name || c.attendee_name,
+                    attendee_picture: updatedChat.attendee_picture ?? c.attendee_picture,
+                    last_message: updatedChat.last_message || c.last_message,
+                    last_message_type: updatedChat.last_message_type,
+                    last_message_duration: updatedChat.last_message_duration,
+                    last_message_at: updatedChat.last_message_at || c.last_message_at,
+                    unread_count: updatedChat.unread_count ?? c.unread_count,
+                  }
+                : c
+            ));
+          }
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(chatsChannel);
+    };
+  }, [currentWorkspace]);
+
   // Fetch leads phone numbers when filter is enabled
   useEffect(() => {
     async function fetchLeadsPhoneNumbers() {
@@ -484,8 +548,20 @@ export default function Messages() {
   async function fetchChats() {
     setLoadingChats(true);
     try {
-      const data = await invokeAuthedFunction('get-chats', { workspaceId: currentWorkspace.id });
-      const fetchedChats: Chat[] = data.chats || [];
+      // ============================================
+      // HYBRID LOADING: Load from cache first, then sync in background
+      // ============================================
+      
+      // Step 1: Load cached chats from local database (instant)
+      const { data: cachedChats, error: cacheError } = await supabase
+        .from('chats')
+        .select('*')
+        .eq('workspace_id', currentWorkspace.id)
+        .order('last_message_at', { ascending: false });
+      
+      if (cacheError) {
+        console.warn('Error loading cached chats:', cacheError);
+      }
       
       // Fetch leads to match phone numbers with names
       const { data: leads } = await supabase
@@ -493,9 +569,9 @@ export default function Messages() {
         .select('full_name, mobile_number, phone')
         .eq('workspace_id', currentWorkspace.id);
       
+      // Create a map of phone numbers to lead names
+      const phoneToName = new Map<string, string>();
       if (leads && leads.length > 0) {
-        // Create a map of phone numbers to lead names
-        const phoneToName = new Map<string, string>();
         leads.forEach(lead => {
           const phone = lead.mobile_number || lead.phone;
           if (phone && lead.full_name) {
@@ -503,13 +579,77 @@ export default function Messages() {
             phoneToName.set(normalizedPhone, lead.full_name);
           }
         });
+      }
+      
+      // Map cached chats to Chat interface
+      const mapCachedToChat = (cached: any): Chat => {
+        const chatPhone = cached.attendee_identifier?.replace(/\D/g, '') || '';
+        let attendeeName = cached.attendee_name;
         
-        // Update chats with lead names where phone matches and name is just a phone number
+        // Update name from leads if current name looks like a phone number
+        if (attendeeName?.startsWith('+') || !attendeeName) {
+          for (const [leadPhone, leadName] of phoneToName) {
+            if (chatPhone.includes(leadPhone) || leadPhone.includes(chatPhone)) {
+              attendeeName = leadName;
+              break;
+            }
+          }
+        }
+        
+        return {
+          id: cached.external_id,
+          account_id: cached.account_id,
+          attendee_identifier: cached.attendee_identifier,
+          attendee_name: attendeeName || `+${chatPhone}`,
+          attendee_email: undefined,
+          attendee_picture: cached.attendee_picture,
+          last_message: cached.last_message || '',
+          last_message_type: cached.last_message_type,
+          last_message_duration: cached.last_message_duration,
+          last_message_at: cached.last_message_at,
+          unread_count: cached.unread_count || 0,
+        };
+      };
+      
+      // If we have cached chats, show them immediately
+      if (cachedChats && cachedChats.length > 0) {
+        const mappedCachedChats = cachedChats.map(mapCachedToChat);
+        setChats(mappedCachedChats);
+        setLoadingChats(false);
+        
+        // Step 2: Sync with provider in background
+        console.log('Loaded', cachedChats.length, 'chats from cache, syncing in background...');
+        invokeAuthedFunction('sync-chats', { workspaceId: currentWorkspace.id })
+          .then(() => {
+            console.log('Background sync completed');
+            // Refresh from cache after sync
+            return supabase
+              .from('chats')
+              .select('*')
+              .eq('workspace_id', currentWorkspace.id)
+              .order('last_message_at', { ascending: false });
+          })
+          .then(({ data: refreshedChats }) => {
+            if (refreshedChats && refreshedChats.length > 0) {
+              const mappedRefreshed = refreshedChats.map(mapCachedToChat);
+              setChats(mappedRefreshed);
+            }
+          })
+          .catch(err => console.warn('Background sync failed:', err));
+        
+        return;
+      }
+      
+      // Step 3: No cache - fall back to direct API call (first load)
+      console.log('No cached chats, fetching from provider...');
+      const data = await invokeAuthedFunction('get-chats', { workspaceId: currentWorkspace.id });
+      const fetchedChats: Chat[] = data.chats || [];
+      
+      // Update chats with lead names where phone matches
+      if (phoneToName.size > 0) {
         fetchedChats.forEach(chat => {
           const chatPhone = chat.attendee_identifier?.replace(/\D/g, '') || '';
-          // Only update if current name looks like a phone number (starts with +)
           if (chat.attendee_name?.startsWith('+') || !chat.attendee_name) {
-            // Try to find a matching lead
             for (const [leadPhone, leadName] of phoneToName) {
               if (chatPhone.includes(leadPhone) || leadPhone.includes(chatPhone)) {
                 chat.attendee_name = leadName;
@@ -521,6 +661,11 @@ export default function Messages() {
       }
       
       setChats(fetchedChats);
+      
+      // Trigger background sync to populate cache for next time
+      invokeAuthedFunction('sync-chats', { workspaceId: currentWorkspace.id })
+        .catch(err => console.warn('Initial sync failed:', err));
+        
     } catch (error: any) {
       toast({
         title: 'Erro ao carregar conversas',
@@ -543,6 +688,85 @@ export default function Messages() {
     }
 
     try {
+      // ============================================
+      // HYBRID LOADING: Load from cache first for initial load
+      // ============================================
+      if (!beforeCursor) {
+        // Step 1: Load cached messages from local database (instant)
+        const { data: cachedMessages, error: cacheError } = await supabase
+          .from('messages')
+          .select('*')
+          .eq('workspace_id', currentWorkspace?.id)
+          .eq('chat_id', chatId)
+          .order('timestamp', { ascending: true })
+          .limit(50);
+        
+        if (!cacheError && cachedMessages && cachedMessages.length > 0) {
+          console.log(`Loaded ${cachedMessages.length} messages from cache for chat ${chatId}`);
+          
+          // Map cached messages to Message interface
+          const mappedCached: Message[] = cachedMessages.map((msg: any) => {
+            let attachments: Message['attachments'] = undefined;
+            if (msg.attachments) {
+              try {
+                const parsed = typeof msg.attachments === 'string' 
+                  ? JSON.parse(msg.attachments) 
+                  : msg.attachments;
+                if (Array.isArray(parsed) && parsed.length > 0) {
+                  attachments = parsed;
+                }
+              } catch (e) {
+                console.warn('Failed to parse attachments:', e);
+              }
+            }
+            
+            return {
+              id: msg.external_id || msg.id,
+              chat_id: msg.chat_id,
+              sender: msg.sender as 'me' | 'them',
+              text: msg.text || '',
+              timestamp: msg.timestamp,
+              status: msg.sender === 'me' ? 'sent' : undefined,
+              attachments,
+            };
+          });
+          
+          setMessages(mappedCached);
+          setLoadingMessages(false);
+          
+          // Force scroll to bottom
+          setTimeout(() => {
+            messagesEndRef.current?.scrollIntoView({ behavior: 'auto' });
+          }, 100);
+          
+          // Step 2: Fetch newer messages from API in background
+          invokeAuthedFunction('get-chat-messages', {
+            workspaceId: currentWorkspace?.id,
+            chatId,
+            limit: 50,
+          }).then((data) => {
+            const apiMessages = (data.messages || []).reverse();
+            if (apiMessages.length > 0) {
+              // Merge with existing, avoiding duplicates
+              setMessages(prev => {
+                const existingIds = new Set(prev.map(m => m.id));
+                const newMsgs = apiMessages.filter((m: Message) => !existingIds.has(m.id));
+                if (newMsgs.length > 0) {
+                  console.log(`Added ${newMsgs.length} new messages from API`);
+                  return [...prev, ...newMsgs];
+                }
+                return prev;
+              });
+            }
+            setCursor(data.cursor || null);
+            setHasMore(!!data.cursor && apiMessages.length > 0);
+          }).catch(err => console.warn('Background message fetch failed:', err));
+          
+          return;
+        }
+      }
+
+      // Step 3: No cache or loading older - fetch from API
       const data = await invokeAuthedFunction('get-chat-messages', {
         workspaceId: currentWorkspace?.id,
         chatId,

@@ -44,6 +44,9 @@ import {
   Clock,
   Save,
   Globe,
+  Play,
+  Eye,
+  ListTodo,
 } from 'lucide-react';
 import { MESSAGE_VARIABLES } from '@/lib/messageVariables';
 import { format } from 'date-fns';
@@ -102,6 +105,11 @@ export default function Settings() {
   // Timezone state
   const [workspaceTimezone, setWorkspaceTimezone] = useState<string>('UTC');
   const [isSavingTimezone, setIsSavingTimezone] = useState(false);
+  
+  // Queue processor states
+  const [isProcessingQueue, setIsProcessingQueue] = useState(false);
+  const [isDryRunning, setIsDryRunning] = useState(false);
+  const [queueResult, setQueueResult] = useState<any>(null);
 
   // Load workspace timezone
   useEffect(() => {
@@ -141,6 +149,60 @@ export default function Settings() {
       });
     } finally {
       setIsSavingTimezone(false);
+    }
+  }
+
+  async function handleProcessQueue(dryRun: boolean) {
+    if (!currentWorkspace) return;
+    
+    if (dryRun) {
+      setIsDryRunning(true);
+    } else {
+      setIsProcessingQueue(true);
+    }
+    setQueueResult(null);
+    
+    try {
+      const response = await supabase.functions.invoke('process-campaign-queue', {
+        body: { 
+          workspaceId: currentWorkspace.id,
+          dryRun,
+          limit: 25,
+        },
+      });
+
+      if (response.error) {
+        throw new Error(response.error.message || 'Erro ao processar fila');
+      }
+
+      setQueueResult(response.data);
+      
+      if (dryRun) {
+        toast({
+          title: 'Dry Run Completo',
+          description: response.data.entries?.length 
+            ? `${response.data.entries.length} item(s) na fila seriam processados.`
+            : 'Nenhum item na fila para processar.',
+        });
+      } else {
+        const processed = response.data.processed || [];
+        const totalSent = processed.reduce((sum: number, p: any) => sum + (p.sentNow || 0), 0);
+        toast({
+          title: 'Fila Processada',
+          description: processed.length 
+            ? `${processed.length} item(s) processados, ${totalSent} mensagem(s) enviada(s).`
+            : 'Nenhum item para processar.',
+        });
+      }
+    } catch (error: any) {
+      toast({
+        title: 'Erro',
+        description: error.message,
+        variant: 'destructive',
+      });
+    } finally {
+      setIsProcessingQueue(false);
+      setIsDryRunning(false);
     }
   }
 
@@ -614,6 +676,96 @@ export default function Settings() {
                 </div>
               </CardContent>
             </Card>
+
+            {/* Queue Processor Test Card (Admin only) */}
+            {isAdmin && (
+              <Card>
+                <CardHeader>
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <CardTitle className="flex items-center gap-2">
+                        <ListTodo className="h-5 w-5" />
+                        Processador de Fila
+                      </CardTitle>
+                      <CardDescription>
+                        Processe campanhas agendadas manualmente para testes
+                      </CardDescription>
+                    </div>
+                  </div>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <div className="flex gap-2">
+                    <Button
+                      onClick={() => handleProcessQueue(true)}
+                      variant="outline"
+                      disabled={isDryRunning || isProcessingQueue}
+                    >
+                      {isDryRunning ? (
+                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      ) : (
+                        <Eye className="mr-2 h-4 w-4" />
+                      )}
+                      Dry Run
+                    </Button>
+                    <Button
+                      onClick={() => handleProcessQueue(false)}
+                      disabled={isProcessingQueue || isDryRunning}
+                    >
+                      {isProcessingQueue ? (
+                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      ) : (
+                        <Play className="mr-2 h-4 w-4" />
+                      )}
+                      Executar Fila Agora
+                    </Button>
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    <strong>Dry Run:</strong> Mostra o que seria processado sem enviar mensagens.
+                    <br />
+                    <strong>Executar:</strong> Processa campanhas com scheduled_date ≤ hoje e envia as mensagens.
+                  </p>
+                  
+                  {queueResult && (
+                    <div className="mt-4 p-4 border rounded-lg bg-muted/50 text-sm">
+                      <p className="font-medium mb-2">Resultado:</p>
+                      {queueResult.dryRun ? (
+                        // Dry run result
+                        queueResult.entries?.length > 0 ? (
+                          <div className="space-y-2">
+                            <p>{queueResult.entries.length} item(s) na fila:</p>
+                            <ul className="list-disc list-inside space-y-1 text-muted-foreground">
+                              {queueResult.entries.map((e: any) => (
+                                <li key={e.queueId}>
+                                  Campanha {e.campaignId.slice(0,8)}... - {e.remaining} leads pendentes (data: {e.scheduledDate})
+                                </li>
+                              ))}
+                            </ul>
+                          </div>
+                        ) : (
+                          <p className="text-muted-foreground">Nenhum item na fila para processar hoje.</p>
+                        )
+                      ) : (
+                        // Execution result
+                        queueResult.processed?.length > 0 ? (
+                          <div className="space-y-2">
+                            <p>{queueResult.processed.length} item(s) processados:</p>
+                            <ul className="list-disc list-inside space-y-1 text-muted-foreground">
+                              {queueResult.processed.map((p: any) => (
+                                <li key={p.queueId}>
+                                  Campanha {p.campaignId.slice(0,8)}... - {p.sentNow} enviados, {p.failedNow} falhas, {p.remaining} restantes
+                                </li>
+                              ))}
+                            </ul>
+                          </div>
+                        ) : (
+                          <p className="text-muted-foreground">Nenhum item foi processado.</p>
+                        )
+                      )}
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            )}
 
             <Card>
               <CardHeader>

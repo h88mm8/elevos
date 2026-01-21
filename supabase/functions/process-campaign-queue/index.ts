@@ -6,7 +6,9 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
-// Message variable replacement
+// ============================================
+// MESSAGE VARIABLE REPLACEMENT
+// ============================================
 const MESSAGE_VARIABLES = [
   { variable: '{{nome}}', field: 'full_name' },
   { variable: '{{primeiro_nome}}', field: 'first_name' },
@@ -31,11 +33,44 @@ function replaceVariables(message: string, lead: Record<string, any>): string {
   return result;
 }
 
-// Apply jitter to interval (±20% randomization)
+// ============================================
+// UTILITIES
+// ============================================
 function applyJitter(baseSeconds: number, minSeconds: number = 10): number {
-  const jitterFactor = 0.8 + Math.random() * 0.4; // 0.8 to 1.2
+  const jitterFactor = 0.8 + Math.random() * 0.4;
   const jitteredValue = Math.round(baseSeconds * jitterFactor);
   return Math.max(jitteredValue, minSeconds);
+}
+
+function getTodayDateInTimezone(timezone: string): string {
+  try {
+    const formatter = new Intl.DateTimeFormat('en-CA', {
+      timeZone: timezone,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    });
+    const parts = formatter.formatToParts(new Date());
+    const year = parts.find(p => p.type === 'year')?.value;
+    const month = parts.find(p => p.type === 'month')?.value;
+    const day = parts.find(p => p.type === 'day')?.value;
+    return `${year}-${month}-${day}`;
+  } catch {
+    return new Date().toISOString().split('T')[0];
+  }
+}
+
+// ============================================
+// TYPES
+// ============================================
+interface ClaimedQueueEntry {
+  queue_id: string;
+  campaign_id: string;
+  workspace_id: string;
+  scheduled_date: string;
+  leads_to_send: number;
+  leads_sent: number;
+  workspace_timezone: string;
 }
 
 interface CampaignLead {
@@ -62,27 +97,98 @@ interface CampaignLead {
 }
 
 interface WorkspaceSettings {
-  // WhatsApp settings
   daily_message_limit: number;
   message_interval_seconds: number;
   max_retries: number;
-  // LinkedIn settings
   linkedin_daily_message_limit: number;
   linkedin_daily_invite_limit: number;
   linkedin_message_interval_seconds: number;
 }
 
 const DEFAULT_SETTINGS: WorkspaceSettings = {
-  // WhatsApp defaults
   daily_message_limit: 50,
   message_interval_seconds: 15,
   max_retries: 3,
-  // LinkedIn defaults
   linkedin_daily_message_limit: 50,
   linkedin_daily_invite_limit: 25,
   linkedin_message_interval_seconds: 30,
 };
 
+type UsageAction = 'linkedin_message' | 'linkedin_invite' | 'whatsapp_message';
+
+interface ProcessResult {
+  queueId: string;
+  campaignId: string;
+  workspaceId: string;
+  scheduledDate: string;
+  leadsToSend: number;
+  leadsSentBefore: number;
+  sentNow: number;
+  failedNow: number;
+  remaining: number;
+  finalStatus: string;
+}
+
+// ============================================
+// LINKEDIN HELPERS
+// ============================================
+function extractLinkedInPublicIdentifier(linkedinUrl: string): string | null {
+  try {
+    const url = linkedinUrl.startsWith('http') 
+      ? new URL(linkedinUrl) 
+      : new URL(`https://linkedin.com${linkedinUrl.startsWith('/') ? '' : '/'}${linkedinUrl}`);
+    const pathParts = url.pathname.split('/').filter(Boolean);
+    const inIndex = pathParts.findIndex(p => p.toLowerCase() === 'in');
+    if (inIndex !== -1 && pathParts[inIndex + 1]) {
+      return pathParts[inIndex + 1];
+    }
+    return pathParts[pathParts.length - 1] || null;
+  } catch {
+    const match = linkedinUrl.match(/\/in\/([^\/\?]+)/);
+    return match ? match[1] : null;
+  }
+}
+
+async function resolveLinkedInProviderId(
+  unipileDsn: string,
+  unipileApiKey: string,
+  accountId: string,
+  publicIdentifier: string
+): Promise<string | null> {
+  try {
+    const response = await fetch(
+      `https://${unipileDsn}/api/v1/users/${encodeURIComponent(publicIdentifier)}?account_id=${accountId}`,
+      {
+        method: 'GET',
+        headers: {
+          'X-API-KEY': unipileApiKey,
+          'Accept': 'application/json',
+        },
+      }
+    );
+
+    if (!response.ok) {
+      const errorText = await response.text().catch(() => '');
+      console.error(`LinkedIn lookup failed for ${publicIdentifier}: HTTP ${response.status} - ${errorText}`);
+      return null;
+    }
+
+    const data = await response.json();
+    const providerId = data.provider_id || data.id;
+    if (providerId) {
+      console.log(`Resolved LinkedIn ${publicIdentifier} -> ${providerId}`);
+      return providerId;
+    }
+    return null;
+  } catch (error) {
+    console.error(`Error resolving LinkedIn ${publicIdentifier}:`, error);
+    return null;
+  }
+}
+
+// ============================================
+// MAIN HANDLER
+// ============================================
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
@@ -94,89 +200,171 @@ serve(async (req) => {
   );
 
   try {
-    const today = new Date().toISOString().split('T')[0];
-    console.log(`Processing campaign queue for ${today}`);
+    // Parse request body (optional parameters)
+    let workspaceId: string | null = null;
+    let limit = 25;
+    let dryRun = false;
 
-    // ============================================
-    // GET QUEUED ITEMS FOR TODAY
-    // ============================================
-    const { data: queueItems, error: queueError } = await supabase
-      .from('campaign_queue')
-      .select('*')
-      .eq('scheduled_date', today)
-      .eq('status', 'queued')
-      .order('created_at', { ascending: true });
-
-    if (queueError) {
-      console.error('Error fetching queue:', queueError);
-      return new Response(JSON.stringify({ error: 'Failed to fetch queue' }), { status: 500, headers: corsHeaders });
+    try {
+      const body = await req.json();
+      workspaceId = body.workspaceId || null;
+      limit = body.limit ?? 25;
+      dryRun = body.dryRun === true;
+    } catch {
+      // No body or invalid JSON - use defaults
     }
 
-    if (!queueItems || queueItems.length === 0) {
-      console.log('No queued items for today');
-      return new Response(JSON.stringify({ success: true, message: 'No items to process' }), { 
+    console.log(`[process-campaign-queue] Starting. workspaceId=${workspaceId || 'all'}, limit=${limit}, dryRun=${dryRun}`);
+
+    // ============================================
+    // CLAIM DUE QUEUE ENTRIES (atomic)
+    // ============================================
+    const { data: claimedEntries, error: claimError } = await supabase
+      .rpc('claim_due_queue_entries', {
+        p_workspace_id: workspaceId,
+        p_limit: limit,
+      });
+
+    if (claimError) {
+      console.error('Error claiming queue entries:', claimError);
+      return new Response(JSON.stringify({ error: 'Failed to claim queue entries', details: claimError.message }), {
+        status: 500,
+        headers: corsHeaders,
+      });
+    }
+
+    const entries = (claimedEntries || []) as ClaimedQueueEntry[];
+
+    if (entries.length === 0) {
+      console.log('[process-campaign-queue] No due queue entries found');
+      return new Response(JSON.stringify({ 
+        success: true, 
+        message: 'No items to process',
+        processed: [],
+        dryRun,
+      }), { 
         headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
       });
     }
 
-    console.log(`Found ${queueItems.length} queue items to process`);
+    console.log(`[process-campaign-queue] Claimed ${entries.length} queue entries`);
 
+    // DRY RUN: Just return what would be processed
+    if (dryRun) {
+      // Release claimed entries back to queued
+      for (const entry of entries) {
+        await supabase
+          .from('campaign_queue')
+          .update({ status: 'queued' })
+          .eq('id', entry.queue_id);
+      }
+
+      const dryRunResults = entries.map(e => ({
+        queueId: e.queue_id,
+        campaignId: e.campaign_id,
+        workspaceId: e.workspace_id,
+        scheduledDate: e.scheduled_date,
+        leadsToSend: e.leads_to_send,
+        leadsSentBefore: e.leads_sent,
+        remaining: e.leads_to_send - e.leads_sent,
+        timezone: e.workspace_timezone,
+      }));
+
+      return new Response(JSON.stringify({
+        success: true,
+        dryRun: true,
+        message: `Would process ${entries.length} queue entries`,
+        entries: dryRunResults,
+      }), {
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
+
+    // ============================================
+    // GET PROVIDER CREDENTIALS
+    // ============================================
     const unipileDsn = Deno.env.get('UNIPILE_DSN');
     const unipileApiKey = Deno.env.get('UNIPILE_API_KEY');
 
     if (!unipileDsn || !unipileApiKey) {
       console.error('Messaging provider not configured');
-      return new Response(JSON.stringify({ error: 'Messaging provider not configured' }), { status: 500, headers: corsHeaders });
+      // Release claimed entries
+      for (const entry of entries) {
+        await supabase
+          .from('campaign_queue')
+          .update({ status: 'queued' })
+          .eq('id', entry.queue_id);
+      }
+      return new Response(JSON.stringify({ error: 'Messaging provider not configured' }), {
+        status: 500,
+        headers: corsHeaders,
+      });
     }
 
-    const processedCampaigns: { campaignId: string; sentCount: number; failedCount: number }[] = [];
+    // ============================================
+    // PROCESS EACH QUEUE ENTRY
+    // ============================================
+    const processResults: ProcessResult[] = [];
 
-    for (const queueItem of queueItems) {
-      console.log(`Processing queue item ${queueItem.id} for campaign ${queueItem.campaign_id}`);
+    for (const entry of entries) {
+      const logPrefix = `[Queue ${entry.queue_id}]`;
+      console.log(`${logPrefix} Processing campaign=${entry.campaign_id}, scheduled=${entry.scheduled_date}, toSend=${entry.leads_to_send}, sent=${entry.leads_sent}`);
 
-      // Mark as processing
-      await supabase
-        .from('campaign_queue')
-        .update({ status: 'processing' })
-        .eq('id', queueItem.id);
+      const remainingForQueue = entry.leads_to_send - entry.leads_sent;
+      if (remainingForQueue <= 0) {
+        console.log(`${logPrefix} Already fully sent, marking completed`);
+        await supabase
+          .from('campaign_queue')
+          .update({ status: 'completed', processed_at: new Date().toISOString() })
+          .eq('id', entry.queue_id);
+        processResults.push({
+          queueId: entry.queue_id,
+          campaignId: entry.campaign_id,
+          workspaceId: entry.workspace_id,
+          scheduledDate: entry.scheduled_date,
+          leadsToSend: entry.leads_to_send,
+          leadsSentBefore: entry.leads_sent,
+          sentNow: 0,
+          failedNow: 0,
+          remaining: 0,
+          finalStatus: 'completed',
+        });
+        continue;
+      }
 
       // Get campaign
       const { data: campaign, error: campaignError } = await supabase
         .from('campaigns')
         .select('*')
-        .eq('id', queueItem.campaign_id)
+        .eq('id', entry.campaign_id)
         .single();
 
       if (campaignError || !campaign) {
-        console.error(`Campaign ${queueItem.campaign_id} not found`);
+        console.error(`${logPrefix} Campaign not found:`, campaignError);
         await supabase
           .from('campaign_queue')
           .update({ status: 'completed', processed_at: new Date().toISOString() })
-          .eq('id', queueItem.id);
+          .eq('id', entry.queue_id);
         continue;
       }
 
-      // Get workspace settings (including LinkedIn)
+      // Get workspace settings
       const { data: workspaceSettings } = await supabase
         .from('workspace_settings')
         .select('daily_message_limit, message_interval_seconds, max_retries, linkedin_daily_message_limit, linkedin_daily_invite_limit, linkedin_message_interval_seconds')
         .eq('workspace_id', campaign.workspace_id)
         .maybeSingle();
 
-      const settings: WorkspaceSettings = {
-        ...DEFAULT_SETTINGS,
-        ...workspaceSettings,
-      };
+      const settings: WorkspaceSettings = { ...DEFAULT_SETTINGS, ...workspaceSettings };
 
-      // Select channel-specific settings
       const isLinkedIn = campaign.type === 'linkedin';
+      const isWhatsApp = campaign.type === 'whatsapp';
+      const dailyLimit = isLinkedIn ? settings.linkedin_daily_message_limit : settings.daily_message_limit;
       const baseIntervalSeconds = isLinkedIn ? settings.linkedin_message_interval_seconds : settings.message_interval_seconds;
-      const minIntervalSeconds = isLinkedIn ? 10 : 10; // Both have 10s minimum
+      const usageAction: UsageAction = isLinkedIn ? 'linkedin_message' : 'whatsapp_message';
 
-      console.log(`Using ${isLinkedIn ? 'LinkedIn' : 'WhatsApp'} settings: ${baseIntervalSeconds}s base interval (with ±20% jitter)`);
-
-      // Get account for WhatsApp/LinkedIn
-      let accountId: string | null = null;
+      // Get account
+      let unipileAccountId: string | null = null;
       if (campaign.type === 'whatsapp' || campaign.type === 'linkedin') {
         const { data: account } = await supabase
           .from('accounts')
@@ -185,17 +373,44 @@ serve(async (req) => {
           .single();
 
         if (!account || account.status !== 'connected') {
-          console.error(`Account not available for campaign ${campaign.id}`);
+          console.error(`${logPrefix} Account not connected`);
           await supabase
             .from('campaign_queue')
             .update({ status: 'completed', processed_at: new Date().toISOString() })
-            .eq('id', queueItem.id);
+            .eq('id', entry.queue_id);
           continue;
         }
-        accountId = account.account_id;
+        unipileAccountId = account.account_id;
       }
 
-      // Get pending leads (including failed with retry_count < max_retries)
+      // Check daily usage
+      const todayDate = getTodayDateInTimezone(entry.workspace_timezone);
+      let currentUsage = 0;
+
+      if (unipileAccountId) {
+        const { data: usageData } = await supabase.rpc('get_daily_usage', {
+          p_workspace_id: campaign.workspace_id,
+          p_account_id: unipileAccountId,
+          p_action: usageAction,
+          p_usage_date: todayDate,
+        });
+        currentUsage = usageData || 0;
+      }
+
+      const remainingCapacity = Math.max(0, dailyLimit - currentUsage);
+      console.log(`${logPrefix} Usage: ${currentUsage}/${dailyLimit}, capacity=${remainingCapacity}, queueRemaining=${remainingForQueue}`);
+
+      if (remainingCapacity === 0) {
+        console.log(`${logPrefix} No capacity today, keeping in queue`);
+        await supabase
+          .from('campaign_queue')
+          .update({ status: 'queued' })
+          .eq('id', entry.queue_id);
+        continue;
+      }
+
+      // Get pending leads (idempotent: only leads not yet sent)
+      const leadsToFetch = Math.min(remainingForQueue, remainingCapacity);
       const { data: campaignLeads, error: leadsError } = await supabase
         .from('campaign_leads')
         .select(`
@@ -204,36 +419,36 @@ serve(async (req) => {
           status,
           retry_count,
           lead:leads (
-            id,
-            full_name,
-            first_name,
-            last_name,
-            email,
-            mobile_number,
-            phone,
-            linkedin_url,
-            company,
-            job_title,
-            city,
-            state,
-            country,
-            industry
+            id, full_name, first_name, last_name, email, mobile_number, phone,
+            linkedin_url, company, job_title, city, state, country, industry
           )
         `)
         .eq('campaign_id', campaign.id)
         .or(`status.eq.pending,and(status.eq.failed,retry_count.lt.${settings.max_retries})`)
-        .limit(queueItem.leads_to_send);
+        .limit(leadsToFetch);
 
       if (leadsError || !campaignLeads || campaignLeads.length === 0) {
-        console.log(`No leads to send for campaign ${campaign.id}`);
+        console.log(`${logPrefix} No pending leads, marking completed`);
         await supabase
           .from('campaign_queue')
-          .update({ status: 'completed', leads_sent: 0, processed_at: new Date().toISOString() })
-          .eq('id', queueItem.id);
+          .update({ status: 'completed', leads_sent: entry.leads_to_send, processed_at: new Date().toISOString() })
+          .eq('id', entry.queue_id);
+        processResults.push({
+          queueId: entry.queue_id,
+          campaignId: entry.campaign_id,
+          workspaceId: entry.workspace_id,
+          scheduledDate: entry.scheduled_date,
+          leadsToSend: entry.leads_to_send,
+          leadsSentBefore: entry.leads_sent,
+          sentNow: 0,
+          failedNow: 0,
+          remaining: 0,
+          finalStatus: 'completed',
+        });
         continue;
       }
 
-      // Update campaign status
+      // Update campaign status to sending
       await supabase
         .from('campaigns')
         .update({ status: 'sending' })
@@ -242,7 +457,9 @@ serve(async (req) => {
       let sentCount = 0;
       let failedCount = 0;
 
-      // Send messages
+      // ============================================
+      // SEND MESSAGES
+      // ============================================
       for (let i = 0; i < campaignLeads.length; i++) {
         const cl = campaignLeads[i] as unknown as CampaignLead;
         const lead = cl.lead;
@@ -267,25 +484,20 @@ serve(async (req) => {
             if (!digits) throw new Error('Invalid phone number');
 
             const formData = new FormData();
-            formData.append('account_id', accountId!);
+            formData.append('account_id', unipileAccountId!);
             formData.append('text', personalizedMessage);
             formData.append('attendees_ids', `${digits}@s.whatsapp.net`);
 
             const response = await fetch(`https://${unipileDsn}/api/v1/chats`, {
               method: 'POST',
-              headers: {
-                'X-API-KEY': unipileApiKey,
-                'Accept': 'application/json',
-              },
+              headers: { 'X-API-KEY': unipileApiKey, 'Accept': 'application/json' },
               body: formData,
             });
 
             if (response.ok) {
               sendSuccess = true;
               const responseData = await response.json().catch(() => ({}));
-              if (responseData.message_id || responseData.id) {
-                providerMessageId = responseData.message_id || responseData.id;
-              }
+              providerMessageId = responseData.message_id || responseData.id || null;
             } else {
               sendError = await response.text().catch(() => `HTTP ${response.status}`);
             }
@@ -293,96 +505,115 @@ serve(async (req) => {
             const linkedinUrl = lead.linkedin_url;
             if (!linkedinUrl) throw new Error('No LinkedIn URL');
 
+            const publicIdentifier = extractLinkedInPublicIdentifier(linkedinUrl);
+            if (!publicIdentifier) throw new Error(`Invalid LinkedIn URL: ${linkedinUrl}`);
+
+            const providerId = await resolveLinkedInProviderId(unipileDsn, unipileApiKey, unipileAccountId!, publicIdentifier);
+            if (!providerId) throw new Error(`Could not resolve LinkedIn: ${publicIdentifier}`);
+
             const formData = new FormData();
-            formData.append('account_id', accountId!);
+            formData.append('account_id', unipileAccountId!);
             formData.append('text', personalizedMessage);
-            formData.append('attendees_ids', linkedinUrl);
+            formData.append('attendees_ids', providerId);
             formData.append('linkedin[api]', 'classic');
 
             const response = await fetch(`https://${unipileDsn}/api/v1/chats`, {
               method: 'POST',
-              headers: {
-                'X-API-KEY': unipileApiKey,
-                'Accept': 'application/json',
-              },
+              headers: { 'X-API-KEY': unipileApiKey, 'Accept': 'application/json' },
               body: formData,
             });
 
             if (response.ok) {
               sendSuccess = true;
               const responseData = await response.json().catch(() => ({}));
-              if (responseData.message_id || responseData.id) {
-                providerMessageId = responseData.message_id || responseData.id;
-              }
+              providerMessageId = responseData.message_id || responseData.id || null;
             } else {
-              const errorData = await response.json().catch(() => ({}));
-              sendError = errorData.message || `HTTP ${response.status}`;
+              sendError = await response.text().catch(() => `HTTP ${response.status}`);
             }
           }
 
           if (sendSuccess) {
-            const updateData: Record<string, any> = { 
-              status: 'sent', 
-              sent_at: new Date().toISOString(),
-              retry_count: cl.retry_count, // Keep current count
-            };
-            if (providerMessageId) {
-              updateData.provider_message_id = providerMessageId;
-            }
             await supabase
               .from('campaign_leads')
-              .update(updateData)
+              .update({
+                status: 'sent',
+                sent_at: new Date().toISOString(),
+                error: null,
+                provider_message_id: providerMessageId,
+              })
               .eq('id', cl.id);
             sentCount++;
+
+            // Increment usage
+            if (unipileAccountId) {
+              await supabase.rpc('increment_daily_usage', {
+                p_workspace_id: campaign.workspace_id,
+                p_account_id: unipileAccountId,
+                p_action: usageAction,
+                p_usage_date: todayDate,
+                p_increment: 1,
+              });
+            }
           } else {
             const newRetryCount = cl.retry_count + 1;
-            const isFinalFailure = newRetryCount >= settings.max_retries;
+            const willRetry = newRetryCount < settings.max_retries;
             await supabase
               .from('campaign_leads')
-              .update({ 
-                status: 'failed', 
+              .update({
+                status: willRetry ? 'pending' : 'failed',
                 error: sendError,
                 retry_count: newRetryCount,
               })
               .eq('id', cl.id);
             failedCount++;
-            console.log(`Lead ${cl.lead_id} failed (attempt ${newRetryCount}/${settings.max_retries})${isFinalFailure ? ' - no more retries' : ''}`);
+            console.log(`${logPrefix} Lead ${cl.lead_id} failed (attempt ${newRetryCount}/${settings.max_retries})`);
           }
 
-          // Apply jitter to interval (±20% randomization) for more natural sending pattern
+          // Delay between messages
           if (i < campaignLeads.length - 1) {
-            const delaySeconds = applyJitter(baseIntervalSeconds, minIntervalSeconds);
-            console.log(`Waiting ${delaySeconds}s before next message (base: ${baseIntervalSeconds}s)`);
+            const delaySeconds = applyJitter(baseIntervalSeconds, 10);
             await new Promise(resolve => setTimeout(resolve, delaySeconds * 1000));
           }
         } catch (error) {
           const errorMessage = error instanceof Error ? error.message : 'Unknown error';
           const newRetryCount = cl.retry_count + 1;
-          const isFinalFailure = newRetryCount >= settings.max_retries;
+          const willRetry = newRetryCount < settings.max_retries;
           await supabase
             .from('campaign_leads')
-            .update({ 
-              status: 'failed', 
+            .update({
+              status: willRetry ? 'pending' : 'failed',
               error: errorMessage,
               retry_count: newRetryCount,
             })
             .eq('id', cl.id);
           failedCount++;
-          console.log(`Lead ${cl.lead_id} exception (attempt ${newRetryCount}/${settings.max_retries})${isFinalFailure ? ' - no more retries' : ''}`);
+          console.error(`${logPrefix} Lead ${cl.lead_id} exception:`, errorMessage);
         }
       }
 
-      // Update queue item
+      // Update queue entry
+      const newLeadsSent = entry.leads_sent + sentCount;
+      const queueCompleted = newLeadsSent >= entry.leads_to_send;
+
       await supabase
         .from('campaign_queue')
-        .update({ 
-          status: 'completed', 
-          leads_sent: sentCount,
-          processed_at: new Date().toISOString() 
+        .update({
+          status: queueCompleted ? 'completed' : 'queued',
+          leads_sent: newLeadsSent,
+          processed_at: queueCompleted ? new Date().toISOString() : null,
         })
-        .eq('id', queueItem.id);
+        .eq('id', entry.queue_id);
 
-      // Check for more queued items
+      // Update campaign counts
+      await supabase
+        .from('campaigns')
+        .update({
+          sent_count: campaign.sent_count + sentCount,
+          failed_count: campaign.failed_count + failedCount,
+        })
+        .eq('id', campaign.id);
+
+      // Determine final campaign status
       const { data: remainingQueue } = await supabase
         .from('campaign_queue')
         .select('id')
@@ -391,47 +622,55 @@ serve(async (req) => {
 
       const hasMoreInQueue = remainingQueue && remainingQueue.length > 0;
 
-      // Update campaign status
-      let finalStatus: string;
+      let finalCampaignStatus: string;
       if (hasMoreInQueue) {
-        finalStatus = 'queued';
+        finalCampaignStatus = 'queued';
       } else {
-        // Check if all leads are processed
         const { data: pendingLeads } = await supabase
           .from('campaign_leads')
           .select('id')
           .eq('campaign_id', campaign.id)
-          .eq('status', 'pending');
+          .eq('status', 'pending')
+          .limit(1);
 
         if (pendingLeads && pendingLeads.length > 0) {
-          finalStatus = 'partial';
+          finalCampaignStatus = 'partial';
         } else {
-          finalStatus = 'completed';
+          finalCampaignStatus = 'completed';
         }
       }
 
       await supabase
         .from('campaigns')
-        .update({
-          status: finalStatus,
-          sent_count: campaign.sent_count + sentCount,
-          failed_count: campaign.failed_count + failedCount,
-        })
+        .update({ status: finalCampaignStatus })
         .eq('id', campaign.id);
 
-      processedCampaigns.push({ campaignId: campaign.id, sentCount, failedCount });
-      console.log(`Campaign ${campaign.id}: ${sentCount} sent, ${failedCount} failed`);
+      console.log(`${logPrefix} Done: sent=${sentCount}, failed=${failedCount}, campaign=${finalCampaignStatus}`);
+
+      processResults.push({
+        queueId: entry.queue_id,
+        campaignId: entry.campaign_id,
+        workspaceId: entry.workspace_id,
+        scheduledDate: entry.scheduled_date,
+        leadsToSend: entry.leads_to_send,
+        leadsSentBefore: entry.leads_sent,
+        sentNow: sentCount,
+        failedNow: failedCount,
+        remaining: entry.leads_to_send - newLeadsSent,
+        finalStatus: queueCompleted ? 'completed' : 'queued',
+      });
     }
 
     return new Response(JSON.stringify({
       success: true,
-      processedCampaigns,
-      date: today,
+      processed: processResults,
+      totalClaimed: entries.length,
+      dryRun: false,
     }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
 
   } catch (err) {
     const error = err as Error;
-    console.error('Error in process-campaign-queue:', error);
+    console.error('[process-campaign-queue] Error:', error);
     return new Response(JSON.stringify({ error: error.message }), { status: 500, headers: corsHeaders });
   }
 });

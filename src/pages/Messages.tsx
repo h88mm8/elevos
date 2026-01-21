@@ -90,6 +90,12 @@ export default function Messages() {
   const scrollAreaRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const messageRefs = useRef<Map<string, HTMLDivElement>>(new Map());
+  
+  // Refs for realtime subscription (avoid re-subscribing on state changes)
+  const chatsRef = useRef<Chat[]>([]);
+  const selectedChatRef = useRef<Chat | null>(null);
+  const isScrolledToBottomRef = useRef(true);
+  const soundEnabledRef = useRef(true);
 
   const [chats, setChats] = useState<Chat[]>([]);
   const [selectedChat, setSelectedChat] = useState<Chat | null>(null);
@@ -119,6 +125,12 @@ export default function Messages() {
   const [hasNewMessages, setHasNewMessages] = useState(false);
   const [isScrolledToBottom, setIsScrolledToBottom] = useState(true);
   const audioContextRef = useRef<AudioContext | null>(null);
+
+  // Keep refs in sync with state for realtime callbacks
+  useEffect(() => { chatsRef.current = chats; }, [chats]);
+  useEffect(() => { selectedChatRef.current = selectedChat; }, [selectedChat]);
+  useEffect(() => { isScrolledToBottomRef.current = isScrolledToBottom; }, [isScrolledToBottom]);
+  useEffect(() => { soundEnabledRef.current = soundEnabled; }, [soundEnabled]);
 
   // Pre-cache media in background when messages load
   useMediaPreCache({
@@ -234,6 +246,7 @@ export default function Messages() {
   }, [currentWorkspace]);
 
   // Subscribe to new messages via Supabase Realtime
+  // Using refs to avoid re-subscribing on every state change
   useEffect(() => {
     if (!currentWorkspace) return;
 
@@ -251,13 +264,12 @@ export default function Messages() {
           
           // Only notify for messages from others (not our own sends)
           if (newMessage.sender !== 'me') {
-            // Find the chat for this message
-            const chat = chats.find(c => c.id === newMessage.chat_id);
+            // Find the chat for this message using ref
+            const chat = chatsRef.current.find(c => c.id === newMessage.chat_id);
             const senderName = chat?.attendee_name || 'Novo contato';
             
-            // Play notification sound
-            // Play notification sound if enabled
-            if (soundEnabled) {
+            // Play notification sound if enabled (using ref)
+            if (soundEnabledRef.current) {
               playNotificationSound();
             }
             
@@ -267,12 +279,13 @@ export default function Messages() {
               description: newMessage.text?.slice(0, 100) || '📎 Anexo recebido',
             });
             
-            // Update unread count in chat list
+            // Update unread count in chat list (only if not viewing this chat)
+            const isViewingThisChat = selectedChatRef.current?.id === newMessage.chat_id;
             setChats(prev => prev.map(c => 
               c.id === newMessage.chat_id 
                 ? { 
                     ...c, 
-                    unread_count: (c.unread_count || 0) + 1,
+                    unread_count: isViewingThisChat ? 0 : (c.unread_count || 0) + 1,
                     last_message: newMessage.text || '📎 Anexo',
                     last_message_at: newMessage.timestamp || new Date().toISOString(),
                   }
@@ -280,13 +293,29 @@ export default function Messages() {
             ));
             
             // If viewing this chat, add message to the list
-            if (selectedChat?.id === newMessage.chat_id) {
+            if (isViewingThisChat) {
+              // Parse attachments from the database payload
+              let attachments: Message['attachments'] = undefined;
+              if (newMessage.attachments) {
+                try {
+                  const parsed = typeof newMessage.attachments === 'string' 
+                    ? JSON.parse(newMessage.attachments) 
+                    : newMessage.attachments;
+                  if (Array.isArray(parsed) && parsed.length > 0) {
+                    attachments = parsed;
+                  }
+                } catch (e) {
+                  console.warn('Failed to parse attachments:', e);
+                }
+              }
+              
               const mappedMessage: Message = {
                 id: newMessage.id,
                 chat_id: newMessage.chat_id,
                 sender: 'them',
                 text: newMessage.text || '',
                 timestamp: newMessage.timestamp || newMessage.created_at,
+                attachments,
               };
               
               setMessages(prev => {
@@ -295,8 +324,8 @@ export default function Messages() {
                 return [...prev, mappedMessage];
               });
               
-              // Show new messages indicator if not scrolled to bottom
-              if (!isScrolledToBottom) {
+              // Show new messages indicator if not scrolled to bottom (using ref)
+              if (!isScrolledToBottomRef.current) {
                 setHasNewMessages(true);
               }
             }
@@ -308,7 +337,7 @@ export default function Messages() {
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [currentWorkspace, chats, selectedChat, toast, isScrolledToBottom, playNotificationSound, soundEnabled]);
+  }, [currentWorkspace, toast, playNotificationSound]);
 
   useEffect(() => {
     if (currentWorkspace) {

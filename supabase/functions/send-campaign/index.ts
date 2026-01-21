@@ -128,6 +128,69 @@ const DEFAULT_SETTINGS: WorkspaceSettings = {
 // Action types for usage tracking
 type UsageAction = 'linkedin_message' | 'linkedin_invite' | 'whatsapp_message';
 
+// ============================================
+// HELPER: Finalize Campaign Status (Source of Truth)
+// ============================================
+// Rules:
+// 1. If any campaign_queue entry exists with status='queued' and leads_sent < leads_to_send => 'queued'
+// 2. If any campaign_leads with status='pending' => 'queued' (work remaining)
+// 3. Otherwise => 'completed'
+async function finalizeCampaignStatus(supabaseClient: any, campaignId: string): Promise<string> {
+  console.log(`[finalizeCampaignStatus] Checking campaign ${campaignId}...`);
+  
+  // Step 1: Check for pending queue entries
+  const { data: queueEntries, error: queueError } = await supabaseClient
+    .from('campaign_queue')
+    .select('id, leads_to_send, leads_sent')
+    .eq('campaign_id', campaignId)
+    .eq('status', 'queued');
+  
+  if (queueError) {
+    console.error(`[finalizeCampaignStatus] Error checking queue:`, queueError);
+  }
+  
+  const hasPendingQueue = queueEntries && queueEntries.some(
+    (q: { leads_to_send: number; leads_sent: number }) => q.leads_sent < q.leads_to_send
+  );
+  
+  if (hasPendingQueue) {
+    console.log(`[finalizeCampaignStatus] Campaign ${campaignId} has pending queue entries -> queued`);
+    await supabaseClient
+      .from('campaigns')
+      .update({ status: 'queued', updated_at: new Date().toISOString() })
+      .eq('id', campaignId);
+    return 'queued';
+  }
+  
+  // Step 2: Check for pending leads
+  const { count: pendingCount, error: pendingError } = await supabaseClient
+    .from('campaign_leads')
+    .select('id', { count: 'exact', head: true })
+    .eq('campaign_id', campaignId)
+    .eq('status', 'pending');
+  
+  if (pendingError) {
+    console.error(`[finalizeCampaignStatus] Error checking pending leads:`, pendingError);
+  }
+  
+  if (pendingCount && pendingCount > 0) {
+    console.log(`[finalizeCampaignStatus] Campaign ${campaignId} has ${pendingCount} pending leads -> queued`);
+    await supabaseClient
+      .from('campaigns')
+      .update({ status: 'queued', updated_at: new Date().toISOString() })
+      .eq('id', campaignId);
+    return 'queued';
+  }
+  
+  // Step 3: No pending work -> completed
+  console.log(`[finalizeCampaignStatus] Campaign ${campaignId} has no pending work -> completed`);
+  await supabaseClient
+    .from('campaigns')
+    .update({ status: 'completed', updated_at: new Date().toISOString() })
+    .eq('id', campaignId);
+  return 'completed';
+}
+
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
@@ -821,43 +884,10 @@ serve(async (req) => {
     }
 
     // ============================================
-    // UPDATE FINAL CAMPAIGN STATUS
+    // FINALIZE CAMPAIGN STATUS (Source of Truth Logic)
     // ============================================
-    const { data: updatedCampaign } = await supabase
-      .from('campaigns')
-      .select('sent_count, failed_count, leads_count')
-      .eq('id', campaignId)
-      .single();
-
-    // Check if there are queued entries (partial completion)
-    const { data: queuedEntries } = await supabase
-      .from('campaign_queue')
-      .select('id')
-      .eq('campaign_id', campaignId)
-      .eq('status', 'queued')
-      .limit(1);
-    
-    const hasQueuedEntries = queuedEntries && queuedEntries.length > 0;
-
-    // Determine final status
-    let finalStatus: string;
-    if (hasQueuedEntries) {
-      finalStatus = 'queued'; // More leads to send on future days
-    } else if (failedCount > 0 && sentCount === 0) {
-      finalStatus = 'failed';
-    } else if (failedCount > 0 && sentCount > 0) {
-      finalStatus = 'partial';
-    } else if (updatedCampaign && updatedCampaign.sent_count >= updatedCampaign.leads_count) {
-      finalStatus = 'completed';
-    } else {
-      finalStatus = sentCount > 0 ? 'running' : 'failed';
-    }
-
-    // Update final status only (counts are derived from campaign_leads via view)
-    await supabase
-      .from('campaigns')
-      .update({ status: finalStatus })
-      .eq('id', campaignId);
+    const finalStatus = await finalizeCampaignStatus(supabase, campaignId);
+    const hasQueuedEntries = finalStatus === 'queued';
 
     console.log(`Campaign ${campaignId} finished: ${sentCount} sent, ${failedCount} failed, status: ${finalStatus}`);
 

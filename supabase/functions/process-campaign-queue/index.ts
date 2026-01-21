@@ -130,6 +130,69 @@ interface ProcessResult {
 }
 
 // ============================================
+// HELPER: Finalize Campaign Status (Source of Truth)
+// ============================================
+// Rules:
+// 1. If any campaign_queue entry exists with status='queued' and leads_sent < leads_to_send => 'queued'
+// 2. If any campaign_leads with status='pending' => 'queued' (work remaining)
+// 3. Otherwise => 'completed'
+async function finalizeCampaignStatus(supabaseClient: any, campaignId: string): Promise<string> {
+  console.log(`[finalizeCampaignStatus] Checking campaign ${campaignId}...`);
+  
+  // Step 1: Check for pending queue entries
+  const { data: queueEntries, error: queueError } = await supabaseClient
+    .from('campaign_queue')
+    .select('id, leads_to_send, leads_sent')
+    .eq('campaign_id', campaignId)
+    .eq('status', 'queued');
+  
+  if (queueError) {
+    console.error(`[finalizeCampaignStatus] Error checking queue:`, queueError);
+  }
+  
+  const hasPendingQueue = queueEntries && queueEntries.some(
+    (q: { leads_to_send: number; leads_sent: number }) => q.leads_sent < q.leads_to_send
+  );
+  
+  if (hasPendingQueue) {
+    console.log(`[finalizeCampaignStatus] Campaign ${campaignId} has pending queue entries -> queued`);
+    await supabaseClient
+      .from('campaigns')
+      .update({ status: 'queued', updated_at: new Date().toISOString() })
+      .eq('id', campaignId);
+    return 'queued';
+  }
+  
+  // Step 2: Check for pending leads
+  const { count: pendingCount, error: pendingError } = await supabaseClient
+    .from('campaign_leads')
+    .select('id', { count: 'exact', head: true })
+    .eq('campaign_id', campaignId)
+    .eq('status', 'pending');
+  
+  if (pendingError) {
+    console.error(`[finalizeCampaignStatus] Error checking pending leads:`, pendingError);
+  }
+  
+  if (pendingCount && pendingCount > 0) {
+    console.log(`[finalizeCampaignStatus] Campaign ${campaignId} has ${pendingCount} pending leads -> queued`);
+    await supabaseClient
+      .from('campaigns')
+      .update({ status: 'queued', updated_at: new Date().toISOString() })
+      .eq('id', campaignId);
+    return 'queued';
+  }
+  
+  // Step 3: No pending work -> completed
+  console.log(`[finalizeCampaignStatus] Campaign ${campaignId} has no pending work -> completed`);
+  await supabaseClient
+    .from('campaigns')
+    .update({ status: 'completed', updated_at: new Date().toISOString() })
+    .eq('id', campaignId);
+  return 'completed';
+}
+
+// ============================================
 // LINKEDIN HELPERS
 // ============================================
 function extractLinkedInPublicIdentifier(linkedinUrl: string): string | null {
@@ -719,37 +782,8 @@ serve(async (req) => {
       // NOTE: No longer updating campaigns.sent_count/failed_count incrementally
       // The view campaigns_with_stats calculates counts from campaign_leads current state
 
-      // Determine final campaign status
-      const { data: remainingQueue } = await supabase
-        .from('campaign_queue')
-        .select('id')
-        .eq('campaign_id', campaign.id)
-        .eq('status', 'queued');
-
-      const hasMoreInQueue = remainingQueue && remainingQueue.length > 0;
-
-      let finalCampaignStatus: string;
-      if (hasMoreInQueue) {
-        finalCampaignStatus = 'queued';
-      } else {
-        const { data: pendingLeads } = await supabase
-          .from('campaign_leads')
-          .select('id')
-          .eq('campaign_id', campaign.id)
-          .eq('status', 'pending')
-          .limit(1);
-
-        if (pendingLeads && pendingLeads.length > 0) {
-          finalCampaignStatus = 'partial';
-        } else {
-          finalCampaignStatus = 'completed';
-        }
-      }
-
-      await supabase
-        .from('campaigns')
-        .update({ status: finalCampaignStatus })
-        .eq('id', campaign.id);
+      // Finalize campaign status using source of truth logic
+      const finalCampaignStatus = await finalizeCampaignStatus(supabase, campaign.id);
 
       console.log(`${logPrefix} Done: sent=${sentCount}, failed=${failedCount}, campaign=${finalCampaignStatus}`);
 
@@ -763,7 +797,7 @@ serve(async (req) => {
         sentNow: sentCount,
         failedNow: failedCount,
         remaining: entry.leads_to_send - newLeadsSent,
-        finalStatus: queueCompleted ? 'completed' : 'queued',
+        finalStatus: finalCampaignStatus,
       });
     }
 

@@ -714,8 +714,8 @@ export default function Messages() {
     }
   }
 
-  async function fetchMessages(chatId: string, beforeCursor?: string) {
-    if (beforeCursor) {
+  async function fetchMessages(chatId: string, beforeTimestamp?: string) {
+    if (beforeTimestamp) {
       setLoadingOlder(true);
     } else {
       setLoadingMessages(true);
@@ -726,107 +726,77 @@ export default function Messages() {
 
     try {
       // ============================================
-      // HYBRID LOADING: Load from cache first for initial load
+      // LOCAL-ONLY: Load messages only from local database
+      // New messages arrive via webhook and are saved locally
+      // Sent messages are saved locally after sending
       // ============================================
-      if (!beforeCursor) {
-        // Step 1: Load cached messages from local database (instant)
-        const { data: cachedMessages, error: cacheError } = await supabase
-          .from('messages')
-          .select('*')
-          .eq('workspace_id', currentWorkspace?.id)
-          .eq('chat_id', chatId)
-          .order('timestamp', { ascending: true })
-          .limit(50);
-        
-        if (!cacheError && cachedMessages && cachedMessages.length > 0) {
-          console.log(`Loaded ${cachedMessages.length} messages from cache for chat ${chatId}`);
-          
-          // Map cached messages to Message interface
-          const mappedCached: Message[] = cachedMessages.map((msg: any) => {
-            let attachments: Message['attachments'] = undefined;
-            if (msg.attachments) {
-              try {
-                const parsed = typeof msg.attachments === 'string' 
-                  ? JSON.parse(msg.attachments) 
-                  : msg.attachments;
-                if (Array.isArray(parsed) && parsed.length > 0) {
-                  attachments = parsed;
-                }
-              } catch (e) {
-                console.warn('Failed to parse attachments:', e);
-              }
-            }
-            
-            return {
-              id: msg.external_id || msg.id,
-              chat_id: msg.chat_id,
-              sender: msg.sender as 'me' | 'them',
-              text: msg.text || '',
-              timestamp: msg.timestamp,
-              status: msg.sender === 'me' ? 'sent' : undefined,
-              attachments,
-            };
-          });
-          
-          setMessages(mappedCached);
-          setLoadingMessages(false);
-          
-          // Force scroll to bottom
-          setTimeout(() => {
-            messagesEndRef.current?.scrollIntoView({ behavior: 'auto' });
-          }, 100);
-          
-          // Step 2: Fetch newer messages from API in background
-          invokeAuthedFunction('get-chat-messages', {
-            workspaceId: currentWorkspace?.id,
-            chatId,
-            limit: 50,
-          }).then((data) => {
-            const apiMessages = (data.messages || []).reverse();
-            if (apiMessages.length > 0) {
-              // Merge with existing, avoiding duplicates
-              setMessages(prev => {
-                const existingIds = new Set(prev.map(m => m.id));
-                const newMsgs = apiMessages.filter((m: Message) => !existingIds.has(m.id));
-                if (newMsgs.length > 0) {
-                  console.log(`Added ${newMsgs.length} new messages from API`);
-                  return [...prev, ...newMsgs];
-                }
-                return prev;
-              });
-            }
-            setCursor(data.cursor || null);
-            setHasMore(!!data.cursor && apiMessages.length > 0);
-          }).catch(err => console.warn('Background message fetch failed:', err));
-          
-          return;
-        }
-      }
-
-      // Step 3: No cache or loading older - fetch from API
-      const data = await invokeAuthedFunction('get-chat-messages', {
-        workspaceId: currentWorkspace?.id,
-        chatId,
-        limit: 50,
-        before: beforeCursor,
-      });
-
-      // Messages come from API newest first, but we need oldest first (newest at bottom)
-      const newMessages = (data.messages || []).reverse();
       
-      if (beforeCursor) {
-        // Prepend older messages (they come newest first, so after reverse they're oldest first)
-        setMessages(prev => [...newMessages, ...prev]);
+      let query = supabase
+        .from('messages')
+        .select('*')
+        .eq('workspace_id', currentWorkspace?.id)
+        .eq('chat_id', chatId)
+        .order('timestamp', { ascending: false }) // Get newest first for pagination
+        .limit(50);
+      
+      // Pagination: get messages older than the cursor
+      if (beforeTimestamp) {
+        query = query.lt('timestamp', beforeTimestamp);
+      }
+      
+      const { data: localMessages, error } = await query;
+      
+      if (error) throw error;
+      
+      // Map local messages to Message interface (reverse to show oldest first)
+      const mappedMessages: Message[] = (localMessages || []).reverse().map((msg: any) => {
+        let attachments: Message['attachments'] = undefined;
+        if (msg.attachments) {
+          try {
+            const parsed = typeof msg.attachments === 'string' 
+              ? JSON.parse(msg.attachments) 
+              : msg.attachments;
+            if (Array.isArray(parsed) && parsed.length > 0) {
+              attachments = parsed;
+            }
+          } catch (e) {
+            console.warn('Failed to parse attachments:', e);
+          }
+        }
+        
+        return {
+          id: msg.external_id || msg.id,
+          chat_id: msg.chat_id,
+          sender: msg.sender as 'me' | 'them',
+          text: msg.text || '',
+          timestamp: msg.timestamp,
+          status: msg.sender === 'me' ? 'sent' : undefined,
+          attachments,
+        };
+      });
+      
+      if (beforeTimestamp) {
+        // Prepend older messages
+        setMessages(prev => [...mappedMessages, ...prev]);
       } else {
-        setMessages(newMessages);
+        setMessages(mappedMessages);
         // Force scroll to bottom after initial load
         setTimeout(() => {
           messagesEndRef.current?.scrollIntoView({ behavior: 'auto' });
         }, 100);
       }
       
-      setCursor(data.cursor || null);
-      setHasMore(!!data.cursor && newMessages.length > 0);
+      // Check if there are more older messages
+      const hasMoreMessages = (localMessages?.length || 0) === 50;
+      setHasMore(hasMoreMessages);
+      
+      // Set cursor to oldest message timestamp for pagination
+      if (localMessages && localMessages.length > 0) {
+        // localMessages is still in newest-first order here (before reverse)
+        // So the last item is the oldest
+        setCursor(localMessages[localMessages.length - 1].timestamp);
+      }
+      
     } catch (error: any) {
       toast({
         title: 'Erro ao carregar mensagens',

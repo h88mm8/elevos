@@ -122,17 +122,19 @@ serve(async (req) => {
       finalMimeType = typeDefaults[mediaType] || 'application/octet-stream';
     }
 
-    console.log(`Using final mimeType: ${finalMimeType}`);
+    // Clean mime type - remove parameters like "; codecs=opus" that storage doesn't accept
+    const cleanMimeType = finalMimeType.split(';')[0].trim();
+    console.log(`Using final mimeType: ${finalMimeType} -> clean: ${cleanMimeType}`);
 
     // Get extension for file path
     const extension = getExtensionFromMimeType(finalMimeType);
     const uploadPath = `${workspaceId}/media/${messageId}.${extension}`;
 
-    // Upload to storage
+    // Upload to storage with clean mime type
     const { error: uploadError } = await supabaseAdmin.storage
       .from('message-attachments')
       .upload(uploadPath, mediaBlob, {
-        contentType: finalMimeType,
+        contentType: cleanMimeType,
         upsert: true,
       });
 

@@ -10,6 +10,7 @@ interface LeadInput {
   id?: string;
   email?: string | null;
   phone?: string | null;
+  mobile_number?: string | null;
   linkedin_url?: string | null;
   full_name?: string | null;
   company?: string | null;
@@ -108,7 +109,7 @@ serve(async (req) => {
     // ============================================
     const validLeads = (leads as LeadInput[]).filter((lead: LeadInput) => {
       if (type === 'email') return !!lead.email;
-      if (type === 'sms' || type === 'whatsapp') return !!lead.phone;
+      if (type === 'sms' || type === 'whatsapp') return !!(lead.phone || lead.mobile_number);
       if (type === 'linkedin') return !!lead.linkedin_url;
       return true; // For other types, include all
     });

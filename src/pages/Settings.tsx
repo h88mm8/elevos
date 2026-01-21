@@ -15,6 +15,7 @@ import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useToast } from '@/hooks/use-toast';
 import { supabase } from '@/integrations/supabase/client';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
@@ -42,10 +43,33 @@ import {
   AlertTriangle,
   Clock,
   Save,
+  Globe,
 } from 'lucide-react';
 import { MESSAGE_VARIABLES } from '@/lib/messageVariables';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
+
+// Common IANA timezone options
+const TIMEZONE_OPTIONS = [
+  { value: 'UTC', label: 'UTC (Coordinated Universal Time)' },
+  { value: 'America/Sao_Paulo', label: 'São Paulo (GMT-3)' },
+  { value: 'America/New_York', label: 'Nova York (GMT-5/-4)' },
+  { value: 'America/Los_Angeles', label: 'Los Angeles (GMT-8/-7)' },
+  { value: 'America/Chicago', label: 'Chicago (GMT-6/-5)' },
+  { value: 'America/Mexico_City', label: 'Cidade do México (GMT-6)' },
+  { value: 'America/Buenos_Aires', label: 'Buenos Aires (GMT-3)' },
+  { value: 'America/Lima', label: 'Lima (GMT-5)' },
+  { value: 'America/Bogota', label: 'Bogotá (GMT-5)' },
+  { value: 'Europe/London', label: 'Londres (GMT+0/+1)' },
+  { value: 'Europe/Paris', label: 'Paris (GMT+1/+2)' },
+  { value: 'Europe/Berlin', label: 'Berlim (GMT+1/+2)' },
+  { value: 'Europe/Madrid', label: 'Madrid (GMT+1/+2)' },
+  { value: 'Europe/Lisbon', label: 'Lisboa (GMT+0/+1)' },
+  { value: 'Asia/Tokyo', label: 'Tóquio (GMT+9)' },
+  { value: 'Asia/Shanghai', label: 'Xangai (GMT+8)' },
+  { value: 'Asia/Dubai', label: 'Dubai (GMT+4)' },
+  { value: 'Australia/Sydney', label: 'Sydney (GMT+10/+11)' },
+];
 
 // Helper for safe number parsing (handles 0 correctly)
 function parseNumberInput(value: string, fallback: number, min: number, max: number): number {
@@ -74,6 +98,51 @@ export default function Settings() {
   const [linkedinIntervalSeconds, setLinkedinIntervalSeconds] = useState<number>(30);
   
   const [settingsChanged, setSettingsChanged] = useState(false);
+  
+  // Timezone state
+  const [workspaceTimezone, setWorkspaceTimezone] = useState<string>('UTC');
+  const [isSavingTimezone, setIsSavingTimezone] = useState(false);
+
+  // Load workspace timezone
+  useEffect(() => {
+    async function loadTimezone() {
+      if (!currentWorkspace) return;
+      const { data } = await supabase
+        .from('workspaces')
+        .select('timezone')
+        .eq('id', currentWorkspace.id)
+        .single();
+      if (data?.timezone) {
+        setWorkspaceTimezone(data.timezone);
+      }
+    }
+    loadTimezone();
+  }, [currentWorkspace?.id]);
+
+  async function handleSaveTimezone(newTimezone: string) {
+    if (!currentWorkspace) return;
+    setIsSavingTimezone(true);
+    try {
+      const { error } = await supabase
+        .from('workspaces')
+        .update({ timezone: newTimezone })
+        .eq('id', currentWorkspace.id);
+      if (error) throw error;
+      setWorkspaceTimezone(newTimezone);
+      toast({
+        title: 'Fuso horário atualizado',
+        description: `Campanhas agendadas usarão ${newTimezone}.`,
+      });
+    } catch (error: any) {
+      toast({
+        title: 'Erro ao salvar',
+        description: error.message,
+        variant: 'destructive',
+      });
+    } finally {
+      setIsSavingTimezone(false);
+    }
+  }
 
   // Initialize settings from hook
   useEffect(() => {
@@ -507,6 +576,31 @@ export default function Settings() {
                 <div className="space-y-2">
                   <Label>Nome do Workspace</Label>
                   <Input value={currentWorkspace?.name || ''} disabled />
+                </div>
+                <div className="space-y-2">
+                  <Label className="flex items-center gap-2">
+                    <Globe className="h-4 w-4" />
+                    Fuso Horário
+                  </Label>
+                  <Select 
+                    value={workspaceTimezone} 
+                    onValueChange={handleSaveTimezone}
+                    disabled={isSavingTimezone}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Selecione o fuso horário" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {TIMEZONE_OPTIONS.map(tz => (
+                        <SelectItem key={tz.value} value={tz.value}>
+                          {tz.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <p className="text-xs text-muted-foreground">
+                    Usado para agendamento de campanhas diferidas (ex.: 09:00 local).
+                  </p>
                 </div>
                 <div className="grid grid-cols-2 gap-4">
                   <div className="space-y-2">

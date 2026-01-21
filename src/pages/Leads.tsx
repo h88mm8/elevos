@@ -729,10 +729,10 @@ export default function Leads() {
                       </TableHead>
                       <TableHead>Nome</TableHead>
                       <TableHead>Email</TableHead>
+                      <TableHead>Celular</TableHead>
                       <TableHead>Empresa</TableHead>
                       <TableHead>Cargo</TableHead>
                       <TableHead>Localização</TableHead>
-                      <TableHead>Indústria</TableHead>
                       <TableHead>LinkedIn</TableHead>
                       <TableHead className="w-32">Ações</TableHead>
                     </TableRow>
@@ -758,15 +758,17 @@ export default function Leads() {
                         </TableCell>
                         <TableCell>
                           {lead.email ? (
-                            <div className="flex flex-col">
-                              <span className="text-sm">{lead.email}</span>
-                              {lead.phone || lead.mobile_number ? (
-                                <Badge variant="secondary" className="w-fit mt-1 text-xs">
-                                  <Phone className="h-3 w-3 mr-1" />
-                                  {lead.phone || lead.mobile_number}
-                                </Badge>
-                              ) : null}
-                            </div>
+                            <span className="text-sm">{lead.email}</span>
+                          ) : (
+                            <span className="text-muted-foreground">-</span>
+                          )}
+                        </TableCell>
+                        <TableCell>
+                          {lead.mobile_number ? (
+                            <Badge variant="secondary" className="gap-1">
+                              <Phone className="h-3 w-3" />
+                              {lead.mobile_number}
+                            </Badge>
                           ) : (
                             <span className="text-muted-foreground">-</span>
                           )}
@@ -800,13 +802,6 @@ export default function Leads() {
                               <MapPin className="h-3 w-3 text-muted-foreground" />
                               <span className="truncate max-w-[150px]">{getLocation(lead)}</span>
                             </div>
-                          ) : (
-                            <span className="text-muted-foreground">-</span>
-                          )}
-                        </TableCell>
-                        <TableCell>
-                          {lead.industry ? (
-                            <span className="text-sm">{lead.industry}</span>
                           ) : (
                             <span className="text-muted-foreground">-</span>
                           )}

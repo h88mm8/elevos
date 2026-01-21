@@ -779,6 +779,7 @@ export type Database = {
         }
         Returns: boolean
       }
+      is_valid_phone: { Args: { identifier: string }; Returns: boolean }
       is_workspace_admin: { Args: { workspace_uuid: string }; Returns: boolean }
       is_workspace_member: {
         Args: { workspace_uuid: string }

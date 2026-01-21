@@ -9,6 +9,20 @@ const corsHeaders = {
 // Cache duration in hours
 const CACHE_DURATION_HOURS = 24;
 
+// ============================================
+// PHONE NUMBER VALIDATION
+// Filters out @lid internal IDs (14-15+ digits)
+// Valid phone numbers: 10-13 digits
+// ============================================
+function isValidPhoneNumber(identifier: string): boolean {
+  if (!identifier) return false;
+  const digits = identifier.replace(/\D/g, '');
+  // IDs @lid have 14-15+ digits and don't start with valid country codes
+  // Brazilian numbers start with 55 and can be up to 13 digits
+  if (digits.length > 13 && !digits.startsWith('55')) return false;
+  return digits.length >= 10 && digits.length <= 15;
+}
+
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
@@ -131,8 +145,10 @@ serve(async (req) => {
     // ============================================
     const phoneIdentifiers = chatItems
       .map((chat: any) => {
-        const identifier = chat.attendee_public_identifier || chat.attendee_provider_id || '';
-        return identifier.split('@')[0] || '';
+        const rawIdentifier = chat.attendee_public_identifier || chat.attendee_provider_id || '';
+        const cleanIdentifier = rawIdentifier.split('@')[0] || '';
+        // Only include valid phone numbers
+        return isValidPhoneNumber(cleanIdentifier) ? cleanIdentifier : '';
       })
       .filter((id: string) => id.length > 0);
 
@@ -153,29 +169,29 @@ serve(async (req) => {
       });
     });
 
-    console.log(`Found ${cachedMap.size} cached profiles out of ${phoneIdentifiers.length} contacts`);
+    console.log(`Found ${cachedMap.size} cached profiles out of ${phoneIdentifiers.length} valid contacts`);
 
     // ============================================
     // FETCH MISSING PROFILES: Only fetch what's not cached
     // ============================================
     const chatsNeedingFetch = chatItems.filter((chat: any) => {
-      const identifier = chat.attendee_public_identifier || chat.attendee_provider_id || '';
-      const phoneNumber = identifier.split('@')[0] || '';
-      return phoneNumber && !cachedMap.has(phoneNumber);
+      const rawIdentifier = chat.attendee_public_identifier || chat.attendee_provider_id || '';
+      const phoneNumber = rawIdentifier.split('@')[0] || '';
+      return isValidPhoneNumber(phoneNumber) && !cachedMap.has(phoneNumber);
     });
 
     console.log(`Fetching ${chatsNeedingFetch.length} profiles from provider API`);
 
     const fetchAttendeeProfile = async (chat: any): Promise<{ phoneNumber: string; displayName: string | null; profilePicture: string | null }> => {
-      const identifier = chat.attendee_public_identifier || chat.attendee_provider_id || '';
-      const phoneNumber = identifier.split('@')[0] || '';
+      const rawIdentifier = chat.attendee_public_identifier || chat.attendee_provider_id || '';
+      const phoneNumber = rawIdentifier.split('@')[0] || '';
       
       try {
-        if (!identifier || !chat.account_id) {
+        if (!rawIdentifier || !chat.account_id) {
           return { phoneNumber, displayName: null, profilePicture: null };
         }
 
-        const profileUrl = `https://${PROVIDER_DSN}/api/v1/users/${encodeURIComponent(identifier)}?account_id=${chat.account_id}`;
+        const profileUrl = `https://${PROVIDER_DSN}/api/v1/users/${encodeURIComponent(rawIdentifier)}?account_id=${chat.account_id}`;
         const profileResponse = await fetch(profileUrl, {
           method: 'GET',
           headers: {
@@ -185,7 +201,7 @@ serve(async (req) => {
         });
 
         if (!profileResponse.ok) {
-          console.log(`Could not fetch profile for ${identifier}: ${profileResponse.status}`);
+          console.log(`Could not fetch profile for ${rawIdentifier}: ${profileResponse.status}`);
           return { phoneNumber, displayName: null, profilePicture: null };
         }
 
@@ -280,28 +296,39 @@ serve(async (req) => {
       return { type, duration };
     };
 
-    const mappedChats = chatItems.map((chat: any) => {
-      const attendeeIdentifier = chat.attendee_public_identifier || chat.attendee_provider_id || '';
-      const phoneNumber = attendeeIdentifier.split('@')[0] || '';
-      const formattedPhone = phoneNumber ? `+${phoneNumber.slice(0, 2)} ${phoneNumber.slice(2)}` : '';
-      const profile = cachedMap.get(phoneNumber);
-      
-      const attachmentInfo = getAttachmentInfo(chat.last_message);
-      
-      return {
-        id: chat.id || chat.chat_id,
-        account_id: chat.account_id,
-        attendee_identifier: phoneNumber, // Used for deduplication
-        attendee_name: profile?.displayName || chat.name || formattedPhone || 'Contato',
-        attendee_email: null,
-        attendee_picture: profile?.profilePicture || null,
-        last_message: chat.last_message?.text || chat.snippet || '',
-        last_message_type: attachmentInfo.type,
-        last_message_duration: attachmentInfo.duration,
-        last_message_at: chat.timestamp || chat.last_message?.date || null,
-        unread_count: chat.unread_count || chat.unread || 0,
-      };
-    });
+    const mappedChats = chatItems
+      .map((chat: any) => {
+        const rawIdentifier = chat.attendee_public_identifier || chat.attendee_provider_id || '';
+        const phoneNumber = rawIdentifier.split('@')[0] || '';
+        
+        // Skip chats with invalid phone numbers (@lid IDs)
+        if (!isValidPhoneNumber(phoneNumber)) {
+          console.log(`Filtering out invalid chat: ${phoneNumber} (length: ${phoneNumber.length})`);
+          return null;
+        }
+        
+        const formattedPhone = phoneNumber ? `+${phoneNumber.slice(0, 2)} ${phoneNumber.slice(2)}` : '';
+        const profile = cachedMap.get(phoneNumber);
+        
+        const attachmentInfo = getAttachmentInfo(chat.last_message);
+        
+        return {
+          id: chat.id || chat.chat_id,
+          account_id: chat.account_id,
+          attendee_identifier: phoneNumber, // Used for deduplication
+          attendee_name: profile?.displayName || chat.name || formattedPhone || 'Contato',
+          attendee_email: null,
+          attendee_picture: profile?.profilePicture || null,
+          last_message: chat.last_message?.text || chat.snippet || '',
+          last_message_type: attachmentInfo.type,
+          last_message_duration: attachmentInfo.duration,
+          last_message_at: chat.timestamp || chat.last_message?.date || null,
+          unread_count: chat.unread_count || chat.unread || 0,
+        };
+      })
+      .filter((chat: any) => chat !== null); // Remove filtered chats
+
+    console.log(`Filtered to ${mappedChats.length} valid chats from ${chatItems.length} total`);
 
     // ============================================
     // DEDUPLICATE CHATS BY PHONE NUMBER

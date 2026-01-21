@@ -136,59 +136,92 @@ type UsageAction = 'linkedin_message' | 'linkedin_invite' | 'whatsapp_message';
 // 2. If any campaign_leads with status='pending' => 'queued' (work remaining)
 // 3. Otherwise => 'completed'
 async function finalizeCampaignStatus(supabaseClient: any, campaignId: string): Promise<string> {
-  console.log(`[finalizeCampaignStatus] Checking campaign ${campaignId}...`);
+  console.log(`[finalizeCampaignStatus] START - campaignId=${campaignId}`);
   
-  // Step 1: Check for pending queue entries
-  const { data: queueEntries, error: queueError } = await supabaseClient
-    .from('campaign_queue')
-    .select('id, leads_to_send, leads_sent')
-    .eq('campaign_id', campaignId)
-    .eq('status', 'queued');
-  
-  if (queueError) {
-    console.error(`[finalizeCampaignStatus] Error checking queue:`, queueError);
-  }
-  
-  const hasPendingQueue = queueEntries && queueEntries.some(
-    (q: { leads_to_send: number; leads_sent: number }) => q.leads_sent < q.leads_to_send
-  );
-  
-  if (hasPendingQueue) {
-    console.log(`[finalizeCampaignStatus] Campaign ${campaignId} has pending queue entries -> queued`);
-    await supabaseClient
+  try {
+    // Step 1: Check for pending queue entries
+    const { data: queueEntries, error: queueError } = await supabaseClient
+      .from('campaign_queue')
+      .select('id, leads_to_send, leads_sent')
+      .eq('campaign_id', campaignId)
+      .eq('status', 'queued');
+    
+    if (queueError) {
+      console.error(`[finalizeCampaignStatus] Error checking queue:`, queueError);
+    }
+    
+    const hasPendingQueue = queueEntries && queueEntries.some(
+      (q: { leads_to_send: number; leads_sent: number }) => q.leads_sent < q.leads_to_send
+    );
+    
+    if (hasPendingQueue) {
+      console.log(`[finalizeCampaignStatus] Campaign ${campaignId} has pending queue entries -> status will be 'queued'`);
+      console.log(`[finalizeCampaignStatus] BEFORE UPDATE: campaignId=${campaignId}, newStatus='queued'`);
+      const { error: updateError } = await supabaseClient
+        .from('campaigns')
+        .update({ status: 'queued', updated_at: new Date().toISOString() })
+        .eq('id', campaignId);
+      if (updateError) {
+        console.error(`[finalizeCampaignStatus] UPDATE ERROR:`, updateError);
+      } else {
+        console.log(`[finalizeCampaignStatus] AFTER UPDATE: campaignId=${campaignId}, status='queued' - SUCCESS`);
+      }
+      return 'queued';
+    }
+    
+    // Step 2: Check for pending leads
+    const { count: pendingCount, error: pendingError } = await supabaseClient
+      .from('campaign_leads')
+      .select('id', { count: 'exact', head: true })
+      .eq('campaign_id', campaignId)
+      .eq('status', 'pending');
+    
+    if (pendingError) {
+      console.error(`[finalizeCampaignStatus] Error checking pending leads:`, pendingError);
+    }
+    
+    if (pendingCount && pendingCount > 0) {
+      console.log(`[finalizeCampaignStatus] Campaign ${campaignId} has ${pendingCount} pending leads -> status will be 'queued'`);
+      console.log(`[finalizeCampaignStatus] BEFORE UPDATE: campaignId=${campaignId}, newStatus='queued'`);
+      const { error: updateError } = await supabaseClient
+        .from('campaigns')
+        .update({ status: 'queued', updated_at: new Date().toISOString() })
+        .eq('id', campaignId);
+      if (updateError) {
+        console.error(`[finalizeCampaignStatus] UPDATE ERROR:`, updateError);
+      } else {
+        console.log(`[finalizeCampaignStatus] AFTER UPDATE: campaignId=${campaignId}, status='queued' - SUCCESS`);
+      }
+      return 'queued';
+    }
+    
+    // Step 3: No pending work -> completed
+    console.log(`[finalizeCampaignStatus] Campaign ${campaignId} has no pending work -> status will be 'completed'`);
+    console.log(`[finalizeCampaignStatus] BEFORE UPDATE: campaignId=${campaignId}, newStatus='completed'`);
+    const { error: updateError } = await supabaseClient
       .from('campaigns')
-      .update({ status: 'queued', updated_at: new Date().toISOString() })
+      .update({ status: 'completed', updated_at: new Date().toISOString() })
       .eq('id', campaignId);
+    if (updateError) {
+      console.error(`[finalizeCampaignStatus] UPDATE ERROR:`, updateError);
+    } else {
+      console.log(`[finalizeCampaignStatus] AFTER UPDATE: campaignId=${campaignId}, status='completed' - SUCCESS`);
+    }
+    return 'completed';
+  } catch (err) {
+    console.error(`[finalizeCampaignStatus] EXCEPTION for campaignId=${campaignId}:`, err);
+    // On exception, try to set to 'queued' as a safe fallback
+    try {
+      await supabaseClient
+        .from('campaigns')
+        .update({ status: 'queued', updated_at: new Date().toISOString() })
+        .eq('id', campaignId);
+      console.log(`[finalizeCampaignStatus] Fallback: set campaignId=${campaignId} to 'queued' after exception`);
+    } catch (e2) {
+      console.error(`[finalizeCampaignStatus] Fallback update also failed:`, e2);
+    }
     return 'queued';
   }
-  
-  // Step 2: Check for pending leads
-  const { count: pendingCount, error: pendingError } = await supabaseClient
-    .from('campaign_leads')
-    .select('id', { count: 'exact', head: true })
-    .eq('campaign_id', campaignId)
-    .eq('status', 'pending');
-  
-  if (pendingError) {
-    console.error(`[finalizeCampaignStatus] Error checking pending leads:`, pendingError);
-  }
-  
-  if (pendingCount && pendingCount > 0) {
-    console.log(`[finalizeCampaignStatus] Campaign ${campaignId} has ${pendingCount} pending leads -> queued`);
-    await supabaseClient
-      .from('campaigns')
-      .update({ status: 'queued', updated_at: new Date().toISOString() })
-      .eq('id', campaignId);
-    return 'queued';
-  }
-  
-  // Step 3: No pending work -> completed
-  console.log(`[finalizeCampaignStatus] Campaign ${campaignId} has no pending work -> completed`);
-  await supabaseClient
-    .from('campaigns')
-    .update({ status: 'completed', updated_at: new Date().toISOString() })
-    .eq('id', campaignId);
-  return 'completed';
 }
 
 serve(async (req) => {
@@ -885,8 +918,9 @@ serve(async (req) => {
 
     // ============================================
     // FINALIZE CAMPAIGN STATUS (Source of Truth Logic)
+    // Use serviceClient for guaranteed permissions
     // ============================================
-    const finalStatus = await finalizeCampaignStatus(supabase, campaignId);
+    const finalStatus = await finalizeCampaignStatus(serviceClient, campaignId);
     const hasQueuedEntries = finalStatus === 'queued';
 
     console.log(`Campaign ${campaignId} finished: ${sentCount} sent, ${failedCount} failed, status: ${finalStatus}`);
@@ -906,6 +940,25 @@ serve(async (req) => {
 
   } catch (error) {
     console.error('Error in send-campaign:', error);
+    
+    // Try to finalize campaign status even on error (prevent stuck 'sending')
+    let finalStatus = 'queued'; // safe default
+    try {
+      const { campaignId: extractedCampaignId } = await req.clone().json().catch(() => ({}));
+      if (extractedCampaignId) {
+        // Create service client for finalization (may work even if user client failed)
+        const serviceClient = createClient(
+          Deno.env.get('SUPABASE_URL')!,
+          Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
+        );
+        console.log(`[send-campaign CATCH] Attempting to finalize campaign ${extractedCampaignId} after error`);
+        finalStatus = await finalizeCampaignStatus(serviceClient, extractedCampaignId);
+        console.log(`[send-campaign CATCH] Campaign ${extractedCampaignId} finalized to: ${finalStatus}`);
+      }
+    } catch (finalizeError) {
+      console.error('[send-campaign CATCH] Failed to finalize campaign status:', finalizeError);
+    }
+    
     return new Response(JSON.stringify({ 
       success: false,
       error: String(error),
@@ -913,6 +966,7 @@ serve(async (req) => {
       failedCount: 0,
       deferredCount: 0,
       results: [],
+      finalStatus,
     }), { status: 500, headers: corsHeaders });
   }
 });

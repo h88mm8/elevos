@@ -6,6 +6,18 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
+// Apply jitter to interval (±20% randomization)
+function applyJitter(baseSeconds: number, minSeconds: number = 10): number {
+  const jitterFactor = 0.8 + Math.random() * 0.4; // 0.8 to 1.2
+  const jitteredValue = Math.round(baseSeconds * jitterFactor);
+  return Math.max(jitteredValue, minSeconds);
+}
+
+// Get today's date in YYYY-MM-DD format
+function getTodayDate(): string {
+  return new Date().toISOString().split('T')[0];
+}
+
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
@@ -27,6 +39,12 @@ serve(async (req) => {
       Deno.env.get('SUPABASE_URL')!,
       Deno.env.get('SUPABASE_ANON_KEY')!,
       { global: { headers: { Authorization: authHeader } } }
+    );
+
+    // Service client for RPC calls (bypasses RLS)
+    const serviceClient = createClient(
+      Deno.env.get('SUPABASE_URL')!,
+      Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
     );
 
     const token = authHeader.replace('Bearer ', '');
@@ -118,21 +136,61 @@ serve(async (req) => {
       });
     }
 
+    // Unipile account ID (for API calls & usage tracking)
+    const unipileAccountId = account.account_id;
+
     // ============================================
     // GET WORKSPACE SETTINGS FOR RATE LIMITING
     // ============================================
     const { data: workspaceSettings } = await supabase
       .from('workspace_settings')
-      .select('linkedin_daily_invite_limit')
+      .select('linkedin_daily_invite_limit, linkedin_message_interval_seconds')
       .eq('workspace_id', workspaceId)
       .maybeSingle();
 
     const dailyInviteLimit = workspaceSettings?.linkedin_daily_invite_limit ?? 25;
+    const baseIntervalSeconds = workspaceSettings?.linkedin_message_interval_seconds ?? 30;
 
-    // TODO: Implement daily invite counting
-    // For now, we just log the limit but don't enforce it
-    // In production, you'd check against a counter table
-    console.log(`Daily invite limit: ${dailyInviteLimit}`);
+    // ============================================
+    // CHECK CURRENT DAILY USAGE
+    // ============================================
+    const todayDate = getTodayDate();
+    const usageAction = 'linkedin_invite';
+
+    const { data: usageData, error: usageError } = await serviceClient
+      .rpc('get_daily_usage', {
+        p_workspace_id: workspaceId,
+        p_account_id: unipileAccountId,
+        p_action: usageAction,
+        p_usage_date: todayDate,
+      });
+
+    if (usageError) {
+      console.error('Error fetching daily usage:', usageError);
+    }
+
+    const currentUsage = usageData || 0;
+    const remainingCapacity = Math.max(0, dailyInviteLimit - currentUsage);
+
+    console.log(`LinkedIn invite usage: ${currentUsage}/${dailyInviteLimit}, remaining: ${remainingCapacity}`);
+
+    // ============================================
+    // CHECK DAILY LIMIT
+    // ============================================
+    if (remainingCapacity === 0) {
+      console.log(`Daily invite limit reached for account ${unipileAccountId}`);
+      return new Response(JSON.stringify({
+        success: false,
+        error: 'Daily invite limit reached',
+        status: 'deferred',
+        reason: 'DAILY_LIMIT_REACHED',
+        currentUsage,
+        dailyLimit: dailyInviteLimit,
+      }), { 
+        status: 429, 
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
+      });
+    }
 
     // ============================================
     // GET PROVIDER CREDENTIALS
@@ -149,18 +207,27 @@ serve(async (req) => {
     }
 
     // ============================================
+    // APPLY JITTER DELAY (for rate limiting)
+    // ============================================
+    // Only apply if this is part of a batch (could be extended with a skipDelay param)
+    // For now, we'll apply a small jitter to avoid burst requests
+    const delaySeconds = applyJitter(baseIntervalSeconds * 0.3, 2); // 30% of interval, min 2s
+    console.log(`Applying ${delaySeconds}s jitter delay before invite`);
+    await new Promise(resolve => setTimeout(resolve, delaySeconds * 1000));
+
+    // ============================================
     // SEND LINKEDIN INVITE
     // ============================================
     // Unipile endpoint: POST /api/v1/users/invite
     const formData = new FormData();
-    formData.append('account_id', account.account_id);
+    formData.append('account_id', unipileAccountId);
     formData.append('provider_id', linkedinUrl); // LinkedIn URL or provider ID
     
     if (note) {
       formData.append('message', note);
     }
 
-    console.log(`Sending invite request to Unipile for account ${account.account_id}`);
+    console.log(`Sending invite request to Unipile for account ${unipileAccountId}`);
 
     const response = await fetch(`https://${unipileDsn}/api/v1/users/invite`, {
       method: 'POST',
@@ -188,6 +255,24 @@ serve(async (req) => {
     console.log('LinkedIn invite sent successfully:', JSON.stringify(responseData));
 
     // ============================================
+    // INCREMENT DAILY USAGE (after successful send)
+    // ============================================
+    const { data: newUsage, error: incrementError } = await serviceClient
+      .rpc('increment_daily_usage', {
+        p_workspace_id: workspaceId,
+        p_account_id: unipileAccountId,
+        p_action: usageAction,
+        p_usage_date: todayDate,
+        p_increment: 1,
+      });
+
+    if (incrementError) {
+      console.error(`Error incrementing usage for ${usageAction}:`, incrementError);
+    } else {
+      console.log(`Usage incremented for ${usageAction}: now ${newUsage}/${dailyInviteLimit}`);
+    }
+
+    // ============================================
     // RETURN SUCCESS
     // ============================================
     return new Response(JSON.stringify({
@@ -195,6 +280,11 @@ serve(async (req) => {
       invitationId: responseData.invitation_id || responseData.id,
       status: 'pending', // Invites are always pending until accepted
       message: 'Connection request sent successfully',
+      usage: {
+        action: usageAction,
+        current: newUsage || currentUsage + 1,
+        limit: dailyInviteLimit,
+      },
     }), { 
       status: 200, 
       headers: { ...corsHeaders, 'Content-Type': 'application/json' } 

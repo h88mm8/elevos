@@ -43,12 +43,44 @@ function getTodayDate(): string {
   return new Date().toISOString().split('T')[0];
 }
 
-// Get next day at 09:00 UTC for rescheduling
-function getNextDayAt9AM(): string {
+// Get next day at 09:00 in specified timezone (fallback to UTC)
+function getNextDayAt9AM(timezone?: string): string {
   const tomorrow = new Date();
   tomorrow.setDate(tomorrow.getDate() + 1);
+  
+  if (timezone) {
+    try {
+      // Create a date string for tomorrow at 09:00 in the target timezone
+      const formatter = new Intl.DateTimeFormat('en-CA', {
+        timeZone: timezone,
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+      });
+      const parts = formatter.formatToParts(tomorrow);
+      const year = parts.find(p => p.type === 'year')?.value;
+      const month = parts.find(p => p.type === 'month')?.value;
+      const day = parts.find(p => p.type === 'day')?.value;
+      
+      // Return ISO string with 09:00 in the target timezone
+      // This is approximate - for precise scheduling, store the timezone and handle in CRON
+      return `${year}-${month}-${day}T09:00:00`;
+    } catch {
+      // Fallback to UTC if timezone is invalid
+      console.warn(`Invalid timezone: ${timezone}, falling back to UTC`);
+    }
+  }
+  
+  // Default: 09:00 UTC
   tomorrow.setUTCHours(9, 0, 0, 0);
   return tomorrow.toISOString();
+}
+
+// Get tomorrow's date string in YYYY-MM-DD format
+function getTomorrowDate(): string {
+  const tomorrow = new Date();
+  tomorrow.setDate(tomorrow.getDate() + 1);
+  return tomorrow.toISOString().split('T')[0];
 }
 
 interface CampaignLead {
@@ -202,7 +234,10 @@ serve(async (req) => {
     // ============================================
     // VALIDATE ACCOUNT FOR WHATSAPP/LINKEDIN CAMPAIGNS
     // ============================================
-    let accountId: string | null = null;
+    // Variable naming convention:
+    // - internalAccountUuid: Internal UUID from accounts.id (for DB references)
+    // - unipileAccountId: Unipile's account ID from accounts.account_id (for API calls & usage tracking)
+    let internalAccountUuid: string | null = null;
     let unipileAccountId: string | null = null;
 
     if (campaign.type === 'whatsapp' || campaign.type === 'linkedin') {
@@ -227,8 +262,8 @@ serve(async (req) => {
         return new Response(JSON.stringify({ error: 'Account is not connected. Please reconnect.' }), { status: 400, headers: corsHeaders });
       }
 
-      accountId = account.id; // Internal UUID for usage tracking
-      unipileAccountId = account.account_id; // Unipile account ID for API calls
+      internalAccountUuid = account.id; // Internal UUID (for DB references)
+      unipileAccountId = account.account_id; // Unipile account ID (for API calls & usage tracking)
     }
 
     // ============================================
@@ -237,7 +272,7 @@ serve(async (req) => {
     const todayDate = getTodayDate();
     let currentUsage = 0;
 
-    if (accountId) {
+    if (unipileAccountId) {
       const { data: usageData, error: usageError } = await serviceClient
         .rpc('get_daily_usage', {
           p_workspace_id: campaign.workspace_id,
@@ -299,14 +334,26 @@ serve(async (req) => {
     }
 
     const totalLeads = campaignLeads.length;
-
-    console.log(`Campaign ${campaignId}: ${totalLeads} leads, daily limit: ${dailyLimit}`);
+    
+    // ============================================
+    // CALCULATE LEADS TO SEND TODAY
+    // ============================================
+    // FIXED: leadsToSendNow = min(totalLeads, remainingCapacity)
+    // remainingCapacity = dailyLimit - currentUsage (what's left for today)
+    const leadsToSendNow = Math.min(totalLeads, remainingCapacity);
+    const remainingAfterToday = totalLeads - leadsToSendNow;
+    
+    console.log(`Campaign ${campaignId}: ${totalLeads} leads total`);
+    console.log(`  currentUsage: ${currentUsage}, dailyLimit: ${dailyLimit}, remainingCapacity: ${remainingCapacity}`);
+    console.log(`  leadsToSendNow: ${leadsToSendNow}, remainingAfterToday: ${remainingAfterToday}`);
 
     // ============================================
-    // CHECK DAILY LIMIT - DEFER IF EXCEEDED
+    // CHECK DAILY LIMIT - DEFER IF NO CAPACITY
     // ============================================
-    if (remainingCapacity === 0) {
-      console.log(`Daily limit reached for ${usageAction}. Deferring campaign to next day.`);
+    if (leadsToSendNow === 0) {
+      console.log(`No capacity remaining for ${usageAction} today (${currentUsage}/${dailyLimit}). Deferring campaign.`);
+      
+      const tomorrowDateStr = getTomorrowDate();
       
       // Update all pending leads to DEFERRED status
       await supabase
@@ -316,17 +363,12 @@ serve(async (req) => {
           error: 'DEFERRED_DAILY_LIMIT',
         })
         .eq('campaign_id', campaignId)
-        .eq('status', 'pending');
-
-      // Create or update queue entry for tomorrow
-      const tomorrowDate = new Date();
-      tomorrowDate.setDate(tomorrowDate.getDate() + 1);
-      const tomorrowDateStr = tomorrowDate.toISOString().split('T')[0];
+        .in('status', ['pending', 'deferred']);
 
       // Check if queue entry already exists for tomorrow
       const { data: existingQueue } = await supabase
         .from('campaign_queue')
-        .select('id')
+        .select('id, leads_to_send')
         .eq('campaign_id', campaignId)
         .eq('scheduled_date', tomorrowDateStr)
         .maybeSingle();
@@ -342,6 +384,14 @@ serve(async (req) => {
             leads_sent: 0,
             status: 'queued',
           });
+        console.log(`Queue entry created for ${tomorrowDateStr}: ${totalLeads} leads`);
+      } else {
+        // Update existing entry with correct lead count
+        await supabase
+          .from('campaign_queue')
+          .update({ leads_to_send: totalLeads })
+          .eq('id', existingQueue.id);
+        console.log(`Queue entry updated for ${tomorrowDateStr}: ${totalLeads} leads`);
       }
 
       // Update campaign status
@@ -358,71 +408,87 @@ serve(async (req) => {
         nextRunAt: getNextDayAt9AM(),
         currentUsage,
         dailyLimit,
+        remainingCapacity: 0,
+        scheduledDate: tomorrowDateStr,
       }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
     }
 
     // ============================================
-    // CHECK IF QUEUE IS NEEDED (campaign exceeds remaining capacity)
+    // CREATE QUEUE FOR REMAINING LEADS (if any)
     // ============================================
-    const effectiveDailyLimit = Math.min(remainingCapacity, dailyLimit);
-    
-    if (totalLeads > effectiveDailyLimit) {
-      console.log(`Campaign exceeds remaining capacity (${remainingCapacity}). Creating queue entries...`);
-
-      // Calculate number of days needed
-      const leadsAfterToday = totalLeads - effectiveDailyLimit;
-      const additionalDays = Math.ceil(leadsAfterToday / dailyLimit);
+    if (remainingAfterToday > 0) {
+      console.log(`${remainingAfterToday} leads won't fit today. Creating queue entries...`);
+      
+      // Calculate how many additional days needed using FULL dailyLimit (not remainingCapacity)
+      const additionalDays = Math.ceil(remainingAfterToday / dailyLimit);
       const today = new Date();
       today.setHours(0, 0, 0, 0);
 
       // Create queue entries for subsequent days
       const queueEntries = [];
+      let leadsRemaining = remainingAfterToday;
+      
       for (let day = 1; day <= additionalDays; day++) {
         const scheduledDate = new Date(today);
         scheduledDate.setDate(scheduledDate.getDate() + day);
+        const scheduledDateStr = scheduledDate.toISOString().split('T')[0];
         
-        const startIdx = effectiveDailyLimit + (day - 1) * dailyLimit;
-        const endIdx = Math.min(startIdx + dailyLimit, totalLeads);
-        const leadsForDay = endIdx - startIdx;
+        // Each day gets up to dailyLimit (full capacity)
+        const leadsForDay = Math.min(leadsRemaining, dailyLimit);
+        leadsRemaining -= leadsForDay;
 
         if (leadsForDay > 0) {
           queueEntries.push({
             campaign_id: campaignId,
             workspace_id: campaign.workspace_id,
-            scheduled_date: scheduledDate.toISOString().split('T')[0],
+            scheduled_date: scheduledDateStr,
             leads_to_send: leadsForDay,
             leads_sent: 0,
             status: 'queued',
           });
+          console.log(`  Queue entry: ${scheduledDateStr} -> ${leadsForDay} leads`);
         }
       }
 
       if (queueEntries.length > 0) {
-        // Insert queue entries
         const { error: queueError } = await supabase
           .from('campaign_queue')
           .insert(queueEntries);
 
         if (queueError) {
           console.error('Error creating queue entries:', queueError);
-          return new Response(JSON.stringify({ error: 'Failed to create queue' }), { status: 500, headers: corsHeaders });
+          // Don't fail - continue sending what we can today
+        } else {
+          console.log(`Queue created: ${queueEntries.length} entries for ${remainingAfterToday} leads`);
         }
 
-        // Update campaign status to 'queued'
+        // Update campaign status to 'queued' (will be partially completed)
         await supabase
           .from('campaigns')
           .update({ status: 'queued' })
           .eq('id', campaignId);
-
-        console.log(`Queue created for ${additionalDays} additional days. Sending first batch of ${effectiveDailyLimit} leads...`);
       }
+      
+      // Mark remaining leads (those not being sent today) as deferred
+      const leadsToProcess = (campaignLeads as unknown as CampaignLead[]).slice(0, leadsToSendNow);
+      const leadIdsToSend = leadsToProcess.map(cl => cl.id);
+      
+      // Defer leads that won't be sent today
+      await supabase
+        .from('campaign_leads')
+        .update({ 
+          status: 'deferred',
+          error: 'QUEUED_FOR_LATER',
+        })
+        .eq('campaign_id', campaignId)
+        .eq('status', 'pending')
+        .not('id', 'in', `(${leadIdsToSend.join(',')})`);
     }
 
-    // Determine how many leads to send now (respecting remaining capacity)
-    const leadsToSendNow = Math.min(totalLeads, effectiveDailyLimit);
+    // Get the leads we'll actually process today
     const leadsToProcess = (campaignLeads as unknown as CampaignLead[]).slice(0, leadsToSendNow);
 
-    console.log(`Starting campaign ${campaignId} with ${leadsToProcess.length} leads (of ${totalLeads} total), remaining capacity: ${remainingCapacity}`);
+    console.log(`Starting campaign ${campaignId}: sending ${leadsToProcess.length} of ${totalLeads} leads today`);
 
     // Update campaign status to 'sending'
     await supabase

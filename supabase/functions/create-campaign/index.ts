@@ -109,7 +109,7 @@ serve(async (req) => {
     // ============================================
     const validLeads = (leads as LeadInput[]).filter((lead: LeadInput) => {
       if (type === 'email') return !!lead.email;
-      if (type === 'sms' || type === 'whatsapp') return !!(lead.phone || lead.mobile_number);
+      if (type === 'sms' || type === 'whatsapp') return !!lead.mobile_number;
       if (type === 'linkedin') return !!lead.linkedin_url;
       return true; // For other types, include all
     });

@@ -115,7 +115,7 @@ export interface Campaign {
   workspace_id: string;
   name: string;
   type: 'email' | 'whatsapp' | 'linkedin';
-  status: 'draft' | 'scheduled' | 'sending' | 'running' | 'paused' | 'completed' | 'partial' | 'failed';
+  status: 'draft' | 'scheduled' | 'sending' | 'running' | 'paused' | 'completed' | 'partial' | 'failed' | 'queued';
   message: string;
   subject: string | null;
   account_id: string | null;
@@ -123,6 +123,27 @@ export interface Campaign {
   leads_count: number;
   sent_count: number;
   failed_count: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CampaignQueue {
+  id: string;
+  campaign_id: string;
+  workspace_id: string;
+  scheduled_date: string;
+  leads_to_send: number;
+  leads_sent: number;
+  status: 'queued' | 'processing' | 'completed';
+  created_at: string;
+  processed_at: string | null;
+}
+
+export interface WorkspaceSettings {
+  id: string;
+  workspace_id: string;
+  daily_message_limit: number;
+  message_interval_seconds: number;
   created_at: string;
   updated_at: string;
 }

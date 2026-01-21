@@ -30,6 +30,7 @@ import {
   Variable,
   Eye,
   Trash2,
+  Clock,
 } from 'lucide-react';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
@@ -45,6 +46,7 @@ const statusLabels: Record<string, { label: string; variant: 'default' | 'second
   completed: { label: 'Concluída', variant: 'default' },
   partial: { label: 'Parcial', variant: 'outline' },
   failed: { label: 'Falhou', variant: 'destructive' },
+  queued: { label: 'Na fila', variant: 'outline' },
 };
 
 const typeIcons: Record<string, React.ElementType> = {
@@ -578,9 +580,19 @@ export default function Campaigns() {
                           </div>
                         </TableCell>
                         <TableCell>
-                          <Badge variant={statusLabels[campaign.status]?.variant || 'secondary'}>
-                            {statusLabels[campaign.status]?.label || campaign.status}
-                          </Badge>
+                          <div className="flex items-center gap-2">
+                            {campaign.status === 'queued' && (
+                              <Clock className="h-3.5 w-3.5 text-muted-foreground" />
+                            )}
+                            <Badge variant={statusLabels[campaign.status]?.variant || 'secondary'}>
+                              {statusLabels[campaign.status]?.label || campaign.status}
+                            </Badge>
+                            {campaign.status === 'queued' && campaign.leads_count > 0 && (
+                              <span className="text-xs text-muted-foreground">
+                                {Math.ceil((campaign.leads_count - campaign.sent_count) / 50)} dias restantes
+                              </span>
+                            )}
+                          </div>
                         </TableCell>
                         <TableCell className="text-right">{campaign.leads_count}</TableCell>
                         <TableCell className="text-right">{campaign.sent_count}</TableCell>

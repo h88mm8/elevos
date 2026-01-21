@@ -575,10 +575,10 @@ export default function Messages() {
 
   return (
     <AppLayout>
-      <div className="h-[calc(100vh-8rem)]">
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 h-full">
+      <div className="h-full flex flex-col">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 flex-1 min-h-0">
           {/* Chat List */}
-          <Card className="md:col-span-1 flex flex-col">
+          <Card className="md:col-span-1 flex flex-col min-h-0 overflow-hidden">
             <CardHeader className="pb-3">
               <CardTitle className="text-lg">Conversas</CardTitle>
               <div className="relative">
@@ -666,7 +666,7 @@ export default function Messages() {
           </Card>
 
           {/* Messages */}
-          <Card className="md:col-span-2 flex flex-col">
+          <Card className="md:col-span-2 flex flex-col min-h-0 overflow-hidden">
             {selectedChat ? (
               <>
                 <CardHeader className="pb-3 border-b space-y-3">

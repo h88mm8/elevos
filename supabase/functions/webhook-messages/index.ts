@@ -51,33 +51,92 @@ async function validateSignature(body: string, signature: string, secret: string
   }
 }
 
-// Cache media to Supabase Storage
-async function cacheMediaToStorage(
-  supabase: any,
-  mediaUrl: string,
-  workspaceId: string,
+// Fetch attachment from Unipile API using attachment_id
+async function fetchAttachmentFromUnipile(
   messageId: string,
-  mediaType: string,
-  mimeType: string
-): Promise<string | null> {
+  attachmentId: string
+): Promise<{ blob: Blob; contentType: string } | null> {
   try {
-    if (!mediaUrl) return null;
+    const UNIPILE_DSN = Deno.env.get('UNIPILE_DSN');
+    const UNIPILE_API_KEY = Deno.env.get('UNIPILE_API_KEY');
     
-    console.log(`Caching ${mediaType} for message ${messageId}: ${mediaUrl.slice(0, 60)}...`);
-    
-    // Download the media
-    const mediaResponse = await fetch(mediaUrl);
-    if (!mediaResponse.ok) {
-      console.error(`Failed to download media: ${mediaResponse.status}`);
+    if (!UNIPILE_DSN || !UNIPILE_API_KEY) {
+      console.warn('Unipile credentials not configured for attachment fetch');
       return null;
     }
     
-    const mediaBlob = await mediaResponse.blob();
-    const contentType = mediaResponse.headers.get('content-type') || mimeType || 'application/octet-stream';
+    const url = `${UNIPILE_DSN}/api/v1/messages/${messageId}/attachments/${attachmentId}`;
+    console.log(`Fetching attachment from Unipile: ${url}`);
+    
+    const response = await fetch(url, {
+      headers: {
+        'X-API-KEY': UNIPILE_API_KEY,
+        'Accept': '*/*',
+      },
+    });
+    
+    if (!response.ok) {
+      console.error(`Unipile attachment fetch failed: ${response.status} ${response.statusText}`);
+      return null;
+    }
+    
+    const blob = await response.blob();
+    const contentType = response.headers.get('content-type') || 'application/octet-stream';
+    
+    console.log(`Fetched attachment: ${blob.size} bytes, type: ${contentType}`);
+    return { blob, contentType };
+  } catch (error) {
+    console.error('Error fetching attachment from Unipile:', error);
+    return null;
+  }
+}
+
+// Cache media to Supabase Storage
+async function cacheMediaToStorage(
+  supabase: any,
+  mediaUrl: string | null,
+  workspaceId: string,
+  messageId: string,
+  mediaType: string,
+  mimeType: string,
+  attachmentId?: string,
+  providerMessageId?: string
+): Promise<string | null> {
+  try {
+    let mediaBlob: Blob;
+    let contentType: string;
+    
+    // If URL is null but we have attachment_id, fetch from Unipile API
+    if (!mediaUrl && attachmentId && providerMessageId) {
+      console.log(`No direct URL, fetching attachment ${attachmentId} from Unipile...`);
+      const result = await fetchAttachmentFromUnipile(providerMessageId, attachmentId);
+      if (!result) {
+        console.warn('Could not fetch attachment from Unipile');
+        return null;
+      }
+      mediaBlob = result.blob;
+      contentType = result.contentType;
+    } else if (mediaUrl) {
+      console.log(`Caching ${mediaType} for message ${messageId}: ${mediaUrl.slice(0, 60)}...`);
+      
+      // Download the media from URL
+      const mediaResponse = await fetch(mediaUrl);
+      if (!mediaResponse.ok) {
+        console.error(`Failed to download media: ${mediaResponse.status}`);
+        return null;
+      }
+      
+      mediaBlob = await mediaResponse.blob();
+      contentType = mediaResponse.headers.get('content-type') || mimeType || 'application/octet-stream';
+    } else {
+      console.warn('No URL or attachment_id to fetch media');
+      return null;
+    }
     
     // Determine file extension
     const extensionMap: Record<string, string> = {
       'audio/ogg': 'ogg',
+      'audio/ogg; codecs=opus': 'ogg',
       'audio/mpeg': 'mp3',
       'audio/mp4': 'm4a',
       'audio/aac': 'aac',
@@ -90,7 +149,7 @@ async function cacheMediaToStorage(
       'video/webm': 'webm',
       'application/pdf': 'pdf',
     };
-    const extension = extensionMap[contentType] || contentType.split('/')[1] || 'bin';
+    const extension = extensionMap[contentType] || contentType.split('/')[1]?.split(';')[0] || 'bin';
     
     // Create file path
     const filePath = `${workspaceId}/${messageId}.${extension}`;
@@ -126,7 +185,8 @@ async function processAttachments(
   supabase: any,
   attachments: any[],
   workspaceId: string,
-  messageId: string
+  messageId: string,
+  providerMessageId?: string
 ): Promise<any[]> {
   if (!attachments || !Array.isArray(attachments) || attachments.length === 0) {
     return [];
@@ -138,31 +198,40 @@ async function processAttachments(
     const att = attachments[i];
     const url = att.url || att.link || att.media_url;
     
-    if (!url) {
-      processedAttachments.push(att);
-      continue;
-    }
-    
     // Skip if already a storage URL
-    if (url.includes('supabase') && url.includes('storage')) {
+    if (url && url.includes('supabase') && url.includes('storage')) {
       processedAttachments.push(att);
       continue;
     }
     
+    // Try to cache the media (will use Unipile API if URL is null but attachment_id exists)
     const cachedUrl = await cacheMediaToStorage(
       supabase,
-      url,
+      url || null,
       workspaceId,
       `${messageId}-${i}`,
       att.type || 'file',
-      att.mime_type || att.mimetype || 'application/octet-stream'
+      att.mime_type || att.mimetype || 'application/octet-stream',
+      att.attachment_id,
+      providerMessageId
     );
     
-    processedAttachments.push({
-      ...att,
-      url: cachedUrl || url,
-      original_url: url,
-    });
+    if (cachedUrl) {
+      processedAttachments.push({
+        ...att,
+        url: cachedUrl,
+        original_url: url || null,
+      });
+    } else if (url) {
+      // Fallback to original URL if caching failed but URL exists
+      processedAttachments.push({
+        ...att,
+        url: url,
+      });
+    } else {
+      // No URL and caching failed - skip this attachment
+      console.warn(`Could not cache attachment ${att.attachment_id} - no URL available`);
+    }
   }
   
   return processedAttachments;
@@ -390,15 +459,19 @@ serve(async (req) => {
             const rawAttachments = extractAttachments(data);
             let processedAttachments: any[] = [];
             
+            // Get provider message_id for Unipile attachment API
+            const providerMessageId = data.message_id || data.id;
+            
             if (rawAttachments.length > 0) {
-              console.log(`Processing ${rawAttachments.length} attachments for message ${data.id}`);
+              console.log(`Processing ${rawAttachments.length} attachments for message ${providerMessageId}`);
               processedAttachments = await processAttachments(
                 supabase,
                 rawAttachments,
                 account.workspace_id,
-                data.id || `msg-${Date.now()}`
+                providerMessageId || `msg-${Date.now()}`,
+                providerMessageId // Pass for Unipile attachment fetch
               );
-              console.log(`Cached attachments:`, processedAttachments.map(a => ({ type: a.type, cached: a.url !== a.original_url })));
+              console.log(`Cached attachments:`, processedAttachments.map(a => ({ type: a.type, url: a.url?.slice(0, 50) })));
             }
 
             // Extract message text - Unipile uses 'message' field, not 'text'

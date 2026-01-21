@@ -139,6 +139,71 @@ serve(async (req) => {
         }
       }
       
+      // Map attachments (audio, video, images, documents)
+      // Provider structure: msg.attachments = [{ type, url, mime_type, filename, size, duration }]
+      // Or may come as individual fields: msg.media, msg.audio, msg.document, msg.image, msg.video
+      let attachments: any[] = [];
+      
+      if (msg.attachments && Array.isArray(msg.attachments)) {
+        attachments = msg.attachments.map((att: any) => ({
+          type: att.type || getAttachmentType(att.mime_type),
+          url: att.url || att.link || att.media_url,
+          mime_type: att.mime_type || att.mimetype,
+          filename: att.filename || att.name,
+          size: att.size,
+          duration: att.duration,
+        }));
+      }
+      
+      // Check individual media fields
+      if (msg.audio || msg.voice) {
+        const audio = msg.audio || msg.voice;
+        attachments.push({
+          type: 'audio',
+          url: audio.url || audio.link || audio.media_url,
+          mime_type: audio.mime_type || audio.mimetype || 'audio/ogg',
+          filename: audio.filename,
+          duration: audio.duration || audio.seconds,
+        });
+      }
+      
+      if (msg.image) {
+        attachments.push({
+          type: 'image',
+          url: msg.image.url || msg.image.link,
+          mime_type: msg.image.mime_type || 'image/jpeg',
+          filename: msg.image.filename,
+        });
+      }
+      
+      if (msg.video) {
+        attachments.push({
+          type: 'video',
+          url: msg.video.url || msg.video.link,
+          mime_type: msg.video.mime_type || 'video/mp4',
+          filename: msg.video.filename,
+          duration: msg.video.duration,
+        });
+      }
+      
+      if (msg.document) {
+        attachments.push({
+          type: 'document',
+          url: msg.document.url || msg.document.link,
+          mime_type: msg.document.mime_type,
+          filename: msg.document.filename || msg.document.name,
+          size: msg.document.size,
+        });
+      }
+      
+      // Log for debugging when there are attachments
+      if (attachments.length > 0) {
+        console.log('Message with attachments:', { 
+          msgId: msg.id, 
+          attachments: attachments.map(a => ({ type: a.type, mime_type: a.mime_type, hasUrl: !!a.url }))
+        });
+      }
+      
       return {
         id: msg.id || msg.message_id,
         chat_id: chatId,
@@ -146,8 +211,19 @@ serve(async (req) => {
         text: msg.text || msg.body || msg.content || '',
         timestamp: msg.date || msg.timestamp || msg.created_at || null,
         status: isSender ? status : undefined,
+        attachments: attachments.length > 0 ? attachments : undefined,
       };
     });
+    
+    // Helper function to determine attachment type from mime
+    function getAttachmentType(mimeType: string | undefined): string {
+      if (!mimeType) return 'file';
+      if (mimeType.startsWith('image/')) return 'image';
+      if (mimeType.startsWith('video/')) return 'video';
+      if (mimeType.startsWith('audio/')) return 'audio';
+      if (mimeType === 'application/pdf') return 'document';
+      return 'file';
+    }
 
     return new Response(JSON.stringify({
       success: true,

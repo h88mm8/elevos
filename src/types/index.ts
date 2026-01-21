@@ -198,6 +198,15 @@ export interface Chat {
   unread_count: number;
 }
 
+export interface MessageAttachment {
+  type: 'image' | 'video' | 'audio' | 'document' | 'file';
+  url: string;
+  mime_type?: string;
+  filename?: string;
+  size?: number;
+  duration?: number; // For audio/video in seconds
+}
+
 export interface Message {
   id: string;
   chat_id: string;
@@ -205,6 +214,7 @@ export interface Message {
   text: string;
   timestamp: string;
   status?: 'sending' | 'sent' | 'delivered' | 'read';
+  attachments?: MessageAttachment[];
 }
 
 export interface Account {

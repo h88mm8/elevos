@@ -351,31 +351,7 @@ serve(async (req) => {
 
     if (entries.length === 0) {
       console.log('[process-campaign-queue] No due queue entries found');
-
-      // Best-effort reconciliation: prevent campaigns from being stuck in 'running'
-      // when there is no pending queue and no pending leads.
-      try {
-        const { data: maybeStuckCampaigns, error: stuckError } = await supabase
-          .from('campaigns')
-          .select('id, status')
-          .in('status', ['running', 'sending'])
-          .limit(25);
-
-        if (stuckError) {
-          console.error('[process-campaign-queue] Reconcile: failed to fetch running/sending campaigns:', stuckError);
-        } else if (maybeStuckCampaigns && maybeStuckCampaigns.length > 0) {
-          console.log(`[process-campaign-queue] Reconcile: found ${maybeStuckCampaigns.length} running/sending campaigns to validate`);
-          for (const c of maybeStuckCampaigns) {
-            const logPrefix = `[Reconcile ${c.id}]`;
-            console.log(`${logPrefix} START status=${c.status}`);
-            const finalStatus = await finalizeCampaignStatus(supabase, c.id);
-            console.log(`${logPrefix} END finalStatus=${finalStatus}`);
-          }
-        }
-      } catch (reconcileErr) {
-        console.error('[process-campaign-queue] Reconcile: exception:', reconcileErr);
-      }
-
+      // NOTE: Triggers now handle campaign status finalization automatically
       return new Response(JSON.stringify({ 
         success: true, 
         message: 'No items to process',
@@ -597,10 +573,10 @@ serve(async (req) => {
         continue;
       }
 
-      // Update campaign status to running (UI label: Enviando)
+      // Update campaign status to sending
       await supabase
         .from('campaigns')
-        .update({ status: 'running' })
+        .update({ status: 'sending' })
         .eq('id', campaign.id);
 
       let sentCount = 0;

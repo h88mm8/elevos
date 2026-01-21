@@ -584,10 +584,10 @@ serve(async (req) => {
 
     console.log(`Starting campaign ${campaignId}: sending ${leadsToProcess.length} of ${totalLeads} leads today`);
 
-    // Update campaign status to 'running' (UI label: Enviando)
+    // Update campaign status to 'sending'
     await supabase
       .from('campaigns')
-      .update({ status: 'running' })
+      .update({ status: 'sending' })
       .eq('id', campaignId);
     startedSending = true;
 

@@ -47,9 +47,11 @@ function StatCard({
 const statusLabels: Record<string, { label: string; variant: 'default' | 'secondary' | 'destructive' | 'outline' }> = {
   draft: { label: 'Rascunho', variant: 'secondary' },
   scheduled: { label: 'Agendada', variant: 'outline' },
+  sending: { label: 'Enviando', variant: 'default' },
   running: { label: 'Enviando', variant: 'default' },
   paused: { label: 'Pausada', variant: 'secondary' },
   completed: { label: 'Concluída', variant: 'default' },
+  queued: { label: 'Na fila', variant: 'outline' },
   failed: { label: 'Falhou', variant: 'destructive' },
 };
 
@@ -65,7 +67,7 @@ export default function Dashboard() {
   const { leads, isLoading: leadsLoading } = useLeads();
   const { campaigns, isLoading: campaignsLoading } = useCampaigns();
 
-  const activeCampaigns = campaigns.filter(c => c.status === 'running' || c.status === 'scheduled');
+  const activeCampaigns = campaigns.filter(c => c.status === 'sending' || c.status === 'running' || c.status === 'scheduled' || c.status === 'queued');
   const recentCampaigns = campaigns.slice(0, 5);
 
   return (

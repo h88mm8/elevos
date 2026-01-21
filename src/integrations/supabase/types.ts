@@ -20,6 +20,8 @@ export type Database = {
           channel: string
           created_at: string
           id: string
+          linkedin_feature: string | null
+          linkedin_organization_name: string | null
           name: string | null
           provider: string
           status: string
@@ -31,6 +33,8 @@ export type Database = {
           channel: string
           created_at?: string
           id?: string
+          linkedin_feature?: string | null
+          linkedin_organization_name?: string | null
           name?: string | null
           provider?: string
           status?: string
@@ -42,6 +46,8 @@ export type Database = {
           channel?: string
           created_at?: string
           id?: string
+          linkedin_feature?: string | null
+          linkedin_organization_name?: string | null
           name?: string | null
           provider?: string
           status?: string

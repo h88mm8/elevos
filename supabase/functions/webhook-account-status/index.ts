@@ -307,17 +307,30 @@ serve(async (req) => {
       
       console.log(`[UPSERT] workspaceId=${workspaceId}, accountId=${accountId}, provider=${providerFromUnipile}, channel=${channel}, linkedinFeature=${linkedinFeature}`);
 
+      // Prepare upsert data with optional LinkedIn fields
+      const upsertData: Record<string, any> = {
+        account_id: accountId,
+        workspace_id: workspaceId,
+        channel: channel,
+        status: 'connected',
+        name: finalAccountName,
+        provider: 'messaging',
+        updated_at: new Date().toISOString(),
+      };
+      
+      // Add LinkedIn-specific fields only for LinkedIn accounts
+      if (channel === 'linkedin') {
+        upsertData.linkedin_feature = linkedinFeature || null;
+        // Extract organization name if available (for Sales Navigator/Recruiter)
+        const organizationName = accountInfo.organization_name || accountInfo.organizationName || null;
+        if (organizationName) {
+          upsertData.linkedin_organization_name = organizationName;
+        }
+      }
+
       const { error: upsertError } = await serviceClient
         .from('accounts')
-        .upsert({
-          account_id: accountId,
-          workspace_id: workspaceId,
-          channel: channel,
-          status: 'connected',
-          name: finalAccountName,
-          provider: 'messaging',
-          updated_at: new Date().toISOString(),
-        }, {
+        .upsert(upsertData, {
           onConflict: 'workspace_id,account_id',
         });
 

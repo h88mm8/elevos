@@ -123,78 +123,17 @@ serve(async (req) => {
     console.log(`Creating campaign with ${validLeads.length} valid leads (${leads.length} total provided)`);
 
     // ============================================
-    // BATCH UPSERT LEADS: Single batch operation using unique index (workspace_id, email)
-    // Separate leads with email (can upsert) from those without (simple insert)
+    // USE EXISTING LEAD IDs: Frontend sends lead.id for existing leads
+    // No need to upsert - leads already exist in database
     // ============================================
-    const leadsWithEmail = validLeads.filter((lead: LeadInput) => lead.email);
-    const leadsWithoutEmail = validLeads.filter((lead: LeadInput) => !lead.email && !lead.id);
-    const leadsWithExistingIds = validLeads.filter((lead: LeadInput) => lead.id);
+    const allLeadIds: string[] = validLeads
+      .filter((lead: LeadInput) => lead.id)
+      .map((lead: LeadInput) => lead.id as string);
 
-    let allLeadIds: string[] = [];
-
-    // 1. Collect existing IDs from leads that already have them
-    const existingIds = leadsWithExistingIds.map((lead: LeadInput) => lead.id as string);
-    allLeadIds = [...existingIds];
-
-    // 2. BATCH UPSERT: Leads with email using unique constraint
-    if (leadsWithEmail.length > 0) {
-      const leadsToUpsert = leadsWithEmail.map((lead: LeadInput) => ({
-        workspace_id: workspaceId,
-        email: lead.email,
-        phone: lead.phone || null,
-        linkedin_url: lead.linkedin_url || null,
-        full_name: lead.full_name || null,
-        company: lead.company || null,
-        job_title: lead.job_title || null,
-        country: lead.country || null,
-      }));
-
-      const { data: upsertedLeads, error: upsertError } = await supabase
-        .from('leads')
-        .upsert(leadsToUpsert, {
-          onConflict: 'workspace_id,email',
-          ignoreDuplicates: false,
-        })
-        .select('id');
-
-      if (upsertError) {
-        console.error('Error upserting leads with email:', upsertError);
-        return new Response(JSON.stringify({ error: 'Failed to upsert leads', details: upsertError.message }), { status: 500, headers: corsHeaders });
-      }
-
-      if (upsertedLeads) {
-        allLeadIds = [...allLeadIds, ...upsertedLeads.map(l => l.id)];
-      }
-    }
-
-    // 3. SIMPLE INSERT: Leads without email (no unique constraint)
-    if (leadsWithoutEmail.length > 0) {
-      const leadsToInsert = leadsWithoutEmail.map((lead: LeadInput) => ({
-        workspace_id: workspaceId,
-        email: null,
-        phone: lead.phone || null,
-        linkedin_url: lead.linkedin_url || null,
-        full_name: lead.full_name || null,
-        company: lead.company || null,
-        job_title: lead.job_title || null,
-        country: lead.country || null,
-      }));
-
-      const { data: insertedLeads, error: insertError } = await supabase
-        .from('leads')
-        .insert(leadsToInsert)
-        .select('id');
-
-      if (insertError) {
-        console.error('Error inserting leads without email:', insertError);
-        // Continue - we might still have leads from upsert
-      } else if (insertedLeads) {
-        allLeadIds = [...allLeadIds, ...insertedLeads.map(l => l.id)];
-      }
-    }
+    console.log(`Using ${allLeadIds.length} existing lead IDs for campaign`);
 
     if (allLeadIds.length === 0) {
-      return new Response(JSON.stringify({ error: 'Failed to process any leads' }), { status: 500, headers: corsHeaders });
+      return new Response(JSON.stringify({ error: 'No valid lead IDs provided. Leads must already exist in database.' }), { status: 400, headers: corsHeaders });
     }
 
     // ============================================

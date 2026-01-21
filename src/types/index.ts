@@ -195,6 +195,8 @@ export interface Chat {
   attendee_email?: string;
   attendee_picture?: string | null;
   last_message: string;
+  last_message_type?: 'image' | 'video' | 'audio' | 'document' | null;
+  last_message_duration?: number | null; // For audio/video in seconds
   last_message_at: string;
   unread_count: number;
 }

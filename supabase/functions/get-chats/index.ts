@@ -255,11 +255,38 @@ serve(async (req) => {
     // ============================================
     // MAP CHATS WITH PROFILES
     // ============================================
+    // Helper to determine attachment type from provider data
+    const getAttachmentInfo = (lastMessage: any): { type: string | null; duration: number | null } => {
+      if (!lastMessage?.attachments || lastMessage.attachments.length === 0) {
+        return { type: null, duration: null };
+      }
+      
+      const attachment = lastMessage.attachments[0];
+      const mimeType = attachment.mime_type || attachment.type || '';
+      
+      let type: string | null = null;
+      if (mimeType.startsWith('image/')) {
+        type = 'image';
+      } else if (mimeType.startsWith('video/')) {
+        type = 'video';
+      } else if (mimeType.startsWith('audio/') || attachment.type === 'audio') {
+        type = 'audio';
+      } else if (mimeType.startsWith('application/') || attachment.type === 'document' || attachment.type === 'file') {
+        type = 'document';
+      }
+      
+      const duration = attachment.duration || null;
+      
+      return { type, duration };
+    };
+
     const mappedChats = chatItems.map((chat: any) => {
       const attendeeIdentifier = chat.attendee_public_identifier || chat.attendee_provider_id || '';
       const phoneNumber = attendeeIdentifier.split('@')[0] || '';
       const formattedPhone = phoneNumber ? `+${phoneNumber.slice(0, 2)} ${phoneNumber.slice(2)}` : '';
       const profile = cachedMap.get(phoneNumber);
+      
+      const attachmentInfo = getAttachmentInfo(chat.last_message);
       
       return {
         id: chat.id || chat.chat_id,
@@ -269,6 +296,8 @@ serve(async (req) => {
         attendee_email: null,
         attendee_picture: profile?.profilePicture || null,
         last_message: chat.last_message?.text || chat.snippet || '',
+        last_message_type: attachmentInfo.type,
+        last_message_duration: attachmentInfo.duration,
         last_message_at: chat.timestamp || chat.last_message?.date || null,
         unread_count: chat.unread_count || chat.unread || 0,
       };

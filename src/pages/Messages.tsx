@@ -15,6 +15,7 @@ import { supabase } from '@/integrations/supabase/client';
 import { MessageAttachments } from '@/components/messages/MessageAttachments';
 import { VoiceRecorder } from '@/components/messages/VoiceRecorder';
 import { StartConversationDialog } from '@/components/messages/StartConversationDialog';
+import { ChatLastMessagePreview } from '@/components/messages/ChatLastMessagePreview';
 import { Lead, Chat, Message } from '@/types';
 import { 
   MessageSquare, 
@@ -1066,11 +1067,10 @@ export default function Messages() {
                               )}
                             </div>
                             <p className="text-sm text-muted-foreground truncate">
-                              {typingChats[chat.id] ? (
-                                <span className="text-primary italic">digitando...</span>
-                              ) : (
-                                chat.last_message
-                              )}
+                              <ChatLastMessagePreview 
+                                chat={chat} 
+                                isTyping={!!typingChats[chat.id]} 
+                              />
                             </p>
                             <p className="text-xs text-muted-foreground mt-1">
                               {chat.last_message_at && !isNaN(new Date(chat.last_message_at).getTime()) 

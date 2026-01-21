@@ -20,6 +20,7 @@ interface WebhookEvent {
       attendee_id?: string;
       attendee_name?: string;
       attendee_provider_id?: string;
+      attendee_public_identifier?: string;
     };
     account_info?: {
       user_id?: string;
@@ -29,6 +30,20 @@ interface WebhookEvent {
     attachments?: unknown[];
     status?: string;
   };
+}
+
+// ============================================
+// PHONE NUMBER VALIDATION
+// Filters out @lid internal IDs (14-15+ digits)
+// Valid phone numbers: 10-13 digits
+// ============================================
+function isValidPhoneNumber(identifier: string): boolean {
+  if (!identifier) return false;
+  const digits = identifier.replace(/\D/g, '');
+  // IDs @lid have 14-15+ digits and don't start with valid country codes
+  // Brazilian numbers start with 55 and can be up to 13 digits
+  if (digits.length > 13 && !digits.startsWith('55')) return false;
+  return digits.length >= 10 && digits.length <= 15;
 }
 
 // Simple HMAC-SHA256 signature validation
@@ -504,11 +519,13 @@ serve(async (req) => {
             console.log(`Message sender check: is_sender=${data.is_sender}, accountUserId=${accountUserId}, senderProviderId=${senderProviderId}, result=${isSentByMe ? 'me' : 'them'}`);
             console.log(`Message text: "${messageText?.slice(0, 50) || '(empty)'}", sender: ${isSentByMe ? 'me' : 'them'}`);
 
-            // Insert message with cached attachments
+            // ============================================
+            // UPSERT MESSAGE: Use upsert for idempotency (prevents duplicates on retries)
+            // ============================================
             const messageTimestamp = data.timestamp || new Date().toISOString();
             const { error: insertError } = await supabase
               .from('messages')
-              .insert({
+              .upsert({
                 workspace_id: account.workspace_id,
                 account_id: account.id,
                 chat_id: data.chat_id || 'unknown',
@@ -517,13 +534,16 @@ serve(async (req) => {
                 text: messageText,
                 attachments: processedAttachments.length > 0 ? processedAttachments : null,
                 timestamp: messageTimestamp,
+              }, {
+                onConflict: 'workspace_id,external_id',
+                ignoreDuplicates: true,
               });
 
             if (insertError) {
-              console.error('Error inserting message:', insertError);
+              console.error('Error upserting message:', insertError);
               errorCount++;
             } else {
-              console.log(`Message inserted successfully: ${data.id}`);
+              console.log(`Message upserted successfully: ${data.id}`);
               processedCount++;
             }
 
@@ -531,9 +551,18 @@ serve(async (req) => {
             // UPSERT CHAT CACHE: Update chats table for fast loading
             // ============================================
             const chatId = data.chat_id || 'unknown';
-            const attendeeIdentifier = data.sender?.attendee_provider_id?.split('@')[0] || 
-                                       data.sender?.attendee_id?.split('@')[0] || '';
-            const attendeeName = data.sender?.attendee_name || null;
+            
+            // Prioritize attendee_public_identifier (real phone) over attendee_provider_id (@lid)
+            const rawIdentifier = data.sender?.attendee_public_identifier || 
+                                  data.sender?.attendee_provider_id || 
+                                  data.sender?.attendee_id || '';
+            const cleanIdentifier = rawIdentifier.split('@')[0];
+            
+            // Only use as attendee_identifier if it's a valid phone number
+            const attendeeIdentifier = isValidPhoneNumber(cleanIdentifier) ? cleanIdentifier : '';
+            const attendeeName = isValidPhoneNumber(cleanIdentifier) ? null : (data.sender?.attendee_name || null);
+            
+            console.log(`Attendee check: raw=${rawIdentifier}, clean=${cleanIdentifier}, valid=${isValidPhoneNumber(cleanIdentifier)}, using=${attendeeIdentifier || 'empty'}`);
             
             // Determine last message type from attachments
             let lastMessageType: string | null = null;
@@ -542,6 +571,24 @@ serve(async (req) => {
               const firstAtt = processedAttachments[0];
               lastMessageType = firstAtt.type || null;
               lastMessageDuration = firstAtt.duration || null;
+            }
+            
+            // ============================================
+            // UNREAD COUNT: Fetch current and increment (not fixed at 1)
+            // ============================================
+            let newUnreadCount = 0;
+            if (!isSentByMe) {
+              // Fetch current unread count
+              const { data: existingChat } = await supabase
+                .from('chats')
+                .select('unread_count')
+                .eq('workspace_id', account.workspace_id)
+                .eq('external_id', chatId)
+                .maybeSingle();
+              
+              const currentUnread = existingChat?.unread_count || 0;
+              newUnreadCount = currentUnread + 1;
+              console.log(`Unread count: current=${currentUnread}, new=${newUnreadCount}`);
             }
             
             // Upsert chat record
@@ -557,8 +604,8 @@ serve(async (req) => {
                 last_message_type: lastMessageType,
                 last_message_duration: lastMessageDuration,
                 last_message_at: messageTimestamp,
-                // Only increment unread for incoming messages
-                unread_count: isSentByMe ? 0 : 1,
+                // Increment unread for incoming, reset to 0 for outgoing
+                unread_count: newUnreadCount,
                 updated_at: new Date().toISOString(),
               }, {
                 onConflict: 'workspace_id,external_id',

@@ -6,6 +6,20 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
+// ============================================
+// PHONE NUMBER VALIDATION
+// Filters out @lid internal IDs (14-15+ digits)
+// Valid phone numbers: 10-13 digits
+// ============================================
+function isValidPhoneNumber(identifier: string): boolean {
+  if (!identifier) return false;
+  const digits = identifier.replace(/\D/g, '');
+  // IDs @lid have 14-15+ digits and don't start with valid country codes
+  // Brazilian numbers start with 55 and can be up to 13 digits
+  if (digits.length > 13 && !digits.startsWith('55')) return false;
+  return digits.length >= 10 && digits.length <= 15;
+}
+
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
@@ -91,38 +105,51 @@ serve(async (req) => {
     console.log(`Retrieved ${chatItems.length} chats from provider for sync`);
 
     // Prepare chat records for upsert
-    const chatRecords = chatItems.map((chat: any) => {
-      const attendeeIdentifier = (chat.attendee_public_identifier || chat.attendee_provider_id || '').split('@')[0];
-      const formattedPhone = attendeeIdentifier ? `+${attendeeIdentifier.slice(0, 2)} ${attendeeIdentifier.slice(2)}` : '';
-      
-      // Determine attachment type
-      let lastMessageType: string | null = null;
-      let lastMessageDuration: number | null = null;
-      if (chat.last_message?.attachments && chat.last_message.attachments.length > 0) {
-        const att = chat.last_message.attachments[0];
-        const mimeType = att.mime_type || att.type || '';
-        if (mimeType.startsWith('image/')) lastMessageType = 'image';
-        else if (mimeType.startsWith('video/')) lastMessageType = 'video';
-        else if (mimeType.startsWith('audio/') || att.type === 'audio') lastMessageType = 'audio';
-        else if (mimeType.startsWith('application/') || att.type === 'document') lastMessageType = 'document';
-        lastMessageDuration = att.duration || null;
-      }
+    const chatRecords = chatItems
+      .map((chat: any) => {
+        // Prioritize attendee_public_identifier (real phone) over attendee_provider_id (@lid)
+        const rawIdentifier = chat.attendee_public_identifier || chat.attendee_provider_id || '';
+        const cleanIdentifier = rawIdentifier.split('@')[0];
+        
+        // Validate phone number - skip @lid IDs
+        if (!isValidPhoneNumber(cleanIdentifier)) {
+          console.log(`Skipping invalid identifier: ${cleanIdentifier} (length: ${cleanIdentifier.length})`);
+          return null;
+        }
+        
+        const formattedPhone = `+${cleanIdentifier.slice(0, 2)} ${cleanIdentifier.slice(2)}`;
+        
+        // Determine attachment type
+        let lastMessageType: string | null = null;
+        let lastMessageDuration: number | null = null;
+        if (chat.last_message?.attachments && chat.last_message.attachments.length > 0) {
+          const att = chat.last_message.attachments[0];
+          const mimeType = att.mime_type || att.type || '';
+          if (mimeType.startsWith('image/')) lastMessageType = 'image';
+          else if (mimeType.startsWith('video/')) lastMessageType = 'video';
+          else if (mimeType.startsWith('audio/') || att.type === 'audio') lastMessageType = 'audio';
+          else if (mimeType.startsWith('application/') || att.type === 'document') lastMessageType = 'document';
+          lastMessageDuration = att.duration || null;
+        }
 
-      return {
-        workspace_id: workspaceId,
-        external_id: chat.id || chat.chat_id,
-        account_id: chat.account_id || '',
-        attendee_identifier: attendeeIdentifier,
-        attendee_name: chat.name || formattedPhone || null,
-        attendee_picture: null, // Will be fetched separately if needed
-        last_message: chat.last_message?.text || chat.snippet || null,
-        last_message_type: lastMessageType,
-        last_message_duration: lastMessageDuration,
-        last_message_at: chat.timestamp || chat.last_message?.date || new Date().toISOString(),
-        unread_count: chat.unread_count || chat.unread || 0,
-        updated_at: new Date().toISOString(),
-      };
-    });
+        return {
+          workspace_id: workspaceId,
+          external_id: chat.id || chat.chat_id,
+          account_id: chat.account_id || '',
+          attendee_identifier: cleanIdentifier,
+          attendee_name: chat.name || formattedPhone || null,
+          attendee_picture: null, // Will be fetched separately if needed
+          last_message: chat.last_message?.text || chat.snippet || null,
+          last_message_type: lastMessageType,
+          last_message_duration: lastMessageDuration,
+          last_message_at: chat.timestamp || chat.last_message?.date || new Date().toISOString(),
+          unread_count: chat.unread_count || chat.unread || 0,
+          updated_at: new Date().toISOString(),
+        };
+      })
+      .filter((record: any) => record !== null); // Remove skipped records
+
+    console.log(`Filtered to ${chatRecords.length} valid chats (removed ${chatItems.length - chatRecords.length} invalid @lid entries)`);
 
     // Upsert all chats
     if (chatRecords.length > 0) {
@@ -143,12 +170,15 @@ serve(async (req) => {
 
     // Fetch and cache profile pictures in background
     const profileFetchPromises = chatItems.slice(0, 20).map(async (chat: any) => {
-      const identifier = chat.attendee_public_identifier || chat.attendee_provider_id || '';
-      const phoneNumber = identifier.split('@')[0];
-      if (!identifier || !chat.account_id || !phoneNumber) return;
+      const rawIdentifier = chat.attendee_public_identifier || chat.attendee_provider_id || '';
+      const phoneNumber = rawIdentifier.split('@')[0];
+      
+      // Skip if not a valid phone number
+      if (!isValidPhoneNumber(phoneNumber)) return;
+      if (!rawIdentifier || !chat.account_id) return;
 
       try {
-        const profileUrl = `https://${PROVIDER_DSN}/api/v1/users/${encodeURIComponent(identifier)}?account_id=${chat.account_id}`;
+        const profileUrl = `https://${PROVIDER_DSN}/api/v1/users/${encodeURIComponent(rawIdentifier)}?account_id=${chat.account_id}`;
         const profileResponse = await fetch(profileUrl, {
           method: 'GET',
           headers: {
@@ -177,7 +207,7 @@ serve(async (req) => {
             .eq('attendee_identifier', phoneNumber);
         }
       } catch (err) {
-        console.log(`Error fetching profile for ${identifier}:`, err);
+        console.log(`Error fetching profile for ${rawIdentifier}:`, err);
       }
     });
 

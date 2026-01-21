@@ -611,14 +611,50 @@ export default function Messages() {
         };
       };
       
+      // ============================================
+      // DEDUPLICATION: Remove duplicate chats by attendee_identifier
+      // Keep the most recent chat for each phone number
+      // ============================================
+      const deduplicateChats = (chats: Chat[]): Chat[] => {
+        const chatMap = new Map<string, Chat>();
+        
+        for (const chat of chats) {
+          // Use attendee_identifier as key, fallback to id
+          const key = chat.attendee_identifier || chat.id;
+          const existing = chatMap.get(key);
+          
+          if (!existing) {
+            chatMap.set(key, chat);
+          } else {
+            // Keep the one with the most recent message
+            const existingDate = new Date(existing.last_message_at || 0).getTime();
+            const currentDate = new Date(chat.last_message_at || 0).getTime();
+            
+            if (currentDate > existingDate) {
+              // Sum unread counts when deduplicating
+              chat.unread_count = (chat.unread_count || 0) + (existing.unread_count || 0);
+              chatMap.set(key, chat);
+            } else {
+              existing.unread_count = (existing.unread_count || 0) + (chat.unread_count || 0);
+            }
+          }
+        }
+        
+        // Sort by last_message_at descending
+        return Array.from(chatMap.values()).sort((a, b) => 
+          new Date(b.last_message_at || 0).getTime() - new Date(a.last_message_at || 0).getTime()
+        );
+      };
+
       // If we have cached chats, show them immediately
       if (cachedChats && cachedChats.length > 0) {
         const mappedCachedChats = cachedChats.map(mapCachedToChat);
-        setChats(mappedCachedChats);
+        const deduplicatedChats = deduplicateChats(mappedCachedChats);
+        console.log(`Loaded ${cachedChats.length} chats, deduplicated to ${deduplicatedChats.length}`);
+        setChats(deduplicatedChats);
         setLoadingChats(false);
         
         // Step 2: Sync with provider in background
-        console.log('Loaded', cachedChats.length, 'chats from cache, syncing in background...');
         invokeAuthedFunction('sync-chats', { workspaceId: currentWorkspace.id })
           .then(() => {
             console.log('Background sync completed');
@@ -632,7 +668,8 @@ export default function Messages() {
           .then(({ data: refreshedChats }) => {
             if (refreshedChats && refreshedChats.length > 0) {
               const mappedRefreshed = refreshedChats.map(mapCachedToChat);
-              setChats(mappedRefreshed);
+              const deduplicatedRefreshed = deduplicateChats(mappedRefreshed);
+              setChats(deduplicatedRefreshed);
             }
           })
           .catch(err => console.warn('Background sync failed:', err));
@@ -1080,6 +1117,37 @@ export default function Messages() {
           ? { ...m, id: data.messageId || m.id, status: 'sent' as const }
           : m
       ));
+
+      // ============================================
+      // PERSIST SENT MESSAGE: Cache locally so it survives page reload
+      // This ensures message appears even if webhook fails
+      // ============================================
+      if (data.messageId && currentWorkspace) {
+        const realChatId = isNewConversation && data.chatId ? data.chatId : selectedChat.id;
+        const messageToCache = {
+          workspace_id: currentWorkspace.id,
+          account_id: selectedChat.account_id,
+          chat_id: realChatId,
+          external_id: data.messageId,
+          sender: 'me',
+          text: messageText || null,
+          attachments: attachmentUrl ? [{
+            type: attachmentType?.split('/')[0] || 'file',
+            url: attachmentUrl,
+            mime_type: attachmentType,
+            filename: attachmentName,
+          }] : null,
+          timestamp: new Date().toISOString(),
+        };
+        
+        // Fire-and-forget - don't block UI
+        supabase.from('messages')
+          .upsert(messageToCache, { onConflict: 'workspace_id,external_id', ignoreDuplicates: true })
+          .then(({ error }) => {
+            if (error) console.warn('Failed to cache sent message:', error);
+            else console.log('Sent message cached locally');
+          });
+      }
     } catch (error: any) {
       // Remove temp message on error
       setMessages(prev => prev.filter(m => m.id !== tempMessage.id));

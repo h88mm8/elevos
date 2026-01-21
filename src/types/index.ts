@@ -201,6 +201,14 @@ export interface Chat {
   unread_count: number;
 }
 
+// Cached chat from local database (extends Chat with DB fields)
+export interface CachedChat extends Chat {
+  external_id: string;
+  workspace_id: string;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface MessageAttachment {
   type: 'image' | 'video' | 'audio' | 'document' | 'file';
   url: string;

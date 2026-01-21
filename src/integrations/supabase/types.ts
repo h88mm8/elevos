@@ -162,6 +162,65 @@ export type Database = {
           },
         ]
       }
+      chats: {
+        Row: {
+          account_id: string
+          attendee_identifier: string | null
+          attendee_name: string | null
+          attendee_picture: string | null
+          created_at: string | null
+          external_id: string
+          id: string
+          last_message: string | null
+          last_message_at: string | null
+          last_message_duration: number | null
+          last_message_type: string | null
+          unread_count: number | null
+          updated_at: string | null
+          workspace_id: string
+        }
+        Insert: {
+          account_id: string
+          attendee_identifier?: string | null
+          attendee_name?: string | null
+          attendee_picture?: string | null
+          created_at?: string | null
+          external_id: string
+          id?: string
+          last_message?: string | null
+          last_message_at?: string | null
+          last_message_duration?: number | null
+          last_message_type?: string | null
+          unread_count?: number | null
+          updated_at?: string | null
+          workspace_id: string
+        }
+        Update: {
+          account_id?: string
+          attendee_identifier?: string | null
+          attendee_name?: string | null
+          attendee_picture?: string | null
+          created_at?: string | null
+          external_id?: string
+          id?: string
+          last_message?: string | null
+          last_message_at?: string | null
+          last_message_duration?: number | null
+          last_message_type?: string | null
+          unread_count?: number | null
+          updated_at?: string | null
+          workspace_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "chats_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       contact_profiles_cache: {
         Row: {
           cached_at: string

@@ -7,6 +7,7 @@ export interface WorkspaceSettings {
   workspace_id: string;
   daily_message_limit: number;
   message_interval_seconds: number;
+  max_retries: number;
   created_at: string;
   updated_at: string;
 }
@@ -14,6 +15,7 @@ export interface WorkspaceSettings {
 const DEFAULT_SETTINGS = {
   daily_message_limit: 50,
   message_interval_seconds: 15,
+  max_retries: 3,
 };
 
 export function useWorkspaceSettings() {
@@ -38,7 +40,7 @@ export function useWorkspaceSettings() {
   });
 
   const upsertSettingsMutation = useMutation({
-    mutationFn: async (settings: Partial<Pick<WorkspaceSettings, 'daily_message_limit' | 'message_interval_seconds'>>) => {
+    mutationFn: async (settings: Partial<Pick<WorkspaceSettings, 'daily_message_limit' | 'message_interval_seconds' | 'max_retries'>>) => {
       if (!currentWorkspace) throw new Error('No workspace selected');
 
       // Check if settings exist

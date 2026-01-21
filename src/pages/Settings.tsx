@@ -57,6 +57,7 @@ export default function Settings() {
   // States for sending limits
   const [dailyLimit, setDailyLimit] = useState<number>(50);
   const [intervalSeconds, setIntervalSeconds] = useState<number>(15);
+  const [maxRetries, setMaxRetries] = useState<number>(3);
   const [settingsChanged, setSettingsChanged] = useState(false);
 
   // Initialize settings from hook
@@ -64,6 +65,7 @@ export default function Settings() {
     if (settings) {
       setDailyLimit(settings.daily_message_limit);
       setIntervalSeconds(settings.message_interval_seconds);
+      setMaxRetries(settings.max_retries ?? 3);
     }
   }, [settings]);
 
@@ -71,16 +73,18 @@ export default function Settings() {
   useEffect(() => {
     if (settings) {
       const changed = dailyLimit !== settings.daily_message_limit || 
-                      intervalSeconds !== settings.message_interval_seconds;
+                      intervalSeconds !== settings.message_interval_seconds ||
+                      maxRetries !== (settings.max_retries ?? 3);
       setSettingsChanged(changed);
     }
-  }, [dailyLimit, intervalSeconds, settings]);
+  }, [dailyLimit, intervalSeconds, maxRetries, settings]);
 
   async function handleSaveSettings() {
     try {
       await updateSettings({
         daily_message_limit: dailyLimit,
         message_interval_seconds: intervalSeconds,
+        max_retries: maxRetries,
       });
       toast({
         title: 'Configurações salvas',
@@ -1053,11 +1057,34 @@ export default function Settings() {
                       </AlertDescription>
                     </Alert>
                   </div>
+
+                  <div className="space-y-3">
+                    <Label htmlFor="maxRetries">Tentativas de reenvio</Label>
+                    <div className="flex items-center gap-2">
+                      <Input
+                        id="maxRetries"
+                        type="number"
+                        min={0}
+                        max={10}
+                        value={maxRetries}
+                        onChange={(e) => setMaxRetries(parseInt(e.target.value) || 3)}
+                        className="w-32"
+                      />
+                      <span className="text-sm text-muted-foreground">tentativas</span>
+                    </div>
+                    <Alert variant="default" className="border-blue-500/50 bg-blue-500/10">
+                      <RefreshCw className="h-4 w-4 text-blue-600" />
+                      <AlertTitle className="text-blue-700 text-sm">Retry automático</AlertTitle>
+                      <AlertDescription className="text-blue-600 text-xs">
+                        Mensagens que falharem serão reenviadas automaticamente nas próximas execuções até atingir o limite de tentativas.
+                      </AlertDescription>
+                    </Alert>
+                  </div>
                 </div>
 
                 <div className="text-sm text-muted-foreground bg-muted/50 p-3 rounded-lg">
                   <p>
-                    Se uma campanha tiver mais leads que o limite diário, ela será enviada em múltiplos dias automaticamente.
+                    Se uma campanha tiver mais leads que o limite diário, ela será enviada em múltiplos dias automaticamente. Mensagens falhas serão retentadas até {maxRetries} vezes.
                   </p>
                 </div>
               </CardContent>

@@ -304,24 +304,12 @@ serve(async (req) => {
     });
 
     // ============================================
-    // FILTER OUT GHOST CHATS (empty conversations)
-    // ============================================
-    const validChats = mappedChats.filter((chat: any) => {
-      // Include chats that have text content OR attachments
-      const hasTextMessage = chat.last_message && chat.last_message.trim().length > 0;
-      const hasAttachment = chat.last_message_type !== null;
-      return hasTextMessage || hasAttachment;
-    });
-
-    console.log(`Filtered ${mappedChats.length} chats to ${validChats.length} valid chats (removed ${mappedChats.length - validChats.length} empty)`);
-
-    // ============================================
     // DEDUPLICATE CHATS BY PHONE NUMBER
     // Keep only the most recent chat for each unique phone number
     // ============================================
     const chatMap = new Map<string, any>();
     
-    for (const chat of validChats) {
+    for (const chat of mappedChats) {
       const key = chat.attendee_identifier || chat.id;
       const existing = chatMap.get(key);
       

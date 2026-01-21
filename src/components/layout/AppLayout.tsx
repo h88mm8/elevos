@@ -14,12 +14,12 @@ import {
   LayoutDashboard, 
   Users, 
   Send, 
-  MessageSquare, 
   Settings, 
   LogOut,
   ChevronDown,
   Building2,
-  Menu
+  Menu,
+  Zap
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useState } from 'react';
@@ -29,7 +29,6 @@ const navItems = [
   { href: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
   { href: '/leads', label: 'Leads', icon: Users },
   { href: '/campaigns', label: 'Campanhas', icon: Send },
-  { href: '/messages', label: 'Mensagens', icon: MessageSquare },
   { href: '/settings', label: 'Configurações', icon: Settings },
 ];
 
@@ -78,8 +77,8 @@ export default function AppLayout({ children }: { children: ReactNode }) {
       {/* Desktop Sidebar */}
       <aside className="hidden lg:fixed lg:inset-y-0 lg:flex lg:w-64 lg:flex-col border-r bg-card">
         <div className="flex h-16 items-center gap-2 px-6 border-b">
-          <MessageSquare className="h-6 w-6 text-primary" />
-          <span className="font-bold text-lg">Unipile Messenger</span>
+          <Zap className="h-6 w-6 text-primary" />
+          <span className="font-bold text-lg">Elevos</span>
         </div>
         
         <div className="flex-1 p-4">
@@ -127,8 +126,8 @@ export default function AppLayout({ children }: { children: ReactNode }) {
             </SheetTrigger>
             <SheetContent side="left" className="w-64 p-0">
               <div className="flex h-16 items-center gap-2 px-6 border-b">
-                <MessageSquare className="h-6 w-6 text-primary" />
-                <span className="font-bold text-lg">Unipile</span>
+                <Zap className="h-6 w-6 text-primary" />
+                <span className="font-bold text-lg">Elevos</span>
               </div>
               <div className="p-4">
                 <NavItems onItemClick={() => setMobileOpen(false)} />

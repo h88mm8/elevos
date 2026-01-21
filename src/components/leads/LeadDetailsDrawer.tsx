@@ -1,3 +1,4 @@
+import { useNavigate } from 'react-router-dom';
 import { Lead } from '@/types';
 import {
   Sheet,
@@ -7,6 +8,7 @@ import {
   SheetTitle,
 } from '@/components/ui/sheet';
 import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
 import { Separator } from '@/components/ui/separator';
 import { 
   Building2, 
@@ -21,6 +23,7 @@ import {
   Calendar,
   Tag,
   Cpu,
+  MessageSquare,
 } from 'lucide-react';
 
 interface LeadDetailsDrawerProps {
@@ -30,6 +33,7 @@ interface LeadDetailsDrawerProps {
 }
 
 export function LeadDetailsDrawer({ lead, open, onOpenChange }: LeadDetailsDrawerProps) {
+  const navigate = useNavigate();
   if (!lead) return null;
 
   const getLocation = () => {
@@ -37,15 +41,35 @@ export function LeadDetailsDrawer({ lead, open, onOpenChange }: LeadDetailsDrawe
     return parts.length > 0 ? parts.join(', ') : null;
   };
 
+  const phoneNumber = lead.mobile_number || lead.phone;
+
+  const handleStartConversation = () => {
+    if (!phoneNumber) return;
+    // Navigate to messages with the phone number to start a new conversation
+    navigate(`/messages?startConversation=${encodeURIComponent(phoneNumber)}&leadName=${encodeURIComponent(lead.full_name || '')}`);
+    onOpenChange(false);
+  };
+
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent className="w-[400px] sm:w-[540px] overflow-y-auto">
         <SheetHeader>
-          <SheetTitle className="text-xl">{lead.full_name || 'Lead sem nome'}</SheetTitle>
-          <SheetDescription>
-            {lead.headline || lead.job_title || 'Sem descrição'}
-          </SheetDescription>
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <SheetTitle className="text-xl">{lead.full_name || 'Lead sem nome'}</SheetTitle>
+              <SheetDescription>
+                {lead.headline || lead.job_title || 'Sem descrição'}
+              </SheetDescription>
+            </div>
+            {phoneNumber && (
+              <Button onClick={handleStartConversation} size="sm" className="shrink-0">
+                <MessageSquare className="h-4 w-4 mr-1.5" />
+                WhatsApp
+              </Button>
+            )}
+          </div>
         </SheetHeader>
+
 
         <div className="mt-6 space-y-6">
           {/* Personal Info */}

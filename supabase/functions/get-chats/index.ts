@@ -307,9 +307,10 @@ serve(async (req) => {
     // FILTER OUT GHOST CHATS (empty conversations)
     // ============================================
     const validChats = mappedChats.filter((chat: any) => {
-      // Only include chats that have a real last_message with content
-      const hasMessage = chat.last_message && chat.last_message.trim().length > 0;
-      return hasMessage;
+      // Include chats that have text content OR attachments
+      const hasTextMessage = chat.last_message && chat.last_message.trim().length > 0;
+      const hasAttachment = chat.last_message_type !== null;
+      return hasTextMessage || hasAttachment;
     });
 
     console.log(`Filtered ${mappedChats.length} chats to ${validChats.length} valid chats (removed ${mappedChats.length - validChats.length} empty)`);

@@ -113,6 +113,7 @@ export type Database = {
           lead_id: string
           provider_message_id: string | null
           replied_at: string | null
+          retry_count: number
           seen_at: string | null
           sent_at: string | null
           status: string
@@ -126,6 +127,7 @@ export type Database = {
           lead_id: string
           provider_message_id?: string | null
           replied_at?: string | null
+          retry_count?: number
           seen_at?: string | null
           sent_at?: string | null
           status?: string
@@ -139,6 +141,7 @@ export type Database = {
           lead_id?: string
           provider_message_id?: string | null
           replied_at?: string | null
+          retry_count?: number
           seen_at?: string | null
           sent_at?: string | null
           status?: string
@@ -760,6 +763,7 @@ export type Database = {
           created_at: string
           daily_message_limit: number
           id: string
+          max_retries: number
           message_interval_seconds: number
           updated_at: string
           workspace_id: string
@@ -768,6 +772,7 @@ export type Database = {
           created_at?: string
           daily_message_limit?: number
           id?: string
+          max_retries?: number
           message_interval_seconds?: number
           updated_at?: string
           workspace_id: string
@@ -776,6 +781,7 @@ export type Database = {
           created_at?: string
           daily_message_limit?: number
           id?: string
+          max_retries?: number
           message_interval_seconds?: number
           updated_at?: string
           workspace_id?: string

@@ -35,6 +35,7 @@ interface CampaignLead {
   id: string;
   lead_id: string;
   status: string;
+  retry_count: number;
   lead: {
     id: string;
     full_name: string | null;
@@ -56,11 +57,13 @@ interface CampaignLead {
 interface WorkspaceSettings {
   daily_message_limit: number;
   message_interval_seconds: number;
+  max_retries: number;
 }
 
 const DEFAULT_SETTINGS: WorkspaceSettings = {
   daily_message_limit: 50,
   message_interval_seconds: 15,
+  max_retries: 3,
 };
 
 serve(async (req) => {
@@ -123,11 +126,14 @@ serve(async (req) => {
     // ============================================
     const { data: workspaceSettings } = await supabase
       .from('workspace_settings')
-      .select('daily_message_limit, message_interval_seconds')
+      .select('daily_message_limit, message_interval_seconds, max_retries')
       .eq('workspace_id', campaign.workspace_id)
       .maybeSingle();
 
-    const settings: WorkspaceSettings = workspaceSettings || DEFAULT_SETTINGS;
+    const settings: WorkspaceSettings = {
+      ...DEFAULT_SETTINGS,
+      ...workspaceSettings,
+    };
     console.log(`Using settings: ${settings.daily_message_limit} msgs/day, ${settings.message_interval_seconds}s interval`);
 
     // ============================================
@@ -174,12 +180,14 @@ serve(async (req) => {
     // ============================================
     // GET PENDING LEADS FOR THIS CAMPAIGN
     // ============================================
+    // Get pending leads (including failed with retry_count < max_retries)
     const { data: campaignLeads, error: leadsError } = await supabase
       .from('campaign_leads')
       .select(`
         id,
         lead_id,
         status,
+        retry_count,
         lead:leads (
           id,
           full_name,
@@ -198,7 +206,7 @@ serve(async (req) => {
         )
       `)
       .eq('campaign_id', campaignId)
-      .in('status', ['pending', 'failed']);
+      .or(`status.eq.pending,and(status.eq.failed,retry_count.lt.${settings.max_retries})`);
 
     if (leadsError) {
       console.error('Error fetching campaign leads:', leadsError);
@@ -282,7 +290,7 @@ serve(async (req) => {
     // ============================================
     let sentCount = 0;
     let failedCount = 0;
-    const results: { leadId: string; success: boolean; error?: string }[] = [];
+    const results: { leadId: string; success: boolean; error?: string; retryCount?: number; willRetry?: boolean }[] = [];
 
     for (let i = 0; i < leadsToProcess.length; i++) {
       const cl = leadsToProcess[i];
@@ -395,7 +403,8 @@ serve(async (req) => {
         if (sendSuccess) {
           const updateData: Record<string, any> = { 
             status: 'sent', 
-            sent_at: new Date().toISOString() 
+            sent_at: new Date().toISOString(),
+            retry_count: cl.retry_count, // Keep current count
           };
           if (providerMessageId) {
             updateData.provider_message_id = providerMessageId;
@@ -407,12 +416,25 @@ serve(async (req) => {
           sentCount++;
           results.push({ leadId: cl.lead_id, success: true });
         } else {
+          const newRetryCount = cl.retry_count + 1;
+          const isFinalFailure = newRetryCount >= settings.max_retries;
           await supabase
             .from('campaign_leads')
-            .update({ status: 'failed', error: sendError })
+            .update({ 
+              status: 'failed', 
+              error: sendError,
+              retry_count: newRetryCount,
+            })
             .eq('id', cl.id);
           failedCount++;
-          results.push({ leadId: cl.lead_id, success: false, error: sendError });
+          results.push({ 
+            leadId: cl.lead_id, 
+            success: false, 
+            error: sendError,
+            retryCount: newRetryCount,
+            willRetry: !isFinalFailure,
+          });
+          console.log(`Lead ${cl.lead_id} failed (attempt ${newRetryCount}/${settings.max_retries})${isFinalFailure ? ' - no more retries' : ''}`);
         }
 
         // Use configured delay between messages (except for last message)
@@ -424,13 +446,27 @@ serve(async (req) => {
         const errorMessage = error instanceof Error ? error.message : 'Unknown error';
         console.error(`Error sending to lead ${cl.lead_id}:`, errorMessage);
         
+        const newRetryCount = cl.retry_count + 1;
+        const isFinalFailure = newRetryCount >= settings.max_retries;
+        
         await supabase
           .from('campaign_leads')
-          .update({ status: 'failed', error: errorMessage })
+          .update({ 
+            status: 'failed', 
+            error: errorMessage,
+            retry_count: newRetryCount,
+          })
           .eq('id', cl.id);
         
         failedCount++;
-        results.push({ leadId: cl.lead_id, success: false, error: errorMessage });
+        results.push({ 
+          leadId: cl.lead_id, 
+          success: false, 
+          error: errorMessage,
+          retryCount: newRetryCount,
+          willRetry: !isFinalFailure,
+        });
+        console.log(`Lead ${cl.lead_id} exception (attempt ${newRetryCount}/${settings.max_retries})${isFinalFailure ? ' - no more retries' : ''}`);
       }
     }
 

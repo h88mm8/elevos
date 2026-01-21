@@ -35,6 +35,7 @@ interface CampaignLead {
   id: string;
   lead_id: string;
   status: string;
+  retry_count: number;
   lead: {
     id: string;
     full_name: string | null;
@@ -56,11 +57,13 @@ interface CampaignLead {
 interface WorkspaceSettings {
   daily_message_limit: number;
   message_interval_seconds: number;
+  max_retries: number;
 }
 
 const DEFAULT_SETTINGS: WorkspaceSettings = {
   daily_message_limit: 50,
   message_interval_seconds: 15,
+  max_retries: 3,
 };
 
 serve(async (req) => {
@@ -139,11 +142,14 @@ serve(async (req) => {
       // Get workspace settings
       const { data: workspaceSettings } = await supabase
         .from('workspace_settings')
-        .select('daily_message_limit, message_interval_seconds')
+        .select('daily_message_limit, message_interval_seconds, max_retries')
         .eq('workspace_id', campaign.workspace_id)
         .maybeSingle();
 
-      const settings: WorkspaceSettings = workspaceSettings || DEFAULT_SETTINGS;
+      const settings: WorkspaceSettings = {
+        ...DEFAULT_SETTINGS,
+        ...workspaceSettings,
+      };
 
       // Get account for WhatsApp/LinkedIn
       let accountId: string | null = null;
@@ -165,13 +171,14 @@ serve(async (req) => {
         accountId = account.account_id;
       }
 
-      // Get pending leads
+      // Get pending leads (including failed with retry_count < max_retries)
       const { data: campaignLeads, error: leadsError } = await supabase
         .from('campaign_leads')
         .select(`
           id,
           lead_id,
           status,
+          retry_count,
           lead:leads (
             id,
             full_name,
@@ -190,7 +197,7 @@ serve(async (req) => {
           )
         `)
         .eq('campaign_id', campaign.id)
-        .in('status', ['pending', 'failed'])
+        .or(`status.eq.pending,and(status.eq.failed,retry_count.lt.${settings.max_retries})`)
         .limit(queueItem.leads_to_send);
 
       if (leadsError || !campaignLeads || campaignLeads.length === 0) {
@@ -283,15 +290,26 @@ serve(async (req) => {
           if (sendSuccess) {
             await supabase
               .from('campaign_leads')
-              .update({ status: 'sent', sent_at: new Date().toISOString() })
+              .update({ 
+                status: 'sent', 
+                sent_at: new Date().toISOString(),
+                retry_count: cl.retry_count, // Keep current count
+              })
               .eq('id', cl.id);
             sentCount++;
           } else {
+            const newRetryCount = cl.retry_count + 1;
+            const isFinalFailure = newRetryCount >= settings.max_retries;
             await supabase
               .from('campaign_leads')
-              .update({ status: 'failed', error: sendError })
+              .update({ 
+                status: 'failed', 
+                error: sendError,
+                retry_count: newRetryCount,
+              })
               .eq('id', cl.id);
             failedCount++;
+            console.log(`Lead ${cl.lead_id} failed (attempt ${newRetryCount}/${settings.max_retries})${isFinalFailure ? ' - no more retries' : ''}`);
           }
 
           // Delay between messages
@@ -300,11 +318,18 @@ serve(async (req) => {
           }
         } catch (error) {
           const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+          const newRetryCount = cl.retry_count + 1;
+          const isFinalFailure = newRetryCount >= settings.max_retries;
           await supabase
             .from('campaign_leads')
-            .update({ status: 'failed', error: errorMessage })
+            .update({ 
+              status: 'failed', 
+              error: errorMessage,
+              retry_count: newRetryCount,
+            })
             .eq('id', cl.id);
           failedCount++;
+          console.log(`Lead ${cl.lead_id} exception (attempt ${newRetryCount}/${settings.max_retries})${isFinalFailure ? ' - no more retries' : ''}`);
         }
       }
 

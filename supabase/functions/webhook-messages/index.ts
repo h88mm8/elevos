@@ -168,16 +168,55 @@ async function processAttachments(
   return processedAttachments;
 }
 
-// Extract attachments from original message data
+// Extract attachments from original message data (normalizes Unipile format)
 function extractAttachments(data: any): any[] {
   const attachments: any[] = [];
   
-  // Direct attachments array
+  // Direct attachments array from Unipile
   if (data.attachments && Array.isArray(data.attachments)) {
-    return data.attachments;
+    console.log('Raw attachments from webhook:', JSON.stringify(data.attachments));
+    
+    for (const att of data.attachments) {
+      // Normalize Unipile fields (attachment_type, attachment_url) to internal format (type, url)
+      const attachmentType = att.attachment_type || att.type || 'file';
+      const attachmentUrl = att.attachment_url || att.url || att.link || att.media_url || null;
+      let mimeType = att.attachment_mime_type || att.mime_type || att.mimetype || null;
+      
+      // For voice notes without mime_type, default to audio/ogg
+      if (att.voice_note && !mimeType) {
+        mimeType = 'audio/ogg; codecs=opus';
+      }
+      
+      // Map attachment_type to our internal types
+      let normalizedType = attachmentType;
+      if (attachmentType === 'audio' || att.voice_note) {
+        normalizedType = 'audio';
+      } else if (attachmentType === 'image' || attachmentType === 'photo') {
+        normalizedType = 'image';
+      } else if (attachmentType === 'video') {
+        normalizedType = 'video';
+      } else if (attachmentType === 'document' || attachmentType === 'file') {
+        normalizedType = 'document';
+      }
+      
+      attachments.push({
+        type: normalizedType,
+        url: attachmentUrl,
+        mime_type: mimeType,
+        filename: att.attachment_name || att.filename || null,
+        size: att.attachment_size || att.size || att.fileLength || null,
+        duration: att.attachment_duration || att.duration || att.seconds || null,
+        // Keep original fields for reference
+        attachment_id: att.attachment_id,
+        voice_note: att.voice_note || false,
+      });
+    }
+    
+    console.log('Normalized attachments:', JSON.stringify(attachments));
+    return attachments;
   }
   
-  // Parse from original if available (WhatsApp structure)
+  // Parse from original if available (WhatsApp structure - fallback)
   let originalData: any = null;
   if (data.original) {
     try {

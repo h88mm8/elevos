@@ -129,11 +129,11 @@ serve(async (req) => {
         return new Response(JSON.stringify({ error: 'Account is required for WhatsApp/LinkedIn campaigns' }), { status: 400, headers: corsHeaders });
       }
 
-      // Verify account belongs to workspace
+      // Verify account belongs to workspace (campaign.account_id stores the internal UUID)
       const { data: account, error: accountError } = await supabase
         .from('accounts')
         .select('account_id, status')
-        .eq('account_id', campaign.account_id)
+        .eq('id', campaign.account_id)
         .eq('workspace_id', campaign.workspace_id)
         .single();
 

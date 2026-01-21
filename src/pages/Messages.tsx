@@ -8,6 +8,7 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { Skeleton } from '@/components/ui/skeleton';
 import { useToast } from '@/hooks/use-toast';
 import { useNotificationSettings } from '@/hooks/useNotificationSettings';
+import { useMediaPreCache } from '@/hooks/useMediaPreCache';
 import { supabase } from '@/integrations/supabase/client';
 import { MessageAttachments } from '@/components/messages/MessageAttachments';
 import { 
@@ -118,6 +119,13 @@ export default function Messages() {
   const [hasNewMessages, setHasNewMessages] = useState(false);
   const [isScrolledToBottom, setIsScrolledToBottom] = useState(true);
   const audioContextRef = useRef<AudioContext | null>(null);
+
+  // Pre-cache media in background when messages load
+  useMediaPreCache({
+    workspaceId: currentWorkspace?.id || '',
+    messages,
+    enabled: !!currentWorkspace && messages.length > 0,
+  });
 
   // Play notification sound
   const playNotificationSound = useCallback(() => {

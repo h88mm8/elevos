@@ -17,6 +17,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Calendar as CalendarComponent } from '@/components/ui/calendar';
+import { Tooltip, TooltipContent, TooltipTrigger, TooltipProvider } from '@/components/ui/tooltip';
 import { useToast } from '@/hooks/use-toast';
 import { supabase } from '@/integrations/supabase/client';
 import { CampaignReportDialog } from '@/components/campaigns/CampaignReportDialog';
@@ -46,6 +47,7 @@ import {
   Sparkles,
   Info,
   Users,
+  LinkIcon,
 } from 'lucide-react';
 import {
   AlertDialog,
@@ -142,13 +144,24 @@ export default function Campaigns() {
   // Check if account is required (WhatsApp and LinkedIn need an account)
   const requiresAccount = type === 'whatsapp' || type === 'linkedin';
 
-  // Filter leads based on campaign type
+  // Filter leads based on campaign type - for LinkedIn, show all leads but mark invalid ones
   const validLeads = leads.filter(lead => {
+    if (type === 'email') return !!lead.email;
+    if (type === 'whatsapp') return !!lead.mobile_number;
+    if (type === 'linkedin') return true; // Show all leads for LinkedIn (with validation badges)
+    return false;
+  });
+
+  // Helper to check if a lead has the required contact info for the campaign type
+  const isLeadValidForType = (lead: Lead) => {
     if (type === 'email') return !!lead.email;
     if (type === 'whatsapp') return !!lead.mobile_number;
     if (type === 'linkedin') return !!lead.linkedin_url;
     return false;
-  });
+  };
+
+  // Count of selectable leads (for LinkedIn, only those with linkedin_url)
+  const selectableLeadsCount = validLeads.filter(isLeadValidForType).length;
 
   function resetForm() {
     setName('');
@@ -443,10 +456,11 @@ export default function Campaigns() {
   }
 
   function toggleSelectAllLeads() {
-    if (selectedLeadIds.size === validLeads.length) {
+    const selectableLeads = validLeads.filter(isLeadValidForType);
+    if (selectedLeadIds.size === selectableLeads.length) {
       setSelectedLeadIds(new Set());
     } else {
-      setSelectedLeadIds(new Set(validLeads.map(l => l.id)));
+      setSelectedLeadIds(new Set(selectableLeads.map(l => l.id)));
     }
   }
 
@@ -780,10 +794,10 @@ export default function Campaigns() {
 
                 <div className="space-y-2">
                   <div className="flex items-center justify-between">
-                    <Label>Selecionar Leads ({selectedLeadIds.size} de {validLeads.length})</Label>
-                    {validLeads.length > 0 && (
+                    <Label>Selecionar Leads ({selectedLeadIds.size} de {selectableLeadsCount})</Label>
+                    {selectableLeadsCount > 0 && (
                       <Button variant="ghost" size="sm" onClick={toggleSelectAllLeads}>
-                        {selectedLeadIds.size === validLeads.length ? 'Desmarcar todos' : 'Selecionar todos'}
+                        {selectedLeadIds.size === selectableLeadsCount ? 'Desmarcar todos' : 'Selecionar todos'}
                       </Button>
                     )}
                   </div>
@@ -794,25 +808,68 @@ export default function Campaigns() {
                       <p className="text-sm">Importe ou busque leads primeiro.</p>
                     </div>
                   ) : (
-                    <div className="border rounded-lg max-h-48 overflow-y-auto">
-                      {validLeads.map(lead => (
-                        <label
-                          key={lead.id}
-                          className="flex items-center gap-3 p-3 hover:bg-muted cursor-pointer border-b last:border-b-0"
-                        >
-                          <Checkbox
-                            checked={selectedLeadIds.has(lead.id)}
-                            onCheckedChange={() => toggleLeadSelection(lead.id)}
-                          />
-                          <div className="flex-1 min-w-0">
-                            <p className="font-medium truncate">{lead.full_name || 'Sem nome'}</p>
-                            <p className="text-sm text-muted-foreground truncate">
-                              {type === 'email' ? lead.email : type === 'whatsapp' ? lead.phone : lead.linkedin_url}
-                            </p>
-                          </div>
-                        </label>
-                      ))}
-                    </div>
+                    <TooltipProvider>
+                      <div className="border rounded-lg max-h-48 overflow-y-auto">
+                        {validLeads.map(lead => {
+                          const isValid = isLeadValidForType(lead);
+                          const leadContent = (
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-center gap-2">
+                                <p className={`font-medium truncate ${!isValid ? 'text-muted-foreground' : ''}`}>
+                                  {lead.full_name || 'Sem nome'}
+                                </p>
+                                {type === 'linkedin' && !lead.linkedin_url && (
+                                  <Badge variant="outline" className="text-amber-600 border-amber-500/50 bg-amber-500/10 text-xs shrink-0">
+                                    <LinkIcon className="h-3 w-3 mr-1" />
+                                    Sem LinkedIn URL
+                                  </Badge>
+                                )}
+                              </div>
+                              <p className="text-sm text-muted-foreground truncate">
+                                {type === 'email' 
+                                  ? lead.email 
+                                  : type === 'whatsapp' 
+                                    ? lead.phone 
+                                    : lead.linkedin_url || 'URL não disponível'}
+                              </p>
+                            </div>
+                          );
+
+                          if (!isValid && type === 'linkedin') {
+                            return (
+                              <Tooltip key={lead.id}>
+                                <TooltipTrigger asChild>
+                                  <div className="flex items-center gap-3 p-3 border-b last:border-b-0 opacity-60 cursor-not-allowed">
+                                    <Checkbox
+                                      checked={false}
+                                      disabled
+                                      className="cursor-not-allowed"
+                                    />
+                                    {leadContent}
+                                  </div>
+                                </TooltipTrigger>
+                                <TooltipContent>
+                                  <p>Para LinkedIn é obrigatório ter linkedin_url</p>
+                                </TooltipContent>
+                              </Tooltip>
+                            );
+                          }
+
+                          return (
+                            <label
+                              key={lead.id}
+                              className="flex items-center gap-3 p-3 hover:bg-muted cursor-pointer border-b last:border-b-0"
+                            >
+                              <Checkbox
+                                checked={selectedLeadIds.has(lead.id)}
+                                onCheckedChange={() => toggleLeadSelection(lead.id)}
+                              />
+                              {leadContent}
+                            </label>
+                          );
+                        })}
+                      </div>
+                    </TooltipProvider>
                   )}
                 </div>
               </div>

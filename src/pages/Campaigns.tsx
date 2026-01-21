@@ -16,6 +16,7 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { Calendar as CalendarComponent } from '@/components/ui/calendar';
 import { useToast } from '@/hooks/use-toast';
 import { supabase } from '@/integrations/supabase/client';
 import { CampaignReportDialog } from '@/components/campaigns/CampaignReportDialog';
@@ -33,8 +34,9 @@ import {
   Trash2,
   Clock,
   BarChart3,
+  CalendarClock,
 } from 'lucide-react';
-import { format } from 'date-fns';
+import { format, setHours, setMinutes } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import { Lead } from '@/types';
 import { MESSAGE_VARIABLES, getMessagePreview } from '@/lib/messageVariables';
@@ -84,6 +86,11 @@ export default function Campaigns() {
   const [subject, setSubject] = useState('');
   const [selectedAccountId, setSelectedAccountId] = useState<string>('');
   const [selectedLeadIds, setSelectedLeadIds] = useState<Set<string>>(new Set());
+  
+  // Schedule state
+  const [scheduleEnabled, setScheduleEnabled] = useState(false);
+  const [scheduleDate, setScheduleDate] = useState<Date | undefined>(undefined);
+  const [scheduleTime, setScheduleTime] = useState('09:00');
 
   // Filter accounts by campaign type
   const channelAccounts = useMemo(() => {
@@ -116,6 +123,9 @@ export default function Campaigns() {
     setSelectedAccountId('');
     setSelectedLeadIds(new Set());
     setShowPreview(false);
+    setScheduleEnabled(false);
+    setScheduleDate(undefined);
+    setScheduleTime('09:00');
   }
 
   function insertVariable(variable: string) {
@@ -167,6 +177,14 @@ export default function Campaigns() {
     try {
       const selectedLeadsData = leads.filter(l => selectedLeadIds.has(l.id));
       
+      // Build schedule datetime if enabled
+      let scheduleISO: string | undefined;
+      if (scheduleEnabled && scheduleDate) {
+        const [hours, minutes] = scheduleTime.split(':').map(Number);
+        const scheduleDatetime = setMinutes(setHours(scheduleDate, hours), minutes);
+        scheduleISO = scheduleDatetime.toISOString();
+      }
+      
       const { data, error } = await supabase.functions.invoke('create-campaign', {
         body: {
           workspaceId: currentWorkspace.id,
@@ -175,6 +193,7 @@ export default function Campaigns() {
           message,
           subject: type === 'email' ? subject : undefined,
           accountId: selectedAccountId || undefined,
+          schedule: scheduleISO,
           leads: selectedLeadsData.map(l => ({
             id: l.id,
             email: l.email,
@@ -192,8 +211,10 @@ export default function Campaigns() {
       if (error) throw error;
 
       toast({
-        title: 'Campanha criada',
-        description: `Campanha "${name}" criada com ${selectedLeadIds.size} leads.`,
+        title: scheduleISO ? 'Campanha agendada' : 'Campanha criada',
+        description: scheduleISO 
+          ? `Campanha "${name}" agendada para ${format(new Date(scheduleISO), "dd/MM/yyyy 'às' HH:mm", { locale: ptBR })}.`
+          : `Campanha "${name}" criada com ${selectedLeadIds.size} leads.`,
       });
 
       refetchCampaigns();
@@ -471,6 +492,58 @@ export default function Campaigns() {
                   </div>
                 </div>
 
+                {/* Schedule Section */}
+                <div className="space-y-3 border-t pt-4">
+                  <div className="flex items-center gap-3">
+                    <Checkbox
+                      id="schedule-enabled"
+                      checked={scheduleEnabled}
+                      onCheckedChange={(checked) => setScheduleEnabled(checked === true)}
+                    />
+                    <Label htmlFor="schedule-enabled" className="flex items-center gap-2 cursor-pointer">
+                      <CalendarClock className="h-4 w-4" />
+                      Agendar envio
+                    </Label>
+                  </div>
+                  
+                  {scheduleEnabled && (
+                    <div className="grid grid-cols-2 gap-4 pl-6">
+                      <div className="space-y-2">
+                        <Label>Data</Label>
+                        <Popover>
+                          <PopoverTrigger asChild>
+                            <Button
+                              variant="outline"
+                              className="w-full justify-start text-left font-normal"
+                            >
+                              <Calendar className="mr-2 h-4 w-4" />
+                              {scheduleDate ? format(scheduleDate, 'dd/MM/yyyy', { locale: ptBR }) : 'Selecionar data'}
+                            </Button>
+                          </PopoverTrigger>
+                          <PopoverContent className="w-auto p-0" align="start">
+                            <CalendarComponent
+                              mode="single"
+                              selected={scheduleDate}
+                              onSelect={setScheduleDate}
+                              disabled={(date) => date < new Date(new Date().setHours(0, 0, 0, 0))}
+                              initialFocus
+                            />
+                          </PopoverContent>
+                        </Popover>
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="schedule-time">Horário</Label>
+                        <Input
+                          id="schedule-time"
+                          type="time"
+                          value={scheduleTime}
+                          onChange={(e) => setScheduleTime(e.target.value)}
+                        />
+                      </div>
+                    </div>
+                  )}
+                </div>
+
                 <div className="space-y-2">
                   <div className="flex items-center justify-between">
                     <Label>Selecionar Leads ({selectedLeadIds.size} de {validLeads.length})</Label>
@@ -518,7 +591,12 @@ export default function Campaigns() {
                   {creating ? (
                     <>
                       <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                      Criando...
+                      {scheduleEnabled ? 'Agendando...' : 'Criando...'}
+                    </>
+                  ) : scheduleEnabled ? (
+                    <>
+                      <CalendarClock className="mr-2 h-4 w-4" />
+                      Agendar Campanha
                     </>
                   ) : (
                     <>
@@ -584,12 +662,17 @@ export default function Campaigns() {
                         </TableCell>
                         <TableCell>
                           <div className="flex items-center gap-2">
-                            {campaign.status === 'queued' && (
+                            {(campaign.status === 'queued' || campaign.status === 'scheduled') && (
                               <Clock className="h-3.5 w-3.5 text-muted-foreground" />
                             )}
                             <Badge variant={statusLabels[campaign.status]?.variant || 'secondary'}>
                               {statusLabels[campaign.status]?.label || campaign.status}
                             </Badge>
+                            {campaign.status === 'scheduled' && campaign.schedule && (
+                              <span className="text-xs text-muted-foreground">
+                                {format(new Date(campaign.schedule), "dd/MM 'às' HH:mm", { locale: ptBR })}
+                              </span>
+                            )}
                             {campaign.status === 'queued' && campaign.leads_count > 0 && (
                               <span className="text-xs text-muted-foreground">
                                 {Math.ceil((campaign.leads_count - campaign.sent_count) / 50)} dias restantes

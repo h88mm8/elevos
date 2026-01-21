@@ -3,6 +3,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { useLeads } from '@/hooks/useLeads';
 import { useLeadLists } from '@/hooks/useLeadLists';
 import { useCredits } from '@/hooks/useCredits';
+import { useTags } from '@/hooks/useTags';
 import AppLayout from '@/components/layout/AppLayout';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -22,6 +23,7 @@ import { CreateListDialog } from '@/components/leads/CreateListDialog';
 import { SearchListDialog } from '@/components/leads/SearchListDialog';
 import { MoveLeadsDialog } from '@/components/leads/MoveLeadsDialog';
 import { DeleteLeadsDialog } from '@/components/leads/DeleteLeadsDialog';
+import { LeadTagsPopover, LeadTagsBadges } from '@/components/leads/LeadTagsPopover';
 import { 
   Search, 
   Phone, 
@@ -36,6 +38,7 @@ import {
   Building2,
   Trash2,
   FolderInput,
+  Tag,
 } from 'lucide-react';
 import { Lead, LeadFilters as LeadFiltersType } from '@/types';
 import { useNavigate } from 'react-router-dom';
@@ -45,6 +48,7 @@ export default function Leads() {
   const { leads, isLoading, refetchLeads, deleteLeads, moveLeads } = useLeads();
   const { lists, createList, refetchLists } = useLeadLists();
   const { credits, refetchCredits } = useCredits();
+  const { tags, refetchTags } = useTags();
   const { toast } = useToast();
   const navigate = useNavigate();
 
@@ -728,6 +732,7 @@ export default function Leads() {
                         />
                       </TableHead>
                       <TableHead>Nome</TableHead>
+                      <TableHead>Tags</TableHead>
                       <TableHead>Email</TableHead>
                       <TableHead>Celular</TableHead>
                       <TableHead>Empresa</TableHead>
@@ -754,6 +759,16 @@ export default function Leads() {
                                 {lead.headline}
                               </span>
                             )}
+                          </div>
+                        </TableCell>
+                        <TableCell>
+                          <div className="flex items-center gap-1">
+                            <LeadTagsBadges leadId={lead.id} />
+                            <LeadTagsPopover leadId={lead.id}>
+                              <Button variant="ghost" size="icon" className="h-6 w-6 opacity-0 group-hover:opacity-100 transition-opacity">
+                                <Tag className="h-3.5 w-3.5" />
+                              </Button>
+                            </LeadTagsPopover>
                           </div>
                         </TableCell>
                         <TableCell>

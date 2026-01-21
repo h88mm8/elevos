@@ -25,10 +25,12 @@ import {
   RefreshCw,
   Download,
   Filter,
+  FileText,
 } from 'lucide-react';
 import { format, formatDistanceToNow, parseISO, startOfHour } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
+import { exportCampaignReportPDF } from '@/lib/pdfExport';
 
 interface CampaignReportDialogProps {
   campaignId: string | null;
@@ -165,6 +167,15 @@ export function CampaignReportDialog({
               </DialogDescription>
             </div>
             <div className="flex items-center gap-2">
+              <Button 
+                variant="outline" 
+                size="sm" 
+                onClick={() => campaign && leads && exportCampaignReportPDF({ campaign, leads })} 
+                disabled={!campaign || !leads?.length}
+              >
+                <FileText className="h-4 w-4 mr-1" />
+                PDF
+              </Button>
               <Button variant="outline" size="sm" onClick={exportToCSV} disabled={!leads?.length}>
                 <Download className="h-4 w-4 mr-1" />
                 CSV

@@ -1333,6 +1333,14 @@ export type Database = {
           status: string
         }[]
       }
+      get_workspace_usage_daily: {
+        Args: { p_days?: number; p_workspace_id: string }
+        Returns: {
+          action: string
+          date: string
+          total_count: number
+        }[]
+      }
       get_workspace_usage_today: {
         Args: { p_workspace_id: string }
         Returns: {

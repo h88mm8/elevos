@@ -52,6 +52,15 @@ export interface SearchUsage {
   limit: number;
 }
 
+export interface QuotaBlockedInfo {
+  action: string;
+  usage: SearchUsage;
+  plan: {
+    code: string;
+    name: string;
+  };
+}
+
 export function useLinkedInSearch({ workspaceId }: UseLinkedInSearchOptions) {
   const { toast } = useToast();
   
@@ -61,6 +70,7 @@ export function useLinkedInSearch({ workspaceId }: UseLinkedInSearchOptions) {
   const [hasMore, setHasMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [usage, setUsage] = useState<SearchUsage | null>(null);
+  const [quotaBlocked, setQuotaBlocked] = useState<QuotaBlockedInfo | null>(null);
 
   const search = useCallback(async (
     filters: LinkedInSearchFilters,
@@ -74,10 +84,11 @@ export function useLinkedInSearch({ workspaceId }: UseLinkedInSearchOptions) {
     const isNewSearch = !newCursor;
     setIsSearching(true);
     setError(null);
+    // Don't clear quotaBlocked here to preserve banner visibility
 
     try {
       // Build filters payload - prefer IDs when available, fallback to text
-      const filtersPayload: Record<string, any> = {};
+      const filtersPayload: Record<string, unknown> = {};
       
       if (filters.keywords.trim()) {
         filtersPayload.keywords = filters.keywords.trim();
@@ -125,9 +136,50 @@ export function useLinkedInSearch({ workspaceId }: UseLinkedInSearchOptions) {
         },
       });
 
-      if (fnError) throw fnError;
-      if (data.error) throw new Error(data.error);
+      // Check for 429 limit reached
+      if (fnError) {
+        // The error object from supabase functions might have context
+        throw fnError;
+      }
+      
+      // Check if response has error field (429 or other API errors)
+      if (data?.error) {
+        // Handle 429 quota limit
+        if (data.error === 'Daily limit reached' && data.usage && data.plan) {
+          const blocked: QuotaBlockedInfo = {
+            action: data.action || 'linkedin_search_page',
+            usage: data.usage,
+            plan: data.plan,
+          };
+          setQuotaBlocked(blocked);
+          
+          toast({
+            title: 'Limite diário atingido',
+            description: `Você usou ${data.usage.current}/${data.usage.limit} buscas hoje no plano ${data.plan.name}.`,
+            variant: 'destructive',
+          });
+          
+          setError(`Limite diário atingido (${data.usage.current}/${data.usage.limit})`);
+          return;
+        }
+        
+        // Handle quota system unavailable
+        if (data.error === 'Quota system unavailable') {
+          setError('Sistema de quotas indisponível. Tente novamente mais tarde.');
+          toast({
+            title: 'Sistema indisponível',
+            description: 'Não foi possível verificar os limites de uso. Tente novamente.',
+            variant: 'destructive',
+          });
+          return;
+        }
+        
+        throw new Error(data.error);
+      }
 
+      // Clear quota blocked on success
+      setQuotaBlocked(null);
+      
       const newResults = data.results || [];
       setResults(newResults);
       setCursor(data.cursor || null);
@@ -143,8 +195,8 @@ export function useLinkedInSearch({ workspaceId }: UseLinkedInSearchOptions) {
           description: 'Tente ajustar os filtros da busca.',
         });
       }
-    } catch (err: any) {
-      const errorMsg = err.message || '';
+    } catch (err: unknown) {
+      const errorMsg = err instanceof Error ? err.message : String(err);
       
       if (errorMsg.includes('global') || errorMsg.includes('configurada') || errorMsg.includes('not configured')) {
         setError('Busca LinkedIn indisponível. Peça ao administrador para configurar a conta global do LinkedIn.');
@@ -172,6 +224,7 @@ export function useLinkedInSearch({ workspaceId }: UseLinkedInSearchOptions) {
     setHasMore(false);
     setError(null);
     setUsage(null);
+    setQuotaBlocked(null);
   }, []);
 
   return {
@@ -181,6 +234,7 @@ export function useLinkedInSearch({ workspaceId }: UseLinkedInSearchOptions) {
     hasMore,
     error,
     usage,
+    quotaBlocked,
     search,
     clearResults,
   };

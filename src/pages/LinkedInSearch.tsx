@@ -122,6 +122,7 @@ export default function LinkedInSearch() {
     hasMore, 
     error,
     usage,
+    quotaBlocked,
     search, 
     clearResults 
   } = useLinkedInSearch({ workspaceId: currentWorkspace?.id });
@@ -452,6 +453,24 @@ export default function LinkedInSearch() {
             />
           </div>
         </div>
+
+        {/* Quota blocked banner */}
+        {quotaBlocked && (
+          <div className="flex-shrink-0 flex items-center justify-between bg-destructive/10 border border-destructive/30 rounded-lg px-4 py-3 mb-4">
+            <div className="flex items-center gap-3">
+              <AlertCircle className="h-5 w-5 text-destructive" />
+              <div>
+                <p className="font-medium text-destructive">Limite diário atingido</p>
+                <p className="text-sm text-muted-foreground">
+                  Você usou {quotaBlocked.usage.current}/{quotaBlocked.usage.limit} buscas hoje no plano {quotaBlocked.plan.name}.
+                </p>
+              </div>
+            </div>
+            <Button variant="outline" size="sm" onClick={() => navigate('/settings')}>
+              Ver plano e limites
+            </Button>
+          </div>
+        )}
 
         {/* Selection bar */}
         {totalSelectedCount > 0 && (

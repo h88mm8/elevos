@@ -73,6 +73,7 @@ async function getWorkspacePlan(serviceClient: any, workspaceId: string): Promis
 }
 
 // Helper to consume quota atomically (prevents race conditions)
+// FAIL-CLOSED: Returns null on error, caller must handle as blocked
 async function consumeQuotaAtomic(
   serviceClient: any,
   workspaceId: string,
@@ -81,7 +82,7 @@ async function consumeQuotaAtomic(
   accountId: string,
   userId: string | null,
   metadata: Record<string, unknown> = {}
-): Promise<QuotaResult> {
+): Promise<QuotaResult | null> {
   const { data, error } = await serviceClient.rpc("consume_workspace_quota", {
     p_workspace_id: workspaceId,
     p_action: action,
@@ -92,9 +93,9 @@ async function consumeQuotaAtomic(
   });
   
   if (error) {
-    console.error("[PLAN_LIMIT] Error consuming quota:", error);
-    // Fail open with a warning - return allowed but log error
-    return { allowed: true, current: 0, limit: dailyLimit, action };
+    console.error("[PLAN_LIMIT] FAIL-CLOSED: Error consuming quota:", error);
+    // FAIL-CLOSED: Return null to indicate system error
+    return null;
   }
   
   return data as QuotaResult;
@@ -286,6 +287,18 @@ serve(async (req) => {
         plan_code: workspacePlan.plan_code,
       }
     );
+    
+    // FAIL-CLOSED: If quota system fails, don't proceed
+    if (quotaResult === null) {
+      console.error(`[PLAN_LIMIT] FAIL-CLOSED: Quota system unavailable for workspaceId=${workspaceId}`);
+      return new Response(
+        JSON.stringify({
+          error: "Quota system unavailable",
+          message: "Unable to verify usage limits. Please try again later.",
+        }),
+        { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
     
     if (!quotaResult.allowed) {
       console.log(`[PLAN_LIMIT] BLOCKED workspaceId=${workspaceId} action=linkedin_enrich current=${quotaResult.current} limit=${quotaResult.limit}`);

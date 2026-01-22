@@ -26,7 +26,7 @@ import { DeleteLeadsDialog } from '@/components/leads/DeleteLeadsDialog';
 import { LeadTagsPopover, LeadTagsBadges } from '@/components/leads/LeadTagsPopover';
 import { BulkTagsPopover } from '@/components/leads/BulkTagsPopover';
 import { LinkedInSearchDialog } from '@/components/leads/LinkedInSearchDialog';
-import { useAccounts } from '@/hooks/useAccounts';
+
 import { 
   Search, 
   Phone, 
@@ -67,7 +67,7 @@ export default function Leads() {
   const { lists, createList, refetchLists } = useLeadLists();
   const { credits, refetchCredits } = useCredits();
   const { tags, refetchTags } = useTags();
-  const { accounts } = useAccounts();
+  
   const { toast } = useToast();
   const navigate = useNavigate();
 
@@ -96,7 +96,6 @@ export default function Leads() {
   // Bulk enrichment state
   const [bulkEnriching, setBulkEnriching] = useState(false);
   const [bulkEnrichProgress, setBulkEnrichProgress] = useState({ current: 0, total: 0 });
-  const [bulkEnrichAccountId, setBulkEnrichAccountId] = useState<string>('');
   const [forceReEnrich, setForceReEnrich] = useState(false);
 
   // Details drawer state
@@ -406,15 +405,11 @@ export default function Leads() {
     }
   }
 
-  // Get LinkedIn accounts for bulk enrichment
-  const linkedInAccounts = useMemo(
-    () => accounts.filter(a => a.channel === 'linkedin' && a.status === 'connected'),
-    [accounts]
-  );
+  // Bulk enrichment no longer requires user accounts - uses global platform account
 
-  // Bulk enrich selected leads via LinkedIn
+  // Bulk enrich selected leads via LinkedIn (uses global platform account)
   async function handleBulkEnrich() {
-    if (!currentWorkspace || !bulkEnrichAccountId) return;
+    if (!currentWorkspace) return;
     
     // Filter leads with LinkedIn URL, optionally including already enriched
     const leadsToEnrich = leads.filter(
@@ -437,8 +432,11 @@ export default function Leads() {
     
     let successCount = 0;
     let errorCount = 0;
+    let shouldStop = false;
 
     for (let i = 0; i < leadsToEnrich.length; i++) {
+      if (shouldStop) break;
+      
       const lead = leadsToEnrich[i];
       setBulkEnrichProgress({ current: i + 1, total: leadsToEnrich.length });
       
@@ -446,18 +444,40 @@ export default function Leads() {
         const { data, error } = await supabase.functions.invoke('linkedin-enrich-lead', {
           body: {
             workspaceId: currentWorkspace.id,
-            accountId: bulkEnrichAccountId,
             leadId: lead.id,
           },
         });
 
         if (error) throw error;
-        if (data.error) throw new Error(data.error);
+        if (data.error) {
+          // Check if global account not configured
+          if (data.error.includes('global') || data.error.includes('configurada')) {
+            toast({
+              title: 'Enriquecimento indisponível',
+              description: 'Peça ao administrador para configurar a conta global do LinkedIn.',
+              variant: 'destructive',
+            });
+            shouldStop = true;
+            break;
+          }
+          throw new Error(data.error);
+        }
         
         successCount++;
       } catch (error: any) {
         console.error(`Error enriching lead ${lead.id}:`, error);
         errorCount++;
+        
+        // Check for global config error
+        if (error.message?.includes('global') || error.message?.includes('configurada')) {
+          toast({
+            title: 'Enriquecimento indisponível',
+            description: 'Peça ao administrador para configurar a conta global do LinkedIn.',
+            variant: 'destructive',
+          });
+          shouldStop = true;
+          break;
+        }
         
         // If we hit rate limit, stop processing
         if (error.message?.includes('rate') || error.message?.includes('limit')) {
@@ -480,10 +500,12 @@ export default function Leads() {
     setBulkEnrichProgress({ current: 0, total: 0 });
     refetchLeads();
     
-    toast({
-      title: 'Enriquecimento concluído',
-      description: `${successCount} leads enriquecidos${errorCount > 0 ? `, ${errorCount} erros` : ''}.`,
-    });
+    if (successCount > 0 || (!shouldStop && errorCount > 0)) {
+      toast({
+        title: 'Enriquecimento concluído',
+        description: `${successCount} leads enriquecidos${errorCount > 0 ? `, ${errorCount} erros` : ''}.`,
+      });
+    }
   }
 
   function toggleSelectAll() {
@@ -821,83 +843,65 @@ export default function Leads() {
                         });
                       }}
                     />
-                    {linkedInAccounts.length > 0 && (
-                      <Popover>
-                        <PopoverTrigger asChild>
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            disabled={bulkEnriching}
-                          >
-                            {bulkEnriching ? (
-                              <>
-                                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                                {bulkEnrichProgress.current}/{bulkEnrichProgress.total}
-                              </>
-                            ) : (
-                              <>
-                                <Sparkles className="mr-2 h-4 w-4 text-primary" />
-                                Enriquecer LinkedIn
-                              </>
-                            )}
-                          </Button>
-                        </PopoverTrigger>
-                        <PopoverContent className="w-72" align="end">
-                          <div className="space-y-3">
-                            <div className="space-y-1">
-                              <h4 className="font-medium text-sm">Enriquecer via LinkedIn</h4>
-                              <p className="text-xs text-muted-foreground">
-                                Busca dados adicionais dos leads selecionados usando o perfil LinkedIn conectado.
+                    <Popover>
+                      <PopoverTrigger asChild>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          disabled={bulkEnriching}
+                        >
+                          {bulkEnriching ? (
+                            <>
+                              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                              {bulkEnrichProgress.current}/{bulkEnrichProgress.total}
+                            </>
+                          ) : (
+                            <>
+                              <Sparkles className="mr-2 h-4 w-4 text-primary" />
+                              Enriquecer LinkedIn
+                            </>
+                          )}
+                        </Button>
+                      </PopoverTrigger>
+                      <PopoverContent className="w-72" align="end">
+                        <div className="space-y-3">
+                          <div className="space-y-1">
+                            <h4 className="font-medium text-sm">Enriquecer via LinkedIn</h4>
+                            <p className="text-xs text-muted-foreground">
+                              Busca dados adicionais dos leads selecionados que possuem perfil LinkedIn.
+                            </p>
+                          </div>
+                          {bulkEnriching ? (
+                            <div className="space-y-2">
+                              <Progress 
+                                value={(bulkEnrichProgress.current / bulkEnrichProgress.total) * 100} 
+                              />
+                              <p className="text-xs text-muted-foreground text-center">
+                                Enriquecendo {bulkEnrichProgress.current} de {bulkEnrichProgress.total}...
                               </p>
                             </div>
-                            {bulkEnriching ? (
-                              <div className="space-y-2">
-                                <Progress 
-                                  value={(bulkEnrichProgress.current / bulkEnrichProgress.total) * 100} 
+                          ) : (
+                            <>
+                              <div className="flex items-center justify-between">
+                                <Label className="text-xs">Re-enriquecer já enriquecidos</Label>
+                                <Switch 
+                                  checked={forceReEnrich} 
+                                  onCheckedChange={setForceReEnrich}
                                 />
-                                <p className="text-xs text-muted-foreground text-center">
-                                  Enriquecendo {bulkEnrichProgress.current} de {bulkEnrichProgress.total}...
-                                </p>
                               </div>
-                            ) : (
-                              <>
-                                <div className="space-y-2">
-                                  <Label className="text-xs">Conta LinkedIn</Label>
-                                  <Select value={bulkEnrichAccountId} onValueChange={setBulkEnrichAccountId}>
-                                    <SelectTrigger className="h-9">
-                                      <SelectValue placeholder="Selecione conta" />
-                                    </SelectTrigger>
-                                    <SelectContent>
-                                      {linkedInAccounts.map(account => (
-                                        <SelectItem key={account.id} value={account.id}>
-                                          {account.name || account.account_id}
-                                        </SelectItem>
-                                      ))}
-                                    </SelectContent>
-                                  </Select>
-                                </div>
-                                <div className="flex items-center justify-between">
-                                  <Label className="text-xs">Re-enriquecer já enriquecidos</Label>
-                                  <Switch 
-                                    checked={forceReEnrich} 
-                                    onCheckedChange={setForceReEnrich}
-                                  />
-                                </div>
-                                <Button
-                                  className="w-full"
-                                  size="sm"
-                                  onClick={handleBulkEnrich}
-                                  disabled={!bulkEnrichAccountId}
-                                >
-                                  <Linkedin className="mr-2 h-4 w-4" />
-                                  Enriquecer {selectedLeads.size} leads
-                                </Button>
-                              </>
-                            )}
-                          </div>
-                        </PopoverContent>
-                      </Popover>
-                    )}
+                              <Button
+                                className="w-full"
+                                size="sm"
+                                onClick={handleBulkEnrich}
+                              >
+                                <Linkedin className="mr-2 h-4 w-4" />
+                                Enriquecer {selectedLeads.size} leads
+                              </Button>
+                            </>
+                          )}
+                        </div>
+                      </PopoverContent>
+                    </Popover>
                     <Button
                       variant="outline"
                       size="sm"

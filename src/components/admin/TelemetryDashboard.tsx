@@ -25,23 +25,26 @@ export function TelemetryDashboard() {
 
   // Aggregate totals from overview
   const totals = useMemo(() => {
-    if (!usageOverview) return { searchPages: 0, enrichments: 0, blocked: 0 };
+    if (!usageOverview) return { searchPages: 0, enrichments: 0, searchBlocked: 0, enrichBlocked: 0 };
     
     let searchPages = 0;
     let enrichments = 0;
-    let blocked = 0;
+    let searchBlocked = 0;
+    let enrichBlocked = 0;
     
     for (const row of usageOverview) {
       if (row.action === 'linkedin_search_page') {
         searchPages += row.total_count;
       } else if (row.action === 'linkedin_enrich') {
         enrichments += row.total_count;
-      } else if (row.action.includes('blocked')) {
-        blocked += row.total_count;
+      } else if (row.action === 'linkedin_search_page_blocked') {
+        searchBlocked += row.total_count;
+      } else if (row.action === 'linkedin_enrich_blocked') {
+        enrichBlocked += row.total_count;
       }
     }
     
-    return { searchPages, enrichments, blocked };
+    return { searchPages, enrichments, searchBlocked, enrichBlocked };
   }, [usageOverview]);
 
   // Aggregate global account usage
@@ -148,8 +151,10 @@ export function TelemetryDashboard() {
             </CardDescription>
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">{totals.blocked}</div>
-            <p className="text-xs text-muted-foreground">por limite</p>
+            <div className="text-2xl font-bold">{totals.searchBlocked + totals.enrichBlocked}</div>
+            <p className="text-xs text-muted-foreground">
+              {totals.searchBlocked} pesquisas, {totals.enrichBlocked} enrich
+            </p>
           </CardContent>
         </Card>
       </div>

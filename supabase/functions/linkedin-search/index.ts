@@ -12,15 +12,12 @@ function getTodayDate(): string {
 
 interface SearchFilters {
   keywords?: string;
-  locations?: string[];
-  industries?: string[];
-  current_companies?: string[];
-  past_companies?: string[];
-  titles?: string[];
-  schools?: string[];
   first_name?: string;
   last_name?: string;
-  connection_of?: string;
+  // Legacy keys from the current UI (free-text)
+  title?: string;
+  company?: string;
+  location?: string;
 }
 
 interface SearchRequest {
@@ -154,34 +151,85 @@ serve(async (req) => {
     const unipileDsn = Deno.env.get("UNIPILE_DSN")!;
     const unipileApiKey = Deno.env.get("UNIPILE_API_KEY")!;
 
-    // Build query params - account_id must be a query param for Unipile
-    const queryParams = new URLSearchParams();
-    queryParams.set("account_id", unipileAccountId);
-    queryParams.set("api", api || "classic");
-    queryParams.set("limit", String(Math.min(limit, 25)));
+    async function resolveParameterId(parameterType: "location" | "company" | "industry" | "school" | "title", query: string) {
+      const unipileTypeMap: Record<typeof parameterType, string> = {
+        location: "REGIONS",
+        industry: "INDUSTRIES",
+        company: "CURRENT_COMPANY",
+        school: "SCHOOLS",
+        title: "CURRENT_TITLE",
+      };
 
-    // Add filters as query params
-    if (filters.keywords) queryParams.set("keywords", filters.keywords);
-    if (filters.locations?.length) filters.locations.forEach(l => queryParams.append("locations", l));
-    if (filters.industries?.length) filters.industries.forEach(i => queryParams.append("industries", i));
-    if (filters.current_companies?.length) filters.current_companies.forEach(c => queryParams.append("current_companies", c));
-    if (filters.past_companies?.length) filters.past_companies.forEach(c => queryParams.append("past_companies", c));
-    if (filters.titles?.length) filters.titles.forEach(t => queryParams.append("titles", t));
-    if (filters.schools?.length) filters.schools.forEach(s => queryParams.append("schools", s));
-    if (filters.first_name) queryParams.set("first_name", filters.first_name);
-    if (filters.last_name) queryParams.set("last_name", filters.last_name);
-    if (filters.connection_of) queryParams.set("connection_of", filters.connection_of);
-    if (cursor) queryParams.set("cursor", cursor);
+      const url = new URL(`https://${unipileDsn}/api/v1/linkedin/search/parameters`);
+      url.searchParams.set("account_id", unipileAccountId);
+      url.searchParams.set("type", unipileTypeMap[parameterType]);
+      url.searchParams.set("query", query);
 
-    const searchUrl = `https://${unipileDsn}/api/v1/linkedin/search?${queryParams.toString()}`;
+      const resp = await fetch(url.toString(), {
+        method: "GET",
+        headers: { "X-API-KEY": unipileApiKey, Accept: "application/json" },
+      });
+
+      if (!resp.ok) {
+        const errorText = await resp.text();
+        console.error(`[linkedin-search] Failed to resolve ${parameterType} id:`, errorText);
+        return null;
+      }
+
+      const data = await resp.json();
+      const first = (data.items || [])[0] as { id?: string } | undefined;
+      return first?.id ?? null;
+    }
+
+    // Unipile expects account_id as a query parameter for this endpoint.
+    // It does NOT support GET; filters should be passed via POST JSON body.
+    const searchUrl = `https://${unipileDsn}/api/v1/linkedin/search?account_id=${encodeURIComponent(unipileAccountId)}`;
+
+    // Build payload (Unipile schema expects category + optional advanced_keywords)
+    const searchPayload: Record<string, unknown> = {
+      api: api || "classic",
+      category: searchType === "companies" ? "companies" : "people",
+      limit: Math.min(limit, 25),
+    };
+
+    if (filters.keywords) searchPayload.keywords = filters.keywords;
+
+    // Free-text fields should go into advanced_keywords to avoid needing numeric IDs
+    const advancedKeywords: Record<string, unknown> = {};
+    if (filters.first_name) advancedKeywords.first_name = filters.first_name;
+    if (filters.last_name) advancedKeywords.last_name = filters.last_name;
+    if (filters.title) advancedKeywords.title = filters.title;
+    if (filters.company) advancedKeywords.company = filters.company;
+    if (Object.keys(advancedKeywords).length) searchPayload.advanced_keywords = advancedKeywords;
+
+    // Location requires numeric parameter IDs. If UI sends free text, try to resolve the ID.
+    if (filters.location) {
+      const trimmed = filters.location.trim();
+      if (/^\d+$/.test(trimmed)) {
+        searchPayload.location = [trimmed];
+      } else {
+        const resolvedId = await resolveParameterId("location", trimmed);
+        if (resolvedId) {
+          searchPayload.location = [resolvedId];
+        } else {
+          console.log(`[linkedin-search] Could not resolve location '${trimmed}', skipping location filter.`);
+        }
+      }
+    }
+
+    if (cursor) searchPayload.cursor = cursor;
+
     console.log("[linkedin-search] Calling Unipile search URL:", searchUrl);
+    console.log("[linkedin-search] Calling Unipile search payload:", JSON.stringify(searchPayload));
 
     const searchResponse = await fetch(searchUrl, {
-      method: "GET",
+      method: "POST",
       headers: {
         "X-API-KEY": unipileApiKey,
+        "Content-Type": "application/json",
         Accept: "application/json",
       },
+      body: JSON.stringify(searchPayload),
     });
 
     if (!searchResponse.ok) {
@@ -205,24 +253,30 @@ serve(async (req) => {
     });
 
     // Transform results to match our lead format
-    const results = (searchData.items || []).map((item: Record<string, unknown>) => ({
-      provider_id: item.id,
-      public_identifier: item.public_identifier,
-      full_name: item.name,
-      first_name: item.first_name,
-      last_name: item.last_name,
-      headline: item.headline,
-      linkedin_url: item.public_identifier 
-        ? `https://www.linkedin.com/in/${item.public_identifier}`
-        : null,
-      profile_picture: item.profile_picture,
-      location: item.location,
-      connection_degree: item.connection_degree,
-      company: typeof item.current_company === "object" 
-        ? (item.current_company as Record<string, unknown>)?.name 
-        : item.current_company,
-      job_title: item.current_title,
-    }));
+    const results = (searchData.items || []).map((item: Record<string, unknown>) => {
+      const publicIdentifier = item.public_identifier as string | undefined;
+      const profileUrl = publicIdentifier
+        ? `https://www.linkedin.com/in/${publicIdentifier}`
+        : (item.profile_url as string | undefined) ?? null;
+
+      return {
+        provider_id: item.id,
+        public_identifier: publicIdentifier,
+        full_name: item.name,
+        first_name: item.first_name,
+        last_name: item.last_name,
+        headline: item.headline,
+        profile_url: profileUrl,
+        profile_picture_url: item.profile_picture,
+        location: item.location,
+        connection_degree: item.connection_degree,
+        company:
+          typeof item.current_company === "object"
+            ? (item.current_company as Record<string, unknown>)?.name
+            : item.current_company,
+        job_title: item.current_title,
+      };
+    });
 
     return new Response(
       JSON.stringify({

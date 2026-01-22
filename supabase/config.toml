@@ -71,3 +71,6 @@ verify_jwt = false
 
 [functions.linkedin-engage]
 verify_jwt = false
+
+[functions.get-all-linkedin-accounts]
+verify_jwt = false

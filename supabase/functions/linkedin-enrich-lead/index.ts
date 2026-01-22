@@ -22,11 +22,96 @@ function extractCompanyIdentifier(companyUrl: string): string | null {
   return match ? match[1] : null;
 }
 
-// Helper to get the global platform LinkedIn search account with validation
-// The RPC already filters by channel='linkedin' AND status='connected'
+interface WorkspacePlan {
+  plan_id: string;
+  plan_code: string;
+  plan_name: string;
+  daily_search_page_limit: number;
+  daily_enrich_limit: number;
+  monthly_search_page_limit: number | null;
+  monthly_enrich_limit: number | null;
+  status: string;
+}
+
+// Helper to get workspace plan with limits
+async function getWorkspacePlan(serviceClient: any, workspaceId: string): Promise<WorkspacePlan> {
+  const { data, error } = await serviceClient.rpc("get_workspace_plan", {
+    p_workspace_id: workspaceId
+  });
+  
+  if (error) {
+    console.error("[PLAN_LIMIT] Error fetching workspace plan:", error);
+    return {
+      plan_id: 'default',
+      plan_code: 'starter',
+      plan_name: 'Starter',
+      daily_search_page_limit: 20,
+      daily_enrich_limit: 50,
+      monthly_search_page_limit: null,
+      monthly_enrich_limit: null,
+      status: 'active'
+    };
+  }
+  
+  if (!data || data.length === 0) {
+    return {
+      plan_id: 'default',
+      plan_code: 'starter',
+      plan_name: 'Starter',
+      daily_search_page_limit: 20,
+      daily_enrich_limit: 50,
+      monthly_search_page_limit: null,
+      monthly_enrich_limit: null,
+      status: 'active'
+    };
+  }
+  
+  return data[0];
+}
+
+// Helper to get today's usage from usage_events
+async function getTodayEnrichCount(serviceClient: any, workspaceId: string): Promise<number> {
+  const { data, error } = await serviceClient.rpc("get_workspace_usage_today", {
+    p_workspace_id: workspaceId
+  });
+  
+  if (error) {
+    console.error("[PLAN_LIMIT] Error fetching usage:", error);
+    return 0;
+  }
+  
+  const enrichUsage = data?.find((u: any) => u.action === 'linkedin_enrich');
+  return Number(enrichUsage?.total_count ?? 0);
+}
+
+// Helper to log usage event
+async function logUsageEvent(
+  serviceClient: any, 
+  workspaceId: string, 
+  userId: string | null,
+  action: string,
+  accountId: string,
+  metadata: Record<string, unknown> = {}
+): Promise<void> {
+  const { error } = await serviceClient
+    .from("usage_events")
+    .insert({
+      workspace_id: workspaceId,
+      user_id: userId,
+      action,
+      account_id: accountId,
+      metadata,
+    });
+  
+  if (error) {
+    console.error("[PLAN_LIMIT] Error logging usage event:", error);
+  }
+}
+
+// Helper to get the global platform LinkedIn search account
 async function getPlatformLinkedInSearchAccount(serviceClient: any): Promise<{
-  accountUuid: string;  // accounts.id (UUID in DB)
-  accountId: string;    // accounts.account_id (Unipile ID for API calls)
+  accountUuid: string;
+  accountId: string;
   linkedinFeature: string | null;
 }> {
   const { data, error } = await serviceClient.rpc("get_platform_linkedin_search_account");
@@ -44,53 +129,43 @@ async function getPlatformLinkedInSearchAccount(serviceClient: any): Promise<{
   
   const account = rows[0];
   
-  // The RPC already validates channel='linkedin' AND status='connected'
-  // Additional validation: double-check account exists and is still valid
   const { data: accountData, error: accountError } = await serviceClient
     .from("accounts")
     .select("id, account_id, channel, status")
-    .eq("id", account.account_uuid)  // Compare by DB UUID, not Unipile account_id
+    .eq("id", account.account_uuid)
     .maybeSingle();
   
   if (accountError || !accountData) {
-    console.error("[LI_ENRICH_GLOBAL] Global account not found by UUID:", account.account_uuid);
-    throw new Error("The configured global LinkedIn account no longer exists. Platform admin must reconfigure.");
+    throw new Error("The configured global LinkedIn account no longer exists.");
   }
   
   if (accountData.channel !== "linkedin") {
-    console.error("[LI_ENRICH_GLOBAL] Account channel mismatch:", accountData.channel);
-    throw new Error("The configured global account is not a LinkedIn account. Platform admin must reconfigure.");
+    throw new Error("The configured global account is not a LinkedIn account.");
   }
   
   if (accountData.status !== "connected") {
-    console.error("[LI_ENRICH_GLOBAL] Global account not connected, status:", accountData.status);
-    throw new Error(`The global LinkedIn account is disconnected (status: ${accountData.status}). Please reconnect it in Settings.`);
+    throw new Error(`The global LinkedIn account is disconnected (status: ${accountData.status}).`);
   }
   
-  console.log(`[LI_ENRICH_GLOBAL] Validated account: DB_UUID=${account.account_uuid}, Unipile_ID=${account.account_id}`);
-  
   return {
-    accountUuid: account.account_uuid,  // DB UUID for internal references
-    accountId: account.account_id,       // Unipile ID for API calls
+    accountUuid: account.account_uuid,
+    accountId: account.account_id,
     linkedinFeature: account.linkedin_feature,
   };
 }
 
 interface EnrichRequest {
   workspaceId: string;
-  // accountId is no longer used - we use the global platform account
-  accountId?: string; // kept for backwards compatibility but ignored
+  accountId?: string;
   leadId: string;
 }
 
 serve(async (req) => {
-  // Handle CORS preflight
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
   }
 
   try {
-    // Validate authorization
     const authHeader = req.headers.get("Authorization");
     if (!authHeader || !authHeader.startsWith("Bearer ")) {
       return new Response(
@@ -101,7 +176,6 @@ serve(async (req) => {
 
     const token = authHeader.replace("Bearer ", "");
 
-    // Initialize Supabase clients
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
     const supabaseAnonKey = Deno.env.get("SUPABASE_ANON_KEY")!;
     const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
@@ -111,7 +185,6 @@ serve(async (req) => {
     });
     const serviceClient = createClient(supabaseUrl, supabaseServiceKey);
 
-    // Validate user
     const { data: { user }, error: userError } = await supabase.auth.getUser();
     if (userError || !user) {
       return new Response(
@@ -120,7 +193,6 @@ serve(async (req) => {
       );
     }
 
-    // Parse request body
     const body: EnrichRequest = await req.json();
     const { workspaceId, leadId } = body;
 
@@ -168,7 +240,7 @@ serve(async (req) => {
       );
     }
 
-    // Get the global platform LinkedIn account for search/enrichment
+    // Get the global platform LinkedIn account
     let platformAccount;
     try {
       platformAccount = await getPlatformLinkedInSearchAccount(serviceClient);
@@ -181,34 +253,30 @@ serve(async (req) => {
 
     const unipileAccountId = platformAccount.accountId;
     
-    console.log(`[LI_ENRICH_GLOBAL] workspaceId=${workspaceId} platformAccountUuid=${platformAccount.accountUuid} unipileAccountId=${unipileAccountId} feature=${platformAccount.linkedinFeature}`);
-
-    // Check daily limits
-    const { data: settings } = await supabase
-      .from("workspace_settings")
-      .select("linkedin_daily_profile_scrape_limit")
-      .eq("workspace_id", workspaceId)
-      .maybeSingle();
-
-    const dailyLimit = settings?.linkedin_daily_profile_scrape_limit ?? 50;
-    const today = getTodayDate();
-
-    const { data: currentUsage } = await serviceClient.rpc("get_daily_usage", {
-      p_workspace_id: workspaceId,
-      p_account_id: unipileAccountId,
-      p_action: "linkedin_profile_scrape",
-      p_usage_date: today,
-    });
-
-    if ((currentUsage ?? 0) >= dailyLimit) {
+    // ===== PLAN LIMIT CHECK =====
+    const workspacePlan = await getWorkspacePlan(serviceClient, workspaceId);
+    const currentEnrichCount = await getTodayEnrichCount(serviceClient, workspaceId);
+    
+    console.log(`[PLAN_LIMIT] workspaceId=${workspaceId} planCode=${workspacePlan.plan_code} action=linkedin_enrich current=${currentEnrichCount} limit=${workspacePlan.daily_enrich_limit}`);
+    
+    if (currentEnrichCount >= workspacePlan.daily_enrich_limit) {
+      await logUsageEvent(serviceClient, workspaceId, user.id, 'linkedin_enrich_blocked', unipileAccountId, {
+        blocked: true,
+        reason: 'daily_limit_reached',
+        plan_code: workspacePlan.plan_code,
+        lead_id: leadId,
+      });
+      
       return new Response(
         JSON.stringify({
-          error: "Daily profile scrape limit reached",
-          usage: { current: currentUsage, limit: dailyLimit },
+          error: "Daily enrich limit reached",
+          usage: { current: currentEnrichCount, limit: workspacePlan.daily_enrich_limit },
+          plan: { code: workspacePlan.plan_code, name: workspacePlan.plan_name },
         }),
         { status: 429, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
+    // ===== END PLAN LIMIT CHECK =====
 
     // Extract public identifier
     const publicIdentifier = extractLinkedInPublicIdentifier(lead.linkedin_url);
@@ -238,6 +306,13 @@ serve(async (req) => {
     if (!profileResponse.ok) {
       const errorText = await profileResponse.text();
       console.error("[linkedin-enrich-lead] Profile fetch error:", errorText);
+      
+      await logUsageEvent(serviceClient, workspaceId, user.id, 'linkedin_enrich', unipileAccountId, {
+        error: true,
+        status: profileResponse.status,
+        lead_id: leadId,
+      });
+      
       return new Response(
         JSON.stringify({ error: "Failed to fetch LinkedIn profile", details: errorText }),
         { status: profileResponse.status, headers: { ...corsHeaders, "Content-Type": "application/json" } }
@@ -247,24 +322,20 @@ serve(async (req) => {
     const profileData = await profileResponse.json();
     console.log("[linkedin-enrich-lead] Full profile data:", JSON.stringify(profileData, null, 2));
 
-    // E) Store the raw profile data and identifiers
-    // Prepare update object with new enrichment fields
+    // Prepare update object
     const updateData: Record<string, unknown> = {
       last_enriched_at: new Date().toISOString(),
       linkedin_public_identifier: publicIdentifier,
       linkedin_provider_id: profileData.id || profileData.provider_id || null,
-      linkedin_profile_json: profileData, // Store full payload for future use
+      linkedin_profile_json: profileData,
     };
 
-    // Map profile fields according to Unipile API structure
-    // Name fields - build full_name from first_name + last_name if not provided directly
     const firstName = profileData.first_name;
     const lastName = profileData.last_name;
     
     if (firstName) updateData.first_name = firstName;
     if (lastName) updateData.last_name = lastName;
     
-    // Build full_name from parts or use direct name field
     if (firstName || lastName) {
       updateData.full_name = [firstName, lastName].filter(Boolean).join(' ');
     } else if (profileData.name) {
@@ -273,25 +344,18 @@ serve(async (req) => {
     
     if (profileData.headline) updateData.headline = profileData.headline;
     if (profileData.industry) updateData.industry = profileData.industry;
-    
-    // Occupation is the primary source for job title in Unipile
     if (profileData.occupation) updateData.job_title = profileData.occupation;
     
-    // Location parsing - handle string or object format
     const locationData = profileData.location;
     if (locationData) {
       if (typeof locationData === "string") {
-        // Try to parse "City, State, Country" or "City, Country" format
         const parts = locationData.split(",").map((p: string) => p.trim());
         if (parts.length === 1) {
-          // Just city or country
           updateData.city = parts[0];
         } else if (parts.length === 2) {
-          // "City, Country" format (common for international)
           updateData.city = parts[0];
           updateData.country = parts[1];
         } else if (parts.length >= 3) {
-          // "City, State, Country" format
           updateData.city = parts[0];
           updateData.state = parts[1];
           updateData.country = parts[2];
@@ -303,24 +367,19 @@ serve(async (req) => {
       }
     }
 
-
-    // Experiences array - Unipile uses "experiences" not "current_positions"
     const experiences = profileData.experiences;
     if (experiences && Array.isArray(experiences) && experiences.length > 0) {
       const currentExperience = experiences[0];
       
-      // If occupation wasn't set, use experience title
       if (!updateData.job_title && currentExperience.title) {
         updateData.job_title = currentExperience.title;
       }
       
-      // Company info from experience - company is an object in Unipile
       if (currentExperience.company) {
         const company = currentExperience.company;
         if (typeof company === "object") {
           if (company.name) updateData.company = company.name;
           if (company.linkedin_url) updateData.company_linkedin = company.linkedin_url;
-          if (company.logo_url) console.log("[linkedin-enrich-lead] Company logo available:", company.logo_url);
         } else if (typeof company === "string") {
           updateData.company = company;
         }
@@ -329,17 +388,13 @@ serve(async (req) => {
       }
     }
 
-    // Seniority
     if (profileData.seniority) updateData.seniority_level = profileData.seniority;
 
-    // Email addresses - can be array or single value
     const emails = profileData.emails || profileData.email;
     if (emails) {
       if (Array.isArray(emails) && emails.length > 0) {
-        // First email goes to main email field
         const primaryEmail = typeof emails[0] === 'object' ? emails[0].email || emails[0].address : emails[0];
         if (primaryEmail) updateData.email = primaryEmail;
-        // Second email (if exists) goes to personal_email
         if (emails.length > 1) {
           const secondaryEmail = typeof emails[1] === 'object' ? emails[1].email || emails[1].address : emails[1];
           if (secondaryEmail) updateData.personal_email = secondaryEmail;
@@ -349,19 +404,15 @@ serve(async (req) => {
       }
     }
 
-    // Phone numbers - can be array or single value
     const phones = profileData.phone_numbers || profileData.phones || profileData.phone;
     if (phones) {
       if (Array.isArray(phones) && phones.length > 0) {
-        // First phone goes to main phone field
         const primaryPhone = typeof phones[0] === 'object' ? phones[0].number || phones[0].phone : phones[0];
         if (primaryPhone) updateData.phone = primaryPhone;
-        // Second phone (if exists) goes to mobile_number
         if (phones.length > 1) {
           const secondaryPhone = typeof phones[1] === 'object' ? phones[1].number || phones[1].phone : phones[1];
           if (secondaryPhone) updateData.mobile_number = secondaryPhone;
         } else if (primaryPhone && primaryPhone.toString().match(/^(\+55|55)?[1-9]{2}9/)) {
-          // If single phone looks like mobile (Brazil format), also set as mobile
           updateData.mobile_number = primaryPhone;
         }
       } else if (typeof phones === 'string') {
@@ -369,7 +420,6 @@ serve(async (req) => {
       }
     }
 
-    // Skills - store as comma-separated in keywords field
     const skills = profileData.skills;
     if (skills && Array.isArray(skills) && skills.length > 0) {
       const skillNames = skills.map((s: unknown) => {
@@ -382,32 +432,11 @@ serve(async (req) => {
       }).filter(Boolean);
       
       if (skillNames.length > 0) {
-        // Append to existing keywords or create new
         const existingKeywords = lead.keywords || '';
         const newKeywords = existingKeywords 
           ? `${existingKeywords}, ${skillNames.join(', ')}`
           : skillNames.join(', ');
         updateData.keywords = newKeywords;
-        console.log("[linkedin-enrich-lead] Skills extracted:", skillNames.length);
-      }
-    }
-
-    // Education - extract most recent for additional context
-    const education = profileData.education || profileData.educations;
-    if (education && Array.isArray(education) && education.length > 0) {
-      const recentEdu = education[0];
-      const eduInfo = [];
-      if (recentEdu.school_name || recentEdu.school) {
-        eduInfo.push(recentEdu.school_name || recentEdu.school);
-      }
-      if (recentEdu.degree) {
-        eduInfo.push(recentEdu.degree);
-      }
-      if (recentEdu.field_of_study || recentEdu.field) {
-        eduInfo.push(recentEdu.field_of_study || recentEdu.field);
-      }
-      if (eduInfo.length > 0) {
-        console.log("[linkedin-enrich-lead] Education:", eduInfo.join(' - '));
       }
     }
 
@@ -416,8 +445,6 @@ serve(async (req) => {
     if (companyLinkedIn) {
       const companyIdentifier = extractCompanyIdentifier(companyLinkedIn);
       if (companyIdentifier) {
-        console.log("[linkedin-enrich-lead] Fetching company data for:", companyIdentifier);
-        
         try {
           const companyResponse = await fetch(
             `https://${unipileDsn}/api/v1/linkedin/company/${companyIdentifier}?account_id=${unipileAccountId}`,
@@ -431,8 +458,6 @@ serve(async (req) => {
 
           if (companyResponse.ok) {
             const companyData = await companyResponse.json();
-            console.log("[linkedin-enrich-lead] Company data received:", companyData.name);
-
             if (companyData.name) updateData.company = companyData.name;
             if (companyData.industry) updateData.company_industry = companyData.industry;
             if (companyData.company_size) updateData.company_size = companyData.company_size;
@@ -447,7 +472,6 @@ serve(async (req) => {
           }
         } catch (companyError) {
           console.warn("[linkedin-enrich-lead] Company fetch failed:", companyError);
-          // Continue without company data
         }
       }
     }
@@ -466,15 +490,12 @@ serve(async (req) => {
       );
     }
 
-    // Increment daily usage
-    await serviceClient.rpc("increment_daily_usage", {
-      p_workspace_id: workspaceId,
-      p_account_id: unipileAccountId,
-      p_action: "linkedin_profile_scrape",
-      p_usage_date: today,
+    // Log successful usage event
+    await logUsageEvent(serviceClient, workspaceId, user.id, 'linkedin_enrich', unipileAccountId, {
+      lead_id: leadId,
+      fields_updated: Object.keys(updateData).length,
     });
 
-    // Return enriched fields
     const enrichedFields = Object.keys(updateData).filter(k => k !== "enriched_at");
 
     return new Response(
@@ -484,8 +505,12 @@ serve(async (req) => {
         data: updateData,
         connectionDegree: profileData.connection_degree,
         usage: {
-          current: (currentUsage ?? 0) + 1,
-          limit: dailyLimit,
+          current: currentEnrichCount + 1,
+          limit: workspacePlan.daily_enrich_limit,
+        },
+        plan: {
+          code: workspacePlan.plan_code,
+          name: workspacePlan.plan_name,
         },
       }),
       { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }

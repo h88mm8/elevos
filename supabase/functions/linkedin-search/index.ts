@@ -14,7 +14,6 @@ interface SearchFilters {
   keywords?: string;
   first_name?: string;
   last_name?: string;
-  // Legacy keys from the current UI (free-text)
   title?: string;
   company?: string;
   location?: string;
@@ -22,7 +21,6 @@ interface SearchFilters {
 
 interface SearchRequest {
   workspaceId: string;
-  // accountId is no longer used for search - we use the global platform account
   accountId?: string; // kept for backwards compatibility but ignored
   searchType: "people" | "companies";
   api: "classic" | "sales_navigator" | "recruiter";
@@ -31,11 +29,98 @@ interface SearchRequest {
   limit?: number;
 }
 
+interface WorkspacePlan {
+  plan_id: string;
+  plan_code: string;
+  plan_name: string;
+  daily_search_page_limit: number;
+  daily_enrich_limit: number;
+  monthly_search_page_limit: number | null;
+  monthly_enrich_limit: number | null;
+  status: string;
+}
+
+// Helper to get workspace plan with limits
+async function getWorkspacePlan(serviceClient: any, workspaceId: string): Promise<WorkspacePlan> {
+  const { data, error } = await serviceClient.rpc("get_workspace_plan", {
+    p_workspace_id: workspaceId
+  });
+  
+  if (error) {
+    console.error("[PLAN_LIMIT] Error fetching workspace plan:", error);
+    // Return default plan if error
+    return {
+      plan_id: 'default',
+      plan_code: 'starter',
+      plan_name: 'Starter',
+      daily_search_page_limit: 20,
+      daily_enrich_limit: 50,
+      monthly_search_page_limit: null,
+      monthly_enrich_limit: null,
+      status: 'active'
+    };
+  }
+  
+  if (!data || data.length === 0) {
+    // Return default if no plan found
+    return {
+      plan_id: 'default',
+      plan_code: 'starter',
+      plan_name: 'Starter',
+      daily_search_page_limit: 20,
+      daily_enrich_limit: 50,
+      monthly_search_page_limit: null,
+      monthly_enrich_limit: null,
+      status: 'active'
+    };
+  }
+  
+  return data[0];
+}
+
+// Helper to get today's usage from usage_events
+async function getTodaySearchPages(serviceClient: any, workspaceId: string): Promise<number> {
+  const { data, error } = await serviceClient.rpc("get_workspace_usage_today", {
+    p_workspace_id: workspaceId
+  });
+  
+  if (error) {
+    console.error("[PLAN_LIMIT] Error fetching usage:", error);
+    return 0;
+  }
+  
+  const searchUsage = data?.find((u: any) => u.action === 'linkedin_search_page');
+  return Number(searchUsage?.total_count ?? 0);
+}
+
+// Helper to log usage event
+async function logUsageEvent(
+  serviceClient: any, 
+  workspaceId: string, 
+  userId: string | null,
+  action: string,
+  accountId: string,
+  metadata: Record<string, unknown> = {}
+): Promise<void> {
+  const { error } = await serviceClient
+    .from("usage_events")
+    .insert({
+      workspace_id: workspaceId,
+      user_id: userId,
+      action,
+      account_id: accountId,
+      metadata,
+    });
+  
+  if (error) {
+    console.error("[PLAN_LIMIT] Error logging usage event:", error);
+  }
+}
+
 // Helper to get the global platform LinkedIn search account with validation
-// The RPC already filters by channel='linkedin' AND status='connected'
 async function getPlatformLinkedInSearchAccount(serviceClient: any): Promise<{
-  accountUuid: string;  // accounts.id (UUID in DB)
-  accountId: string;    // accounts.account_id (Unipile ID for API calls)
+  accountUuid: string;
+  accountId: string;
   linkedinFeature: string | null;
 }> {
   const { data, error } = await serviceClient.rpc("get_platform_linkedin_search_account");
@@ -53,12 +138,10 @@ async function getPlatformLinkedInSearchAccount(serviceClient: any): Promise<{
   
   const account = rows[0];
   
-  // The RPC already validates channel='linkedin' AND status='connected'
-  // Additional validation: double-check account exists and is still valid
   const { data: accountData, error: accountError } = await serviceClient
     .from("accounts")
     .select("id, account_id, channel, status")
-    .eq("id", account.account_uuid)  // Compare by DB UUID, not Unipile account_id
+    .eq("id", account.account_uuid)
     .maybeSingle();
   
   if (accountError || !accountData) {
@@ -67,32 +150,26 @@ async function getPlatformLinkedInSearchAccount(serviceClient: any): Promise<{
   }
   
   if (accountData.channel !== "linkedin") {
-    console.error("[LI_SEARCH_GLOBAL] Account channel mismatch:", accountData.channel);
     throw new Error("The configured global account is not a LinkedIn account. Platform admin must reconfigure.");
   }
   
   if (accountData.status !== "connected") {
-    console.error("[LI_SEARCH_GLOBAL] Global account not connected, status:", accountData.status);
     throw new Error(`The global LinkedIn account is disconnected (status: ${accountData.status}). Please reconnect it in Settings.`);
   }
   
-  console.log(`[LI_SEARCH_GLOBAL] Validated account: DB_UUID=${account.account_uuid}, Unipile_ID=${account.account_id}`);
-  
   return {
-    accountUuid: account.account_uuid,  // DB UUID for internal references
-    accountId: account.account_id,       // Unipile ID for API calls
+    accountUuid: account.account_uuid,
+    accountId: account.account_id,
     linkedinFeature: account.linkedin_feature,
   };
 }
 
 serve(async (req) => {
-  // Handle CORS preflight
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
   }
 
   try {
-    // Validate authorization
     const authHeader = req.headers.get("Authorization");
     if (!authHeader || !authHeader.startsWith("Bearer ")) {
       return new Response(
@@ -103,7 +180,6 @@ serve(async (req) => {
 
     const token = authHeader.replace("Bearer ", "");
 
-    // Initialize Supabase clients
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
     const supabaseAnonKey = Deno.env.get("SUPABASE_ANON_KEY")!;
     const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
@@ -113,7 +189,6 @@ serve(async (req) => {
     });
     const serviceClient = createClient(supabaseUrl, supabaseServiceKey);
 
-    // Validate user
     const { data: { user }, error: userError } = await supabase.auth.getUser();
     if (userError || !user) {
       return new Response(
@@ -122,7 +197,6 @@ serve(async (req) => {
       );
     }
 
-    // Parse request body
     const body: SearchRequest = await req.json();
     const { workspaceId, searchType, api, filters, cursor, limit = 25 } = body;
 
@@ -148,7 +222,7 @@ serve(async (req) => {
       );
     }
 
-    // Get the global platform LinkedIn account for search/enrichment
+    // Get the global platform LinkedIn account
     let platformAccount;
     try {
       platformAccount = await getPlatformLinkedInSearchAccount(serviceClient);
@@ -161,35 +235,30 @@ serve(async (req) => {
 
     const unipileAccountId = platformAccount.accountId;
     
-    console.log(`[LI_SEARCH_GLOBAL] workspaceId=${workspaceId} platformAccountUuid=${platformAccount.accountUuid} unipileAccountId=${unipileAccountId} feature=${platformAccount.linkedinFeature}`);
-
-    // Check workspace settings and daily limits
-    const { data: settings } = await supabase
-      .from("workspace_settings")
-      .select("linkedin_daily_search_limit")
-      .eq("workspace_id", workspaceId)
-      .maybeSingle();
-
-    const dailySearchLimit = settings?.linkedin_daily_search_limit ?? 50;
-    const today = getTodayDate();
-
-    // Get current usage (use Unipile account_id for usage tracking)
-    const { data: currentUsage } = await serviceClient.rpc("get_daily_usage", {
-      p_workspace_id: workspaceId,
-      p_account_id: unipileAccountId,
-      p_action: "linkedin_search",
-      p_usage_date: today,
-    });
-
-    if ((currentUsage ?? 0) >= dailySearchLimit) {
+    // ===== PLAN LIMIT CHECK =====
+    const workspacePlan = await getWorkspacePlan(serviceClient, workspaceId);
+    const currentSearchPages = await getTodaySearchPages(serviceClient, workspaceId);
+    
+    console.log(`[PLAN_LIMIT] workspaceId=${workspaceId} planCode=${workspacePlan.plan_code} action=linkedin_search_page current=${currentSearchPages} limit=${workspacePlan.daily_search_page_limit}`);
+    
+    if (currentSearchPages >= workspacePlan.daily_search_page_limit) {
+      // Log blocked event
+      await logUsageEvent(serviceClient, workspaceId, user.id, 'linkedin_search_blocked', unipileAccountId, {
+        blocked: true,
+        reason: 'daily_limit_reached',
+        plan_code: workspacePlan.plan_code,
+      });
+      
       return new Response(
         JSON.stringify({
           error: "Daily search limit reached",
-          usage: { current: currentUsage, limit: dailySearchLimit },
+          usage: { current: currentSearchPages, limit: workspacePlan.daily_search_page_limit },
+          plan: { code: workspacePlan.plan_code, name: workspacePlan.plan_name },
         }),
         { status: 429, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
+    // ===== END PLAN LIMIT CHECK =====
 
     // Call Unipile LinkedIn Search API
     const unipileDsn = Deno.env.get("UNIPILE_DSN")!;
@@ -225,11 +294,8 @@ serve(async (req) => {
       return first?.id ?? null;
     }
 
-    // Unipile expects account_id as a query parameter for this endpoint.
-    // It does NOT support GET; filters should be passed via POST JSON body.
     const searchUrl = `https://${unipileDsn}/api/v1/linkedin/search?account_id=${encodeURIComponent(unipileAccountId)}`;
 
-    // Build payload (Unipile schema expects category + optional advanced_keywords)
     const searchPayload: Record<string, unknown> = {
       api: api || "classic",
       category: searchType === "companies" ? "companies" : "people",
@@ -238,7 +304,6 @@ serve(async (req) => {
 
     if (filters.keywords) searchPayload.keywords = filters.keywords;
 
-    // Free-text fields should go into advanced_keywords to avoid needing numeric IDs
     const advancedKeywords: Record<string, unknown> = {};
     if (filters.first_name) advancedKeywords.first_name = filters.first_name;
     if (filters.last_name) advancedKeywords.last_name = filters.last_name;
@@ -246,7 +311,6 @@ serve(async (req) => {
     if (filters.company) advancedKeywords.company = filters.company;
     if (Object.keys(advancedKeywords).length) searchPayload.advanced_keywords = advancedKeywords;
 
-    // Location requires numeric parameter IDs. If UI sends free text, try to resolve the ID.
     if (filters.location) {
       const trimmed = filters.location.trim();
       if (/^\d+$/.test(trimmed)) {
@@ -255,8 +319,6 @@ serve(async (req) => {
         const resolvedId = await resolveParameterId("location", trimmed);
         if (resolvedId) {
           searchPayload.location = [resolvedId];
-        } else {
-          console.log(`[linkedin-search] Could not resolve location '${trimmed}', skipping location filter.`);
         }
       }
     }
@@ -279,6 +341,14 @@ serve(async (req) => {
     if (!searchResponse.ok) {
       const errorText = await searchResponse.text();
       console.error("[linkedin-search] Unipile error:", errorText);
+      
+      // Log error event
+      await logUsageEvent(serviceClient, workspaceId, user.id, 'linkedin_search_page', unipileAccountId, {
+        error: true,
+        status: searchResponse.status,
+        details: errorText.substring(0, 200),
+      });
+      
       return new Response(
         JSON.stringify({ error: "LinkedIn search failed", details: errorText }),
         { status: searchResponse.status, headers: { ...corsHeaders, "Content-Type": "application/json" } }
@@ -288,15 +358,14 @@ serve(async (req) => {
     const searchData = await searchResponse.json();
     console.log("[linkedin-search] Unipile response items:", searchData.items?.length ?? 0);
 
-    // Increment daily usage (use Unipile account_id for tracking)
-    await serviceClient.rpc("increment_daily_usage", {
-      p_workspace_id: workspaceId,
-      p_account_id: unipileAccountId,
-      p_action: "linkedin_search",
-      p_usage_date: today,
+    // Log successful usage event (1 page = 1 count regardless of results)
+    await logUsageEvent(serviceClient, workspaceId, user.id, 'linkedin_search_page', unipileAccountId, {
+      cursorUsed: !!cursor,
+      resultsCount: searchData.items?.length ?? 0,
+      api: api || 'classic',
     });
 
-    // Transform results to match our lead format
+    // Transform results
     const results = (searchData.items || []).map((item: Record<string, unknown>) => {
       const publicIdentifier = item.public_identifier as string | undefined;
       const profileUrl = publicIdentifier
@@ -329,8 +398,12 @@ serve(async (req) => {
         cursor: searchData.cursor,
         hasMore: !!searchData.cursor,
         usage: {
-          current: (currentUsage ?? 0) + 1,
-          limit: dailySearchLimit,
+          current: currentSearchPages + 1,
+          limit: workspacePlan.daily_search_page_limit,
+        },
+        plan: {
+          code: workspacePlan.plan_code,
+          name: workspacePlan.plan_name,
         },
       }),
       { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }

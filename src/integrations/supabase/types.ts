@@ -712,6 +712,45 @@ export type Database = {
           },
         ]
       }
+      plans: {
+        Row: {
+          code: string
+          created_at: string
+          daily_enrich_limit: number
+          daily_search_page_limit: number
+          id: string
+          is_default: boolean
+          monthly_enrich_limit: number | null
+          monthly_search_page_limit: number | null
+          name: string
+          updated_at: string
+        }
+        Insert: {
+          code: string
+          created_at?: string
+          daily_enrich_limit?: number
+          daily_search_page_limit?: number
+          id?: string
+          is_default?: boolean
+          monthly_enrich_limit?: number | null
+          monthly_search_page_limit?: number | null
+          name: string
+          updated_at?: string
+        }
+        Update: {
+          code?: string
+          created_at?: string
+          daily_enrich_limit?: number
+          daily_search_page_limit?: number
+          id?: string
+          is_default?: boolean
+          monthly_enrich_limit?: number | null
+          monthly_search_page_limit?: number | null
+          name?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
       platform_admins: {
         Row: {
           created_at: string
@@ -904,6 +943,47 @@ export type Database = {
           },
         ]
       }
+      usage_events: {
+        Row: {
+          account_id: string | null
+          action: string
+          count: number
+          created_at: string
+          id: string
+          metadata: Json | null
+          user_id: string | null
+          workspace_id: string
+        }
+        Insert: {
+          account_id?: string | null
+          action: string
+          count?: number
+          created_at?: string
+          id?: string
+          metadata?: Json | null
+          user_id?: string | null
+          workspace_id: string
+        }
+        Update: {
+          account_id?: string | null
+          action?: string
+          count?: number
+          created_at?: string
+          id?: string
+          metadata?: Json | null
+          user_id?: string | null
+          workspace_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "usage_events_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       workspace_invites: {
         Row: {
           accepted_at: string | null
@@ -972,6 +1052,51 @@ export type Database = {
             foreignKeyName: "workspace_members_workspace_id_fkey"
             columns: ["workspace_id"]
             isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      workspace_plans: {
+        Row: {
+          created_at: string
+          ends_at: string | null
+          plan_id: string
+          starts_at: string
+          status: string
+          updated_at: string
+          workspace_id: string
+        }
+        Insert: {
+          created_at?: string
+          ends_at?: string | null
+          plan_id: string
+          starts_at?: string
+          status?: string
+          updated_at?: string
+          workspace_id: string
+        }
+        Update: {
+          created_at?: string
+          ends_at?: string | null
+          plan_id?: string
+          starts_at?: string
+          status?: string
+          updated_at?: string
+          workspace_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "workspace_plans_plan_id_fkey"
+            columns: ["plan_id"]
+            isOneToOne: false
+            referencedRelation: "plans"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "workspace_plans_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: true
             referencedRelation: "workspaces"
             referencedColumns: ["id"]
           },
@@ -1131,6 +1256,15 @@ export type Database = {
         Args: { p_campaign_id: string }
         Returns: string
       }
+      get_admin_usage_overview: {
+        Args: { p_days?: number }
+        Returns: {
+          action: string
+          date: string
+          total_count: number
+          unique_workspaces: number
+        }[]
+      }
       get_daily_usage: {
         Args: {
           p_account_id: string
@@ -1140,6 +1274,15 @@ export type Database = {
         }
         Returns: number
       }
+      get_global_account_usage: {
+        Args: { p_days?: number }
+        Returns: {
+          account_id: string
+          action: string
+          date: string
+          total_count: number
+        }[]
+      }
       get_platform_linkedin_search_account: {
         Args: never
         Returns: {
@@ -1148,12 +1291,42 @@ export type Database = {
           linkedin_feature: string
         }[]
       }
+      get_top_workspaces_usage: {
+        Args: { p_days?: number; p_limit?: number }
+        Returns: {
+          enrichments: number
+          plan_code: string
+          search_pages: number
+          workspace_id: string
+          workspace_name: string
+        }[]
+      }
       get_workspace_daily_usage: {
         Args: { p_usage_date: string; p_workspace_id: string }
         Returns: {
           account_id: string
           action: string
           count: number
+        }[]
+      }
+      get_workspace_plan: {
+        Args: { p_workspace_id: string }
+        Returns: {
+          daily_enrich_limit: number
+          daily_search_page_limit: number
+          monthly_enrich_limit: number
+          monthly_search_page_limit: number
+          plan_code: string
+          plan_id: string
+          plan_name: string
+          status: string
+        }[]
+      }
+      get_workspace_usage_today: {
+        Args: { p_workspace_id: string }
+        Returns: {
+          action: string
+          total_count: number
         }[]
       }
       increment_daily_usage: {

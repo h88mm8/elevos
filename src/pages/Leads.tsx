@@ -916,6 +916,9 @@ export default function Leads() {
         lead={selectedLead}
         open={drawerOpen}
         onOpenChange={setDrawerOpen}
+        accounts={accounts}
+        workspaceId={currentWorkspace?.id}
+        onLeadUpdated={refetchLeads}
       />
 
       {/* Search List Dialog */}

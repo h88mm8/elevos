@@ -113,13 +113,13 @@ serve(async (req) => {
       );
     }
 
-    // Validate account
+    // Validate account - accountId can be UUID (id column) or Unipile account_id
     const { data: account } = await supabase
       .from("accounts")
-      .select("account_id, status, channel")
-      .eq("account_id", accountId)
+      .select("id, account_id, status, channel")
       .eq("workspace_id", workspaceId)
       .eq("channel", "linkedin")
+      .or(`id.eq.${accountId},account_id.eq.${accountId}`)
       .maybeSingle();
 
     if (!account || account.status !== "connected") {
@@ -128,6 +128,9 @@ serve(async (req) => {
         { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
+
+    // Use the Unipile account_id for API calls
+    const unipileAccountId = account.account_id;
 
     // Check daily limits
     const { data: settings } = await supabase
@@ -141,7 +144,7 @@ serve(async (req) => {
 
     const { data: currentUsage } = await serviceClient.rpc("get_daily_usage", {
       p_workspace_id: workspaceId,
-      p_account_id: accountId,
+      p_account_id: unipileAccountId,
       p_action: "linkedin_profile_scrape",
       p_usage_date: today,
     });
@@ -172,7 +175,7 @@ serve(async (req) => {
     console.log("[linkedin-enrich-lead] Fetching profile for:", publicIdentifier);
 
     const profileResponse = await fetch(
-      `https://${unipileDsn}/api/v1/users/${publicIdentifier}?account_id=${accountId}`,
+      `https://${unipileDsn}/api/v1/users/${publicIdentifier}?account_id=${unipileAccountId}`,
       {
         method: "GET",
         headers: {
@@ -243,7 +246,7 @@ serve(async (req) => {
         
         try {
           const companyResponse = await fetch(
-            `https://${unipileDsn}/api/v1/linkedin/company/${companyIdentifier}?account_id=${accountId}`,
+            `https://${unipileDsn}/api/v1/linkedin/company/${companyIdentifier}?account_id=${unipileAccountId}`,
             {
               method: "GET",
               headers: {
@@ -292,7 +295,7 @@ serve(async (req) => {
     // Increment daily usage
     await serviceClient.rpc("increment_daily_usage", {
       p_workspace_id: workspaceId,
-      p_account_id: accountId,
+      p_account_id: unipileAccountId,
       p_action: "linkedin_profile_scrape",
       p_usage_date: today,
     });

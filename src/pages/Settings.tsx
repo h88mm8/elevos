@@ -6,6 +6,7 @@ import { useAccounts } from '@/hooks/useAccounts';
 import { useWorkspaceSettings } from '@/hooks/useWorkspaceSettings';
 import { useDailyUsage } from '@/hooks/useDailyUsage';
 import AppLayout from '@/components/layout/AppLayout';
+import { WorkspaceBillingCard } from '@/components/settings/WorkspaceBillingCard';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -627,6 +628,19 @@ export default function Settings() {
           </TabsList>
 
           <TabsContent value="workspace" className="space-y-4">
+            {/* Plan & Usage Section */}
+            {currentWorkspace ? (
+              <WorkspaceBillingCard />
+            ) : (
+              <Card>
+                <CardHeader>
+                  <CardTitle>Selecione um workspace</CardTitle>
+                  <CardDescription>
+                    Escolha um workspace para ver plano, limites e consumo.
+                  </CardDescription>
+                </CardHeader>
+              </Card>
+            )}
             <Card>
               <CardHeader>
                 <CardTitle>Workspace Atual</CardTitle>

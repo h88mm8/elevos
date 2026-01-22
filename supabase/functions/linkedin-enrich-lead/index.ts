@@ -201,21 +201,29 @@ serve(async (req) => {
       enriched_at: new Date().toISOString(),
     };
 
-    // Map profile fields - handle different field naming conventions from Unipile
-    const fullName = profileData.name || profileData.full_name || profileData.displayName;
-    if (fullName) updateData.full_name = fullName;
+    // Map profile fields according to Unipile API structure
+    // Name fields - build full_name from first_name + last_name if not provided directly
+    const firstName = profileData.first_name;
+    const lastName = profileData.last_name;
     
-    const firstName = profileData.first_name || profileData.firstName;
     if (firstName) updateData.first_name = firstName;
-    
-    const lastName = profileData.last_name || profileData.lastName;
     if (lastName) updateData.last_name = lastName;
+    
+    // Build full_name from parts or use direct name field
+    if (firstName || lastName) {
+      updateData.full_name = [firstName, lastName].filter(Boolean).join(' ');
+    } else if (profileData.name) {
+      updateData.full_name = profileData.name;
+    }
     
     if (profileData.headline) updateData.headline = profileData.headline;
     if (profileData.industry) updateData.industry = profileData.industry;
     
-    // Location parsing - handle multiple formats
-    const locationData = profileData.location || profileData.geo_location;
+    // Occupation is the primary source for job title in Unipile
+    if (profileData.occupation) updateData.job_title = profileData.occupation;
+    
+    // Location parsing - handle string or object format
+    const locationData = profileData.location;
     if (locationData) {
       if (typeof locationData === "string") {
         // Try to parse "City, State, Country" format
@@ -230,26 +238,33 @@ serve(async (req) => {
       }
     }
 
-    // Current position - handle multiple field naming conventions
-    const positions = profileData.current_positions || profileData.positions || profileData.experience;
-    if (positions && Array.isArray(positions) && positions.length > 0) {
-      const currentPosition = positions[0];
-      const jobTitle = currentPosition.title || currentPosition.job_title || currentPosition.position;
-      const companyName = currentPosition.company_name || currentPosition.companyName || currentPosition.company;
-      const companyLinkedIn = currentPosition.company_linkedin_url || currentPosition.companyLinkedInUrl || currentPosition.company_url;
+    // Experiences array - Unipile uses "experiences" not "current_positions"
+    const experiences = profileData.experiences;
+    if (experiences && Array.isArray(experiences) && experiences.length > 0) {
+      const currentExperience = experiences[0];
       
-      if (jobTitle) updateData.job_title = jobTitle;
-      if (companyName) updateData.company = companyName;
-      if (companyLinkedIn) updateData.company_linkedin = companyLinkedIn;
+      // If occupation wasn't set, use experience title
+      if (!updateData.job_title && currentExperience.title) {
+        updateData.job_title = currentExperience.title;
+      }
+      
+      // Company info from experience - company is an object in Unipile
+      if (currentExperience.company) {
+        const company = currentExperience.company;
+        if (typeof company === "object") {
+          if (company.name) updateData.company = company.name;
+          if (company.linkedin_url) updateData.company_linkedin = company.linkedin_url;
+          if (company.logo_url) console.log("[linkedin-enrich-lead] Company logo available:", company.logo_url);
+        } else if (typeof company === "string") {
+          updateData.company = company;
+        }
+      } else if (currentExperience.company_name) {
+        updateData.company = currentExperience.company_name;
+      }
     }
-    
-    // Also check for direct occupation/company fields (some APIs return these directly)
-    if (!updateData.job_title && profileData.occupation) updateData.job_title = profileData.occupation;
-    if (!updateData.company && profileData.company) updateData.company = profileData.company;
 
     // Seniority
-    const seniority = profileData.seniority || profileData.seniority_level;
-    if (seniority) updateData.seniority_level = seniority;
+    if (profileData.seniority) updateData.seniority_level = profileData.seniority;
 
     // Try to get company data if we have company LinkedIn
     const companyLinkedIn = updateData.company_linkedin as string || lead.company_linkedin;

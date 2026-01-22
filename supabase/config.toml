@@ -74,3 +74,9 @@ verify_jwt = false
 
 [functions.get-all-linkedin-accounts]
 verify_jwt = false
+
+[functions.platform-admin-bootstrap]
+verify_jwt = false
+
+[functions.update-platform-settings]
+verify_jwt = false

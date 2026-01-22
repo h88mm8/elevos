@@ -418,7 +418,7 @@ export default function Leads() {
     
     // Filter leads with LinkedIn URL, optionally including already enriched
     const leadsToEnrich = leads.filter(
-      l => selectedLeads.has(l.id) && l.linkedin_url && (forceReEnrich || !l.enriched_at)
+      l => selectedLeads.has(l.id) && l.linkedin_url && (forceReEnrich || !l.last_enriched_at)
     );
     
     if (leadsToEnrich.length === 0) {
@@ -975,7 +975,7 @@ export default function Leads() {
                           <div className="flex flex-col gap-0.5">
                             <div className="flex items-center gap-1.5">
                               <span>{lead.full_name || '-'}</span>
-                              {lead.enriched_at && (
+                              {lead.last_enriched_at && (
                                 <span title="Enriquecido"><Sparkles className="h-3 w-3 text-primary" /></span>
                               )}
                             </div>

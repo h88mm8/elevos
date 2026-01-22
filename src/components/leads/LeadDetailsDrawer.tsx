@@ -176,9 +176,9 @@ export function LeadDetailsDrawer({
                 )}
               </Button>
             </div>
-            {lead.enriched_at && (
+            {lead.last_enriched_at && (
               <p className="text-xs text-muted-foreground">
-                Último enriquecimento: {new Date(lead.enriched_at).toLocaleDateString('pt-BR')}
+                Último enriquecimento: {new Date(lead.last_enriched_at).toLocaleDateString('pt-BR')}
               </p>
             )}
           </div>

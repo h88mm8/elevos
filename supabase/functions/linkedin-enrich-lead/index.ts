@@ -22,7 +22,7 @@ function extractCompanyIdentifier(companyUrl: string): string | null {
   return match ? match[1] : null;
 }
 
-// Helper to get the global platform LinkedIn search account
+// Helper to get the global platform LinkedIn search account with validation
 async function getPlatformLinkedInSearchAccount(serviceClient: any): Promise<{
   accountUuid: string;
   accountId: string;
@@ -42,6 +42,28 @@ async function getPlatformLinkedInSearchAccount(serviceClient: any): Promise<{
   }
   
   const account = rows[0];
+  
+  // D) Additional validation: verify the account is still connected
+  const { data: accountData, error: accountError } = await serviceClient
+    .from("accounts")
+    .select("id, account_id, channel, status")
+    .eq("id", account.account_uuid)
+    .maybeSingle();
+  
+  if (accountError || !accountData) {
+    console.error("[LI_ENRICH_GLOBAL] Global account not found:", account.account_uuid);
+    throw new Error("The configured global LinkedIn account no longer exists. Platform admin must reconfigure.");
+  }
+  
+  if (accountData.channel !== "linkedin") {
+    throw new Error("The configured global account is not a LinkedIn account. Platform admin must reconfigure.");
+  }
+  
+  if (accountData.status !== "connected") {
+    console.error("[LI_ENRICH_GLOBAL] Global account not connected, status:", accountData.status);
+    throw new Error(`The global LinkedIn account is disconnected (status: ${accountData.status}). Please reconnect it in Settings.`);
+  }
+  
   return {
     accountUuid: account.account_uuid,
     accountId: account.account_id,
@@ -220,9 +242,13 @@ serve(async (req) => {
     const profileData = await profileResponse.json();
     console.log("[linkedin-enrich-lead] Full profile data:", JSON.stringify(profileData, null, 2));
 
-    // Prepare update object
+    // E) Store the raw profile data and identifiers
+    // Prepare update object with new enrichment fields
     const updateData: Record<string, unknown> = {
-      enriched_at: new Date().toISOString(),
+      last_enriched_at: new Date().toISOString(),
+      linkedin_public_identifier: publicIdentifier,
+      linkedin_provider_id: profileData.id || profileData.provider_id || null,
+      linkedin_profile_json: profileData, // Store full payload for future use
     };
 
     // Map profile fields according to Unipile API structure

@@ -548,7 +548,6 @@ export type Database = {
           country: string | null
           created_at: string
           email: string | null
-          enriched_at: string | null
           first_name: string | null
           full_name: string | null
           headline: string | null
@@ -556,7 +555,11 @@ export type Database = {
           industry: string | null
           job_title: string | null
           keywords: string | null
+          last_enriched_at: string | null
           last_name: string | null
+          linkedin_profile_json: Json | null
+          linkedin_provider_id: string | null
+          linkedin_public_identifier: string | null
           linkedin_url: string | null
           list_id: string | null
           mobile_number: string | null
@@ -584,7 +587,6 @@ export type Database = {
           country?: string | null
           created_at?: string
           email?: string | null
-          enriched_at?: string | null
           first_name?: string | null
           full_name?: string | null
           headline?: string | null
@@ -592,7 +594,11 @@ export type Database = {
           industry?: string | null
           job_title?: string | null
           keywords?: string | null
+          last_enriched_at?: string | null
           last_name?: string | null
+          linkedin_profile_json?: Json | null
+          linkedin_provider_id?: string | null
+          linkedin_public_identifier?: string | null
           linkedin_url?: string | null
           list_id?: string | null
           mobile_number?: string | null
@@ -620,7 +626,6 @@ export type Database = {
           country?: string | null
           created_at?: string
           email?: string | null
-          enriched_at?: string | null
           first_name?: string | null
           full_name?: string | null
           headline?: string | null
@@ -628,7 +633,11 @@ export type Database = {
           industry?: string | null
           job_title?: string | null
           keywords?: string | null
+          last_enriched_at?: string | null
           last_name?: string | null
+          linkedin_profile_json?: Json | null
+          linkedin_provider_id?: string | null
+          linkedin_public_identifier?: string | null
           linkedin_url?: string | null
           list_id?: string | null
           mobile_number?: string | null
@@ -676,16 +685,19 @@ export type Database = {
           id: number
           linkedin_search_account_id: string | null
           updated_at: string
+          updated_by: string | null
         }
         Insert: {
           id?: number
           linkedin_search_account_id?: string | null
           updated_at?: string
+          updated_by?: string | null
         }
         Update: {
           id?: number
           linkedin_search_account_id?: string | null
           updated_at?: string
+          updated_by?: string | null
         }
         Relationships: [
           {

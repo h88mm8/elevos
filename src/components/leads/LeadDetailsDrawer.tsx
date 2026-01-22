@@ -90,11 +90,21 @@ export function LeadDetailsDrawer({
 
       onLeadUpdated?.();
     } catch (error: any) {
-      toast({
-        title: 'Erro ao enriquecer',
-        description: error.message || 'Não foi possível enriquecer o lead',
-        variant: 'destructive',
-      });
+      // Check if global account not configured
+      const errorMsg = error.message || '';
+      if (errorMsg.includes('global') || errorMsg.includes('configurada') || errorMsg.includes('not configured')) {
+        toast({
+          title: 'Enriquecimento indisponível',
+          description: 'Peça ao administrador para configurar a conta global do LinkedIn.',
+          variant: 'destructive',
+        });
+      } else {
+        toast({
+          title: 'Erro ao enriquecer',
+          description: errorMsg || 'Não foi possível enriquecer o lead',
+          variant: 'destructive',
+        });
+      }
     } finally {
       setIsEnriching(false);
     }

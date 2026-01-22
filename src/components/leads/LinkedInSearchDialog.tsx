@@ -172,11 +172,21 @@ export function LinkedInSearchDialog({
         });
       }
     } catch (error: any) {
-      toast({
-        title: 'Erro na busca',
-        description: error.message || 'Não foi possível buscar no LinkedIn',
-        variant: 'destructive',
-      });
+      // Check if global account not configured
+      const errorMsg = error.message || '';
+      if (errorMsg.includes('global') || errorMsg.includes('configurada') || errorMsg.includes('not configured')) {
+        toast({
+          title: 'Busca LinkedIn indisponível',
+          description: 'Peça ao administrador para configurar a conta global do LinkedIn.',
+          variant: 'destructive',
+        });
+      } else {
+        toast({
+          title: 'Erro na busca',
+          description: errorMsg || 'Não foi possível buscar no LinkedIn',
+          variant: 'destructive',
+        });
+      }
     } finally {
       setIsSearching(false);
       setIsLoadingMore(false);

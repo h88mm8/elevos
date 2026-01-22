@@ -38,15 +38,7 @@ export function useLinkedInAutocomplete({
     setError(null);
 
     try {
-      const { data, error: fnError } = await supabase.functions.invoke(
-        'linkedin-search-parameters',
-        {
-          body: null,
-          headers: {},
-        }
-      );
-
-      // We need to use GET with query params, so use fetch directly
+      // Use GET with query params via direct fetch
       const { data: session } = await supabase.auth.getSession();
       const token = session?.session?.access_token;
       
@@ -63,7 +55,7 @@ export function useLinkedInAutocomplete({
         method: 'GET',
         headers: {
           'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json',
+          'apikey': import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
         },
       });
 

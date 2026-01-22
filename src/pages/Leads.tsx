@@ -25,6 +25,8 @@ import { MoveLeadsDialog } from '@/components/leads/MoveLeadsDialog';
 import { DeleteLeadsDialog } from '@/components/leads/DeleteLeadsDialog';
 import { LeadTagsPopover, LeadTagsBadges } from '@/components/leads/LeadTagsPopover';
 import { BulkTagsPopover } from '@/components/leads/BulkTagsPopover';
+import { LinkedInSearchDialog } from '@/components/leads/LinkedInSearchDialog';
+import { useAccounts } from '@/hooks/useAccounts';
 import { 
   Search, 
   Phone, 
@@ -40,6 +42,7 @@ import {
   Trash2,
   FolderInput,
   Tag,
+  Linkedin,
 } from 'lucide-react';
 import { Lead, LeadFilters as LeadFiltersType } from '@/types';
 import { useNavigate } from 'react-router-dom';
@@ -50,6 +53,7 @@ export default function Leads() {
   const { lists, createList, refetchLists } = useLeadLists();
   const { credits, refetchCredits } = useCredits();
   const { tags, refetchTags } = useTags();
+  const { accounts } = useAccounts();
   const { toast } = useToast();
   const navigate = useNavigate();
 
@@ -96,6 +100,7 @@ export default function Leads() {
   const [isSearchingList, setIsSearchingList] = useState(false);
   const [isMoving, setIsMoving] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
+  const [linkedInSearchOpen, setLinkedInSearchOpen] = useState(false);
 
   // Get lead tags helper from useTags
   const { getLeadTags } = useTags();
@@ -635,19 +640,29 @@ export default function Leads() {
                   Apenas com email válido
                 </Label>
               </div>
-              <Button onClick={handleSearchClick} disabled={searching}>
-                {searching ? (
-                  <>
-                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                    Buscando...
-                  </>
-                ) : (
-                  <>
-                    <Search className="mr-2 h-4 w-4" />
-                    Buscar Leads
-                  </>
-                )}
-              </Button>
+              <div className="flex gap-2">
+                <Button
+                  variant="outline"
+                  onClick={() => setLinkedInSearchOpen(true)}
+                  disabled={searching}
+                >
+                  <Linkedin className="mr-2 h-4 w-4 text-[#0A66C2]" />
+                  Buscar LinkedIn
+                </Button>
+                <Button onClick={handleSearchClick} disabled={searching}>
+                  {searching ? (
+                    <>
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      Buscando...
+                    </>
+                  ) : (
+                    <>
+                      <Search className="mr-2 h-4 w-4" />
+                      Buscar Leads
+                    </>
+                  )}
+                </Button>
+              </div>
             </div>
           </CardContent>
         </Card>
@@ -930,6 +945,21 @@ export default function Leads() {
         selectedCount={selectedLeads.size}
         isLoading={isDeleting}
       />
+
+      {/* LinkedIn Search Dialog */}
+      {currentWorkspace && (
+        <LinkedInSearchDialog
+          open={linkedInSearchOpen}
+          onOpenChange={setLinkedInSearchOpen}
+          accounts={accounts}
+          lists={lists}
+          workspaceId={currentWorkspace.id}
+          onImportComplete={() => {
+            refetchLeads();
+            refetchLists();
+          }}
+        />
+      )}
     </AppLayout>
   );
 }

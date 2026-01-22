@@ -1,6 +1,7 @@
-import { ReactNode } from 'react';
+import { ReactNode, useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
+import { usePlatformAdmin } from '@/hooks/usePlatformAdmin';
 import { Button } from '@/components/ui/button';
 import { 
   DropdownMenu, 
@@ -20,10 +21,10 @@ import {
   Building2,
   Menu,
   Zap,
-  Tag
+  Tag,
+  Shield
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { useState } from 'react';
 import { Sheet, SheetContent, SheetTrigger } from '@/components/ui/sheet';
 
 const navItems = [
@@ -34,14 +35,20 @@ const navItems = [
   { href: '/settings', label: 'Configurações', icon: Settings },
 ];
 
-function NavItems({ onItemClick }: { onItemClick?: () => void }) {
+function NavItems({ onItemClick, isPlatformAdmin }: { onItemClick?: () => void; isPlatformAdmin?: boolean }) {
   const location = useLocation();
+  
+  // Build nav items including platform admin if applicable
+  const allNavItems = isPlatformAdmin 
+    ? [...navItems, { href: '/platform-admin', label: 'Platform Admin', icon: Shield }]
+    : navItems;
   
   return (
     <nav className="flex flex-col gap-1">
-      {navItems.map((item) => {
+      {allNavItems.map((item) => {
         const Icon = item.icon;
         const isActive = location.pathname === item.href;
+        const isPlatformAdminItem = item.href === '/platform-admin';
         
         return (
           <Link
@@ -52,10 +59,11 @@ function NavItems({ onItemClick }: { onItemClick?: () => void }) {
               'flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium transition-colors',
               isActive 
                 ? 'bg-primary text-primary-foreground' 
-                : 'text-muted-foreground hover:bg-muted hover:text-foreground'
+                : 'text-muted-foreground hover:bg-muted hover:text-foreground',
+              isPlatformAdminItem && 'border-t mt-2 pt-3'
             )}
           >
-            <Icon className="h-5 w-5" />
+            <Icon className={cn("h-5 w-5", isPlatformAdminItem && "text-amber-500")} />
             {item.label}
           </Link>
         );
@@ -66,6 +74,7 @@ function NavItems({ onItemClick }: { onItemClick?: () => void }) {
 
 export default function AppLayout({ children }: { children: ReactNode }) {
   const { profile, workspaces, currentWorkspace, setCurrentWorkspace, signOut } = useAuth();
+  const { isPlatformAdmin } = usePlatformAdmin();
   const navigate = useNavigate();
   const [mobileOpen, setMobileOpen] = useState(false);
 
@@ -84,7 +93,7 @@ export default function AppLayout({ children }: { children: ReactNode }) {
         </div>
         
         <div className="flex-1 p-4">
-          <NavItems />
+          <NavItems isPlatformAdmin={isPlatformAdmin} />
         </div>
         
         <div className="p-4 border-t">
@@ -132,7 +141,7 @@ export default function AppLayout({ children }: { children: ReactNode }) {
                 <span className="font-bold text-lg">Elevos</span>
               </div>
               <div className="p-4">
-                <NavItems onItemClick={() => setMobileOpen(false)} />
+                <NavItems onItemClick={() => setMobileOpen(false)} isPlatformAdmin={isPlatformAdmin} />
               </div>
             </SheetContent>
           </Sheet>
@@ -159,6 +168,13 @@ export default function AppLayout({ children }: { children: ReactNode }) {
                 <Settings className="mr-2 h-4 w-4" />
                 Configurações
               </DropdownMenuItem>
+              {isPlatformAdmin && (
+                <DropdownMenuItem onClick={() => navigate('/platform-admin')}>
+                  <Shield className="mr-2 h-4 w-4 text-amber-500" />
+                  Platform Admin
+                </DropdownMenuItem>
+              )}
+              <DropdownMenuSeparator />
               <DropdownMenuItem onClick={handleSignOut} className="text-destructive">
                 <LogOut className="mr-2 h-4 w-4" />
                 Sair

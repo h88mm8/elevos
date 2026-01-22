@@ -96,11 +96,11 @@ serve(async (req) => {
       );
     }
 
-    // Validate account
+    // Validate account - accountId is the UUID (id column), not the Unipile account_id
     const { data: account, error: accountError } = await supabase
       .from("accounts")
-      .select("account_id, status, channel")
-      .eq("account_id", accountId)
+      .select("id, account_id, status, channel")
+      .eq("id", accountId)
       .eq("workspace_id", workspaceId)
       .eq("channel", "linkedin")
       .maybeSingle();
@@ -119,6 +119,9 @@ serve(async (req) => {
       );
     }
 
+    // The Unipile account_id for API calls
+    const unipileAccountId = account.account_id;
+
     // Check workspace settings and daily limits
     const { data: settings } = await supabase
       .from("workspace_settings")
@@ -129,10 +132,10 @@ serve(async (req) => {
     const dailySearchLimit = settings?.linkedin_daily_search_limit ?? 50;
     const today = getTodayDate();
 
-    // Get current usage
+    // Get current usage (use Unipile account_id for usage tracking)
     const { data: currentUsage } = await serviceClient.rpc("get_daily_usage", {
       p_workspace_id: workspaceId,
-      p_account_id: accountId,
+      p_account_id: unipileAccountId,
       p_action: "linkedin_search",
       p_usage_date: today,
     });
@@ -151,9 +154,10 @@ serve(async (req) => {
     const unipileDsn = Deno.env.get("UNIPILE_DSN")!;
     const unipileApiKey = Deno.env.get("UNIPILE_API_KEY")!;
 
+    // Use Unipile account_id for the API call
     const searchPayload: Record<string, unknown> = {
-      account_id: accountId,
-      api: api,
+      account_id: unipileAccountId,
+      api: api || "classic",
       limit: Math.min(limit, 25),
     };
 
@@ -196,10 +200,10 @@ serve(async (req) => {
     const searchData = await searchResponse.json();
     console.log("[linkedin-search] Unipile response items:", searchData.items?.length ?? 0);
 
-    // Increment daily usage
+    // Increment daily usage (use Unipile account_id for tracking)
     await serviceClient.rpc("increment_daily_usage", {
       p_workspace_id: workspaceId,
-      p_account_id: accountId,
+      p_account_id: unipileAccountId,
       p_action: "linkedin_search",
       p_usage_date: today,
     });

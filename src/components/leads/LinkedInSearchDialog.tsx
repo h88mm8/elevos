@@ -34,7 +34,6 @@ import {
   ChevronLeft,
 } from 'lucide-react';
 import { LeadList } from '@/types';
-import { Account } from '@/hooks/useAccounts';
 import { supabase } from '@/integrations/supabase/client';
 import { useToast } from '@/hooks/use-toast';
 
@@ -54,7 +53,6 @@ interface LinkedInSearchResult {
 interface LinkedInSearchDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  accounts: Account[];
   lists: LeadList[];
   workspaceId: string;
   onImportComplete: () => void;
@@ -65,7 +63,6 @@ type Step = 'config' | 'results';
 export function LinkedInSearchDialog({
   open,
   onOpenChange,
-  accounts,
   lists,
   workspaceId,
   onImportComplete,
@@ -76,7 +73,6 @@ export function LinkedInSearchDialog({
   const [step, setStep] = useState<Step>('config');
 
   // Config state
-  const [selectedAccountId, setSelectedAccountId] = useState<string>('');
   const [keywords, setKeywords] = useState('');
   const [jobTitle, setJobTitle] = useState('');
   const [company, setCompany] = useState('');
@@ -100,15 +96,8 @@ export function LinkedInSearchDialog({
   const [newListName, setNewListName] = useState('');
   const [newListDescription, setNewListDescription] = useState('');
 
-  // Get LinkedIn accounts only
-  const linkedInAccounts = useMemo(
-    () => accounts.filter(a => a.channel === 'linkedin' && a.status === 'connected'),
-    [accounts]
-  );
-
   function resetState() {
     setStep('config');
-    setSelectedAccountId('');
     setKeywords('');
     setJobTitle('');
     setCompany('');
@@ -134,15 +123,6 @@ export function LinkedInSearchDialog({
   }
 
   async function handleSearch(loadMore = false) {
-    if (!selectedAccountId) {
-      toast({
-        title: 'Selecione uma conta',
-        description: 'Escolha uma conta LinkedIn para realizar a busca.',
-        variant: 'destructive',
-      });
-      return;
-    }
-
     if (!keywords.trim() && !jobTitle.trim() && !company.trim()) {
       toast({
         title: 'Filtros obrigatórios',
@@ -158,7 +138,6 @@ export function LinkedInSearchDialog({
       const { data, error } = await supabase.functions.invoke('linkedin-search', {
         body: {
           workspaceId,
-          accountId: selectedAccountId,
           searchType: 'people',
           filters: {
             keywords: keywords.trim() || undefined,
@@ -310,7 +289,7 @@ export function LinkedInSearchDialog({
     }
   }
 
-  const canSearch = selectedAccountId && (keywords.trim() || jobTitle.trim() || company.trim());
+  const canSearch = keywords.trim() || jobTitle.trim() || company.trim();
 
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
@@ -324,40 +303,13 @@ export function LinkedInSearchDialog({
           </DialogTitle>
           <DialogDescription>
             {step === 'config' 
-              ? 'Configure os filtros e selecione uma conta para buscar leads.' 
+              ? 'Configure os filtros para buscar leads no LinkedIn.' 
               : `${results.length} resultados encontrados. Selecione os leads para importar.`}
           </DialogDescription>
         </DialogHeader>
 
         {step === 'config' ? (
           <div className="space-y-6 py-4">
-            {/* Account selection */}
-            <div className="space-y-2">
-              <Label>Conta LinkedIn *</Label>
-              {linkedInAccounts.length === 0 ? (
-                <div className="flex items-center gap-2 p-4 rounded-lg border border-dashed text-muted-foreground">
-                  <AlertCircle className="h-4 w-4" />
-                  <span className="text-sm">Nenhuma conta LinkedIn conectada.</span>
-                </div>
-              ) : (
-                <Select value={selectedAccountId} onValueChange={setSelectedAccountId}>
-                  <SelectTrigger>
-                    <SelectValue placeholder="Selecione uma conta" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {linkedInAccounts.map(account => (
-                      <SelectItem key={account.id} value={account.id}>
-                        <div className="flex items-center gap-2">
-                          <User className="h-4 w-4" />
-                          <span>{account.name || account.account_id}</span>
-                        </div>
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              )}
-            </div>
-
             {/* Search filters */}
             <div className="grid gap-4 sm:grid-cols-2">
               <div className="space-y-2">

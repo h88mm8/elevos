@@ -32,9 +32,10 @@ interface SearchRequest {
 }
 
 // Helper to get the global platform LinkedIn search account with validation
+// The RPC already filters by channel='linkedin' AND status='connected'
 async function getPlatformLinkedInSearchAccount(serviceClient: any): Promise<{
-  accountUuid: string;
-  accountId: string;
+  accountUuid: string;  // accounts.id (UUID in DB)
+  accountId: string;    // accounts.account_id (Unipile ID for API calls)
   linkedinFeature: string | null;
 }> {
   const { data, error } = await serviceClient.rpc("get_platform_linkedin_search_account");
@@ -52,19 +53,21 @@ async function getPlatformLinkedInSearchAccount(serviceClient: any): Promise<{
   
   const account = rows[0];
   
-  // D) Additional validation: verify the account is still connected
+  // The RPC already validates channel='linkedin' AND status='connected'
+  // Additional validation: double-check account exists and is still valid
   const { data: accountData, error: accountError } = await serviceClient
     .from("accounts")
     .select("id, account_id, channel, status")
-    .eq("id", account.account_uuid)
+    .eq("id", account.account_uuid)  // Compare by DB UUID, not Unipile account_id
     .maybeSingle();
   
   if (accountError || !accountData) {
-    console.error("[LI_SEARCH_GLOBAL] Global account not found:", account.account_uuid);
+    console.error("[LI_SEARCH_GLOBAL] Global account not found by UUID:", account.account_uuid);
     throw new Error("The configured global LinkedIn account no longer exists. Platform admin must reconfigure.");
   }
   
   if (accountData.channel !== "linkedin") {
+    console.error("[LI_SEARCH_GLOBAL] Account channel mismatch:", accountData.channel);
     throw new Error("The configured global account is not a LinkedIn account. Platform admin must reconfigure.");
   }
   
@@ -73,9 +76,11 @@ async function getPlatformLinkedInSearchAccount(serviceClient: any): Promise<{
     throw new Error(`The global LinkedIn account is disconnected (status: ${accountData.status}). Please reconnect it in Settings.`);
   }
   
+  console.log(`[LI_SEARCH_GLOBAL] Validated account: DB_UUID=${account.account_uuid}, Unipile_ID=${account.account_id}`);
+  
   return {
-    accountUuid: account.account_uuid,
-    accountId: account.account_id,
+    accountUuid: account.account_uuid,  // DB UUID for internal references
+    accountId: account.account_id,       // Unipile ID for API calls
     linkedinFeature: account.linkedin_feature,
   };
 }

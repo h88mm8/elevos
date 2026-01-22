@@ -1057,6 +1057,7 @@ export type Database = {
         }
         Returns: boolean
       }
+      bootstrap_platform_admin: { Args: { p_user_id: string }; Returns: Json }
       claim_due_queue_entries: {
         Args: { p_limit?: number; p_workspace_id?: string }
         Returns: {

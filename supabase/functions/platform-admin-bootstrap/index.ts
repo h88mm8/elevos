@@ -43,54 +43,59 @@ serve(async (req) => {
       );
     }
 
-    console.log(`[platform-admin-bootstrap] User ${user.id} attempting bootstrap`);
+    console.log(`[platform-admin-bootstrap] User ${user.id} attempting atomic bootstrap`);
 
-    // Check if any platform admins exist
-    const { data: existingAdmins, error: countError } = await serviceClient
-      .from("platform_admins")
-      .select("user_id")
-      .limit(1);
+    // Call the atomic RPC function
+    const { data: result, error: rpcError } = await serviceClient.rpc("bootstrap_platform_admin", {
+      p_user_id: user.id,
+    });
 
-    if (countError) {
-      console.error("[platform-admin-bootstrap] Error checking admins:", countError);
+    if (rpcError) {
+      console.error("[platform-admin-bootstrap] RPC error:", rpcError);
       return new Response(
-        JSON.stringify({ error: "Failed to check existing admins" }),
+        JSON.stringify({ error: "Failed to execute bootstrap", details: rpcError.message }),
         { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
 
-    // If admins exist, deny the request
-    if (existingAdmins && existingAdmins.length > 0) {
-      console.log("[platform-admin-bootstrap] Admins already exist, denying bootstrap");
+    const { created, already_has_admin } = result as { created: boolean; already_has_admin: boolean };
+
+    console.log(`[platform-admin-bootstrap] Result: created=${created}, already_has_admin=${already_has_admin}`);
+
+    if (already_has_admin) {
       return new Response(
-        JSON.stringify({ 
+        JSON.stringify({
+          success: false,
           error: "Platform admin already exists. Bootstrap is only allowed when no admins exist.",
-          alreadyHasAdmin: true
+          alreadyHasAdmin: true,
+          created: false,
         }),
         { status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
 
-    // No admins exist - make this user the first admin
-    const { error: insertError } = await serviceClient
-      .from("platform_admins")
-      .insert({ user_id: user.id });
-
-    if (insertError) {
-      console.error("[platform-admin-bootstrap] Error inserting admin:", insertError);
+    if (created) {
+      console.log(`[platform-admin-bootstrap] User ${user.id} is now platform admin`);
       return new Response(
-        JSON.stringify({ error: "Failed to create platform admin" }),
-        { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        JSON.stringify({
+          success: true,
+          message: "You are now a platform administrator",
+          userId: user.id,
+          created: true,
+          alreadyHasAdmin: false,
+        }),
+        { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
 
-    console.log(`[platform-admin-bootstrap] User ${user.id} is now platform admin`);
-
+    // Edge case: user already is admin (ON CONFLICT DO NOTHING hit)
     return new Response(
-      JSON.stringify({ 
-        success: true, 
-        message: "You are now a platform administrator",
-        userId: user.id
+      JSON.stringify({
+        success: true,
+        message: "You are already a platform administrator",
+        userId: user.id,
+        created: false,
+        alreadyHasAdmin: false,
       }),
       { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );

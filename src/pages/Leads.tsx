@@ -97,6 +97,7 @@ export default function Leads() {
   const [bulkEnriching, setBulkEnriching] = useState(false);
   const [bulkEnrichProgress, setBulkEnrichProgress] = useState({ current: 0, total: 0 });
   const [bulkEnrichAccountId, setBulkEnrichAccountId] = useState<string>('');
+  const [forceReEnrich, setForceReEnrich] = useState(false);
 
   // Details drawer state
   const [selectedLeadId, setSelectedLeadId] = useState<string | null>(null);
@@ -415,15 +416,17 @@ export default function Leads() {
   async function handleBulkEnrich() {
     if (!currentWorkspace || !bulkEnrichAccountId) return;
     
-    // Filter leads with LinkedIn URL that haven't been enriched
+    // Filter leads with LinkedIn URL, optionally including already enriched
     const leadsToEnrich = leads.filter(
-      l => selectedLeads.has(l.id) && l.linkedin_url && !l.enriched_at
+      l => selectedLeads.has(l.id) && l.linkedin_url && (forceReEnrich || !l.enriched_at)
     );
     
     if (leadsToEnrich.length === 0) {
       toast({
         title: 'Nenhum lead para enriquecer',
-        description: 'Os leads selecionados já foram enriquecidos ou não possuem URL do LinkedIn.',
+        description: forceReEnrich 
+          ? 'Os leads selecionados não possuem URL do LinkedIn.'
+          : 'Os leads selecionados já foram enriquecidos ou não possuem URL do LinkedIn.',
         variant: 'destructive',
       });
       return;
@@ -872,6 +875,13 @@ export default function Leads() {
                                       ))}
                                     </SelectContent>
                                   </Select>
+                                </div>
+                                <div className="flex items-center justify-between">
+                                  <Label className="text-xs">Re-enriquecer já enriquecidos</Label>
+                                  <Switch 
+                                    checked={forceReEnrich} 
+                                    onCheckedChange={setForceReEnrich}
+                                  />
                                 </div>
                                 <Button
                                   className="w-full"

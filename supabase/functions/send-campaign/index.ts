@@ -674,8 +674,10 @@ serve(async (req) => {
             throw new Error(`Invalid LinkedIn URL format: ${linkedinUrl}`);
           }
 
-          // Resolve to provider_id via Unipile user lookup
-          const providerId = await resolveLinkedInProviderId(unipileDsn, unipileApiKey, unipileAccountId!, publicIdentifier);
+          // Resolve to provider_id AND connection_degree via Unipile user lookup
+          const profileResult = await resolveLinkedInProfile(unipileDsn, unipileApiKey, unipileAccountId!, publicIdentifier);
+          const providerId = profileResult.providerId;
+          const connectionDegree = profileResult.connectionDegree;
           
           if (!providerId) {
             throw new Error(`Could not resolve LinkedIn profile: ${publicIdentifier}`);
@@ -692,10 +694,43 @@ serve(async (req) => {
             // Uses JSON body, NOT FormData
             // ============================================
             
+            // CHECK IF ALREADY CONNECTED - Skip invite if connection_degree is 1
+            if (connectionDegree === 1) {
+              console.log(`[INVITE] Skipping ${publicIdentifier} - already connected (degree: 1)`);
+              
+              // Mark as skipped, not failed
+              await supabase
+                .from('campaign_leads')
+                .update({ 
+                  status: 'sent', 
+                  sent_at: new Date().toISOString(),
+                  error: null,
+                  skip_reason: 'already_connected',
+                })
+                .eq('id', cl.id);
+              
+              sentCount++;
+              results.push({ 
+                leadId: cl.lead_id, 
+                success: true, 
+                error: 'Já é conexão 1º grau - convite não enviado'
+              });
+              
+              // Apply interval before next lead
+              if (i < leadsToProcess.length - 1) {
+                const intervalMs = applyJitter(baseIntervalSeconds, minIntervalSeconds) * 1000;
+                console.log(`Waiting ${intervalMs}ms before next lead...`);
+                await new Promise(resolve => setTimeout(resolve, intervalMs));
+              }
+              continue; // Skip to next lead
+            }
+            
             // Validate providerId before sending
             if (!providerId) {
               throw new Error('Could not resolve provider_id for LinkedIn invite');
             }
+
+            // Build JSON body
 
             // Build JSON body
             const inviteBody: Record<string, string> = {
@@ -1008,14 +1043,20 @@ function extractLinkedInPublicIdentifier(linkedinUrl: string): string | null {
 }
 
 // ============================================
-// HELPER: Resolve LinkedIn public identifier to provider_id
+// HELPER: Resolve LinkedIn public identifier to provider_id AND connection_degree
 // ============================================
-async function resolveLinkedInProviderId(
+interface LinkedInLookupResult {
+  providerId: string | null;
+  connectionDegree: number | null;
+  error?: string;
+}
+
+async function resolveLinkedInProfile(
   unipileDsn: string, 
   unipileApiKey: string, 
   accountId: string, 
   publicIdentifier: string
-): Promise<string | null> {
+): Promise<LinkedInLookupResult> {
   try {
     const lookupUrl = `https://${unipileDsn}/api/v1/users/${encodeURIComponent(publicIdentifier)}?account_id=${accountId}`;
     console.log(`[LinkedIn Lookup] URL: ${lookupUrl}`);
@@ -1031,7 +1072,7 @@ async function resolveLinkedInProviderId(
     if (!response.ok) {
       const errorText = await response.text().catch(() => '');
       console.error(`[LinkedIn Lookup] Failed for ${publicIdentifier}: HTTP ${response.status} - ${errorText}`);
-      return null;
+      return { providerId: null, connectionDegree: null, error: `HTTP ${response.status}: ${errorText}` };
     }
 
     const data = await response.json();
@@ -1039,27 +1080,40 @@ async function resolveLinkedInProviderId(
       id: data.id,
       provider_id: data.provider_id,
       provider_messaging_id: data.provider_messaging_id,
+      connection_degree: data.connection_degree,
     }));
     
     // IMPORTANT: Use provider_id or id for invite endpoint
     // DO NOT use provider_messaging_id - it doesn't work for /users/invite
     const providerId = data.provider_id || data.id;
+    const connectionDegree = data.connection_degree ?? null;
     
     if (!providerId) {
       console.error(`[LinkedIn Lookup] No valid provider_id found for ${publicIdentifier}. Available fields: ${Object.keys(data).join(', ')}`);
-      return null;
+      return { providerId: null, connectionDegree, error: 'No provider_id found' };
     }
     
     // Validate that we're not returning provider_messaging_id by mistake
     if (providerId === data.provider_messaging_id && !data.provider_id && !data.id) {
       console.error(`[LinkedIn Lookup] Only provider_messaging_id available for ${publicIdentifier}, which doesn't work for invites`);
-      return null;
+      return { providerId: null, connectionDegree, error: 'Only provider_messaging_id available' };
     }
     
-    console.log(`[LinkedIn Lookup] Resolved ${publicIdentifier} -> provider_id: ${providerId}`);
-    return providerId;
+    console.log(`[LinkedIn Lookup] Resolved ${publicIdentifier} -> provider_id: ${providerId}, connection_degree: ${connectionDegree}`);
+    return { providerId, connectionDegree };
   } catch (error) {
     console.error(`[LinkedIn Lookup] Error for ${publicIdentifier}:`, error);
-    return null;
+    return { providerId: null, connectionDegree: null, error: String(error) };
   }
+}
+
+// Legacy wrapper for backward compatibility
+async function resolveLinkedInProviderId(
+  unipileDsn: string, 
+  unipileApiKey: string, 
+  accountId: string, 
+  publicIdentifier: string
+): Promise<string | null> {
+  const result = await resolveLinkedInProfile(unipileDsn, unipileApiKey, accountId, publicIdentifier);
+  return result.providerId;
 }

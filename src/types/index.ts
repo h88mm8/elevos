@@ -154,8 +154,28 @@ export interface WorkspaceSettings {
   linkedin_daily_message_limit: number;
   linkedin_daily_invite_limit: number;
   linkedin_message_interval_seconds: number;
+  // LinkedIn advanced settings
+  linkedin_daily_search_limit?: number;
+  linkedin_daily_profile_scrape_limit?: number;
+  linkedin_daily_like_limit?: number;
+  linkedin_daily_comment_limit?: number;
   created_at: string;
   updated_at: string;
+}
+
+export interface EngagementAction {
+  id: string;
+  workspace_id: string;
+  account_id: string;
+  lead_id: string | null;
+  linkedin_url: string;
+  post_id: string | null;
+  action_type: 'like' | 'comment' | 'view_profile';
+  comment_text: string | null;
+  status: 'pending' | 'done' | 'failed';
+  created_at: string;
+  executed_at: string | null;
+  error: string | null;
 }
 
 export interface CampaignLead {

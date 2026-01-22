@@ -159,6 +159,7 @@ export type Database = {
           retry_count: number
           seen_at: string | null
           sent_at: string | null
+          skip_reason: string | null
           status: string
         }
         Insert: {
@@ -173,6 +174,7 @@ export type Database = {
           retry_count?: number
           seen_at?: string | null
           sent_at?: string | null
+          skip_reason?: string | null
           status?: string
         }
         Update: {
@@ -187,6 +189,7 @@ export type Database = {
           retry_count?: number
           seen_at?: string | null
           sent_at?: string | null
+          skip_reason?: string | null
           status?: string
         }
         Relationships: [
@@ -391,6 +394,66 @@ export type Database = {
             foreignKeyName: "credits_workspace_id_fkey"
             columns: ["workspace_id"]
             isOneToOne: true
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      engagement_actions: {
+        Row: {
+          account_id: string
+          action_type: string
+          comment_text: string | null
+          created_at: string
+          error: string | null
+          executed_at: string | null
+          id: string
+          lead_id: string | null
+          linkedin_url: string
+          post_id: string | null
+          status: string
+          workspace_id: string
+        }
+        Insert: {
+          account_id: string
+          action_type: string
+          comment_text?: string | null
+          created_at?: string
+          error?: string | null
+          executed_at?: string | null
+          id?: string
+          lead_id?: string | null
+          linkedin_url: string
+          post_id?: string | null
+          status?: string
+          workspace_id: string
+        }
+        Update: {
+          account_id?: string
+          action_type?: string
+          comment_text?: string | null
+          created_at?: string
+          error?: string | null
+          executed_at?: string | null
+          id?: string
+          lead_id?: string | null
+          linkedin_url?: string
+          post_id?: string | null
+          status?: string
+          workspace_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "engagement_actions_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
+            referencedRelation: "leads"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "engagement_actions_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
             referencedRelation: "workspaces"
             referencedColumns: ["id"]
           },
@@ -819,8 +882,12 @@ export type Database = {
           created_at: string
           daily_message_limit: number
           id: string
+          linkedin_daily_comment_limit: number
           linkedin_daily_invite_limit: number
+          linkedin_daily_like_limit: number
           linkedin_daily_message_limit: number
+          linkedin_daily_profile_scrape_limit: number
+          linkedin_daily_search_limit: number
           linkedin_message_interval_seconds: number
           max_retries: number
           message_interval_seconds: number
@@ -831,8 +898,12 @@ export type Database = {
           created_at?: string
           daily_message_limit?: number
           id?: string
+          linkedin_daily_comment_limit?: number
           linkedin_daily_invite_limit?: number
+          linkedin_daily_like_limit?: number
           linkedin_daily_message_limit?: number
+          linkedin_daily_profile_scrape_limit?: number
+          linkedin_daily_search_limit?: number
           linkedin_message_interval_seconds?: number
           max_retries?: number
           message_interval_seconds?: number
@@ -843,8 +914,12 @@ export type Database = {
           created_at?: string
           daily_message_limit?: number
           id?: string
+          linkedin_daily_comment_limit?: number
           linkedin_daily_invite_limit?: number
+          linkedin_daily_like_limit?: number
           linkedin_daily_message_limit?: number
+          linkedin_daily_profile_scrape_limit?: number
+          linkedin_daily_search_limit?: number
           linkedin_message_interval_seconds?: number
           max_retries?: number
           message_interval_seconds?: number

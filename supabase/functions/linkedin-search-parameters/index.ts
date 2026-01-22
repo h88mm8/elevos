@@ -119,13 +119,13 @@ serve(async (req) => {
     const unipileDsn = Deno.env.get("UNIPILE_DSN")!;
     const unipileApiKey = Deno.env.get("UNIPILE_API_KEY")!;
 
-    // Map our types to Unipile parameter types
+    // Map our types to Unipile parameter types (per Unipile API docs)
     const unipileTypeMap: Record<ParameterType, string> = {
-      location: "REGIONS",
-      industry: "INDUSTRIES",
-      company: "CURRENT_COMPANY",
-      school: "SCHOOLS",
-      title: "CURRENT_TITLE",
+      location: "LOCATION",
+      industry: "INDUSTRY",
+      company: "COMPANY",
+      school: "SCHOOL",
+      title: "JOB_TITLE",
     };
 
     const unipileType = unipileTypeMap[parameterType];

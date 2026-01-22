@@ -11,11 +11,12 @@
 import { createClient } from '@supabase/supabase-js';
 
 // Configuration from environment
-const SUPABASE_URL = process.env.SUPABASE_URL!;
-const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_KEY!;
-const TEST_USER_EMAIL = process.env.TEST_USER_EMAIL!;
-const TEST_USER_PASSWORD = process.env.TEST_USER_PASSWORD!;
-const WORKSPACE_ID = process.env.WORKSPACE_ID!;
+const SUPABASE_URL = process.env.SUPABASE_URL;
+const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_KEY;
+const SUPABASE_ANON_KEY = process.env.SUPABASE_ANON_KEY;
+const TEST_USER_EMAIL = process.env.TEST_USER_EMAIL;
+const TEST_USER_PASSWORD = process.env.TEST_USER_PASSWORD;
+const WORKSPACE_ID = process.env.WORKSPACE_ID;
 
 const CONCURRENT_REQUESTS = 10;
 const TEST_LIMIT = 2;
@@ -38,9 +39,9 @@ async function main() {
   console.log('========================\n');
 
   // Validate environment
-  if (!SUPABASE_URL || !SUPABASE_SERVICE_KEY || !TEST_USER_EMAIL || !TEST_USER_PASSWORD || !WORKSPACE_ID) {
+  if (!SUPABASE_URL || !SUPABASE_SERVICE_KEY || !SUPABASE_ANON_KEY || !TEST_USER_EMAIL || !TEST_USER_PASSWORD || !WORKSPACE_ID) {
     console.error('❌ Missing required environment variables');
-    console.error('Required: SUPABASE_URL, SUPABASE_SERVICE_KEY, TEST_USER_EMAIL, TEST_USER_PASSWORD, WORKSPACE_ID');
+    console.error('Required: SUPABASE_URL, SUPABASE_SERVICE_KEY, SUPABASE_ANON_KEY, TEST_USER_EMAIL, TEST_USER_PASSWORD, WORKSPACE_ID');
     process.exit(1);
   }
 
@@ -49,8 +50,8 @@ async function main() {
     auth: { persistSession: false }
   });
 
-  // Create user client for actual test
-  const userClient = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY.replace(SUPABASE_SERVICE_KEY, process.env.SUPABASE_ANON_KEY || SUPABASE_SERVICE_KEY), {
+  // Create user client for authentication (uses anon key)
+  const userClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
     auth: { persistSession: false }
   });
 
@@ -97,13 +98,17 @@ async function main() {
 
     // Step 4: Clear today's usage events for clean test
     console.log('\n🧹 Clearing today\'s usage events for this workspace...');
-    const today = new Date().toISOString().split('T')[0];
+    // Use start of day in UTC to avoid timezone issues
+    const todayStart = new Date();
+    todayStart.setUTCHours(0, 0, 0, 0);
+    const todayISO = todayStart.toISOString();
+    
     const { error: deleteError } = await adminClient
       .from('usage_events')
       .delete()
       .eq('workspace_id', WORKSPACE_ID)
       .in('action', ['linkedin_search_page', 'linkedin_search_page_blocked'])
-      .gte('created_at', today);
+      .gte('created_at', todayISO);
 
     if (deleteError) {
       console.warn('⚠️ Could not clear usage events:', deleteError.message);
@@ -181,7 +186,7 @@ async function fireConurrentRequests(accessToken: string, workspaceId: string): 
         headers: {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${accessToken}`,
-          'apikey': process.env.SUPABASE_ANON_KEY || SUPABASE_SERVICE_KEY
+          'apikey': SUPABASE_ANON_KEY!
         },
         body: JSON.stringify({
           workspaceId,
@@ -214,14 +219,17 @@ async function fireConurrentRequests(accessToken: string, workspaceId: string): 
 }
 
 async function validateUsageEvents(client: any, workspaceId: string): Promise<UsageValidation> {
-  const today = new Date().toISOString().split('T')[0];
+  // Use start of day in UTC to avoid timezone issues
+  const todayStart = new Date();
+  todayStart.setUTCHours(0, 0, 0, 0);
+  const todayISO = todayStart.toISOString();
 
   const { data, error } = await client
     .from('usage_events')
     .select('action, count')
     .eq('workspace_id', workspaceId)
     .in('action', ['linkedin_search_page', 'linkedin_search_page_blocked'])
-    .gte('created_at', today);
+    .gte('created_at', todayISO);
 
   if (error) {
     console.error('❌ Failed to query usage_events:', error.message);

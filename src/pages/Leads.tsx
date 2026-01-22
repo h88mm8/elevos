@@ -942,11 +942,12 @@ export default function Leads() {
                       </TableHead>
                       <TableHead>Nome</TableHead>
                       <TableHead>Tags</TableHead>
-                      <TableHead>Email</TableHead>
-                      <TableHead>Celular</TableHead>
                       <TableHead>Empresa</TableHead>
                       <TableHead>Cargo</TableHead>
+                      <TableHead>Indústria</TableHead>
                       <TableHead>Localização</TableHead>
+                      <TableHead>Email</TableHead>
+                      <TableHead>Celular</TableHead>
                       <TableHead>LinkedIn</TableHead>
                       <TableHead className="w-32">Ações</TableHead>
                     </TableRow>
@@ -961,10 +962,15 @@ export default function Leads() {
                           />
                         </TableCell>
                         <TableCell className="font-medium">
-                          <div className="flex flex-col">
-                            <span>{lead.full_name || '-'}</span>
+                          <div className="flex flex-col gap-0.5">
+                            <div className="flex items-center gap-1.5">
+                              <span>{lead.full_name || '-'}</span>
+                              {lead.enriched_at && (
+                                <span title="Enriquecido"><Sparkles className="h-3 w-3 text-primary" /></span>
+                              )}
+                            </div>
                             {lead.headline && (
-                              <span className="text-xs text-muted-foreground truncate max-w-[200px]">
+                              <span className="text-xs text-muted-foreground truncate max-w-[250px]">
                                 {lead.headline}
                               </span>
                             )}
@@ -981,51 +987,60 @@ export default function Leads() {
                           </div>
                         </TableCell>
                         <TableCell>
-                          {lead.email ? (
-                            <span className="text-sm">{lead.email}</span>
-                          ) : (
-                            <span className="text-muted-foreground">-</span>
-                          )}
-                        </TableCell>
-                        <TableCell>
-                          {lead.mobile_number ? (
-                            <Badge variant="secondary" className="gap-1">
-                              <Phone className="h-3 w-3" />
-                              {lead.mobile_number}
-                            </Badge>
-                          ) : (
-                            <span className="text-muted-foreground">-</span>
-                          )}
-                        </TableCell>
-                        <TableCell>
-                          <div className="flex flex-col">
+                          <div className="flex flex-col gap-0.5">
                             <div className="flex items-center gap-1">
-                              <Building2 className="h-3 w-3 text-muted-foreground" />
-                              <span>{lead.company || '-'}</span>
+                              <Building2 className="h-3 w-3 text-muted-foreground shrink-0" />
+                              <span className="truncate max-w-[150px]">{lead.company || '-'}</span>
                             </div>
-                            {lead.company_size && (
-                              <Badge variant="outline" className="w-fit mt-1 text-xs">
-                                {lead.company_size}
-                              </Badge>
+                            {(lead.company_size || lead.company_industry) && (
+                              <div className="flex flex-wrap gap-1">
+                                {lead.company_size && (
+                                  <Badge variant="outline" className="text-xs py-0">
+                                    {lead.company_size}
+                                  </Badge>
+                                )}
+                              </div>
                             )}
                           </div>
                         </TableCell>
                         <TableCell>
-                          <div className="flex flex-col">
-                            <span>{lead.job_title || '-'}</span>
+                          <div className="flex flex-col gap-0.5">
+                            <span className="truncate max-w-[150px]">{lead.job_title || '-'}</span>
                             {lead.seniority_level && (
-                              <Badge variant="secondary" className="w-fit mt-1 text-xs">
+                              <Badge variant="secondary" className="w-fit text-xs py-0">
                                 {lead.seniority_level}
                               </Badge>
                             )}
                           </div>
                         </TableCell>
                         <TableCell>
+                          <span className="text-sm truncate max-w-[120px] block">
+                            {lead.industry || lead.company_industry || '-'}
+                          </span>
+                        </TableCell>
+                        <TableCell>
                           {getLocation(lead) ? (
                             <div className="flex items-center gap-1 text-sm">
-                              <MapPin className="h-3 w-3 text-muted-foreground" />
-                              <span className="truncate max-w-[150px]">{getLocation(lead)}</span>
+                              <MapPin className="h-3 w-3 text-muted-foreground shrink-0" />
+                              <span className="truncate max-w-[130px]">{getLocation(lead)}</span>
                             </div>
+                          ) : (
+                            <span className="text-muted-foreground">-</span>
+                          )}
+                        </TableCell>
+                        <TableCell>
+                          {lead.email ? (
+                            <span className="text-sm truncate max-w-[150px] block">{lead.email}</span>
+                          ) : (
+                            <span className="text-muted-foreground">-</span>
+                          )}
+                        </TableCell>
+                        <TableCell>
+                          {lead.mobile_number || lead.phone ? (
+                            <Badge variant="secondary" className="gap-1">
+                              <Phone className="h-3 w-3" />
+                              {lead.mobile_number || lead.phone}
+                            </Badge>
                           ) : (
                             <span className="text-muted-foreground">-</span>
                           )}
@@ -1038,7 +1053,7 @@ export default function Leads() {
                               rel="noopener noreferrer"
                               className="text-primary hover:underline inline-flex items-center gap-1"
                             >
-                              <ExternalLink className="h-3 w-3" />
+                              <Linkedin className="h-3.5 w-3.5" />
                               Perfil
                             </a>
                           ) : (

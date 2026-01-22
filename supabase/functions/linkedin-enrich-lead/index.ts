@@ -194,48 +194,62 @@ serve(async (req) => {
     }
 
     const profileData = await profileResponse.json();
-    console.log("[linkedin-enrich-lead] Profile data received for:", profileData.name);
+    console.log("[linkedin-enrich-lead] Full profile data:", JSON.stringify(profileData, null, 2));
 
     // Prepare update object
     const updateData: Record<string, unknown> = {
       enriched_at: new Date().toISOString(),
     };
 
-    // Map profile fields
-    if (profileData.name) updateData.full_name = profileData.name;
-    if (profileData.first_name) updateData.first_name = profileData.first_name;
-    if (profileData.last_name) updateData.last_name = profileData.last_name;
+    // Map profile fields - handle different field naming conventions from Unipile
+    const fullName = profileData.name || profileData.full_name || profileData.displayName;
+    if (fullName) updateData.full_name = fullName;
+    
+    const firstName = profileData.first_name || profileData.firstName;
+    if (firstName) updateData.first_name = firstName;
+    
+    const lastName = profileData.last_name || profileData.lastName;
+    if (lastName) updateData.last_name = lastName;
+    
     if (profileData.headline) updateData.headline = profileData.headline;
     if (profileData.industry) updateData.industry = profileData.industry;
     
-    // Location parsing
-    if (profileData.location) {
-      const location = profileData.location;
-      if (typeof location === "string") {
+    // Location parsing - handle multiple formats
+    const locationData = profileData.location || profileData.geo_location;
+    if (locationData) {
+      if (typeof locationData === "string") {
         // Try to parse "City, State, Country" format
-        const parts = location.split(",").map((p: string) => p.trim());
+        const parts = locationData.split(",").map((p: string) => p.trim());
         if (parts.length >= 1) updateData.city = parts[0];
         if (parts.length >= 2) updateData.state = parts[1];
         if (parts.length >= 3) updateData.country = parts[2];
-      } else if (typeof location === "object") {
-        if (location.city) updateData.city = location.city;
-        if (location.state) updateData.state = location.state;
-        if (location.country) updateData.country = location.country;
+      } else if (typeof locationData === "object") {
+        if (locationData.city) updateData.city = locationData.city;
+        if (locationData.state || locationData.region) updateData.state = locationData.state || locationData.region;
+        if (locationData.country || locationData.country_name) updateData.country = locationData.country || locationData.country_name;
       }
     }
 
-    // Current position
-    if (profileData.current_positions && profileData.current_positions.length > 0) {
-      const currentPosition = profileData.current_positions[0];
-      if (currentPosition.title) updateData.job_title = currentPosition.title;
-      if (currentPosition.company_name) updateData.company = currentPosition.company_name;
-      if (currentPosition.company_linkedin_url) {
-        updateData.company_linkedin = currentPosition.company_linkedin_url;
-      }
+    // Current position - handle multiple field naming conventions
+    const positions = profileData.current_positions || profileData.positions || profileData.experience;
+    if (positions && Array.isArray(positions) && positions.length > 0) {
+      const currentPosition = positions[0];
+      const jobTitle = currentPosition.title || currentPosition.job_title || currentPosition.position;
+      const companyName = currentPosition.company_name || currentPosition.companyName || currentPosition.company;
+      const companyLinkedIn = currentPosition.company_linkedin_url || currentPosition.companyLinkedInUrl || currentPosition.company_url;
+      
+      if (jobTitle) updateData.job_title = jobTitle;
+      if (companyName) updateData.company = companyName;
+      if (companyLinkedIn) updateData.company_linkedin = companyLinkedIn;
     }
+    
+    // Also check for direct occupation/company fields (some APIs return these directly)
+    if (!updateData.job_title && profileData.occupation) updateData.job_title = profileData.occupation;
+    if (!updateData.company && profileData.company) updateData.company = profileData.company;
 
     // Seniority
-    if (profileData.seniority) updateData.seniority_level = profileData.seniority;
+    const seniority = profileData.seniority || profileData.seniority_level;
+    if (seniority) updateData.seniority_level = seniority;
 
     // Try to get company data if we have company LinkedIn
     const companyLinkedIn = updateData.company_linkedin as string || lead.company_linkedin;

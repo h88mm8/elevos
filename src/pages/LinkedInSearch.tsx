@@ -1,9 +1,18 @@
-import { useState, useCallback, useMemo } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useState, useCallback, useMemo, useEffect } from 'react';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { useLeadLists } from '@/hooks/useLeadLists';
-import { useLinkedInSearch, LinkedInSearchResult, LinkedInSearchFilters } from '@/hooks/useLinkedInSearch';
+import { 
+  useLinkedInSearch, 
+  LinkedInSearchResult, 
+  LinkedInSearchFilters,
+  emptyFilters 
+} from '@/hooks/useLinkedInSearch';
+import { useSavedSearches, SavedSearch } from '@/hooks/useSavedSearches';
+import { AutocompleteOption } from '@/hooks/useLinkedInAutocomplete';
 import AppLayout from '@/components/layout/AppLayout';
+import { LinkedInAutocomplete } from '@/components/linkedin/LinkedInAutocomplete';
+import { SavedSearchesDropdown } from '@/components/linkedin/SavedSearchesDropdown';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -11,6 +20,8 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { ScrollArea } from '@/components/ui/scroll-area';
+import { Separator } from '@/components/ui/separator';
 import {
   Select,
   SelectContent,
@@ -18,6 +29,11 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from '@/components/ui/collapsible';
 import { Textarea } from '@/components/ui/textarea';
 import { useToast } from '@/hooks/use-toast';
 import { supabase } from '@/integrations/supabase/client';
@@ -30,11 +46,17 @@ import {
   ExternalLink,
   ChevronLeft,
   ChevronRight,
+  ChevronDown,
   X,
   Download,
   AlertCircle,
   FolderPlus,
   FolderOpen,
+  RefreshCw,
+  Trash2,
+  GraduationCap,
+  Briefcase,
+  Factory,
 } from 'lucide-react';
 
 // Custom LinkedIn icon
@@ -46,11 +68,51 @@ function LinkedInIcon({ className }: { className?: string }) {
   );
 }
 
+// Serialize filters to URL params
+function filtersToParams(filters: LinkedInSearchFilters): URLSearchParams {
+  const params = new URLSearchParams();
+  if (filters.keywords) params.set('keywords', filters.keywords);
+  if (filters.title) params.set('title', filters.title);
+  if (filters.company) params.set('company', filters.company);
+  if (filters.location) params.set('location', filters.location);
+  if (filters.locationIds.length) params.set('locationIds', JSON.stringify(filters.locationIds));
+  if (filters.companyIds.length) params.set('companyIds', JSON.stringify(filters.companyIds));
+  if (filters.industryIds.length) params.set('industryIds', JSON.stringify(filters.industryIds));
+  if (filters.schoolIds.length) params.set('schoolIds', JSON.stringify(filters.schoolIds));
+  if (filters.titleIds.length) params.set('titleIds', JSON.stringify(filters.titleIds));
+  return params;
+}
+
+// Parse filters from URL params
+function paramsToFilters(params: URLSearchParams): LinkedInSearchFilters {
+  const parseJson = (key: string): AutocompleteOption[] => {
+    try {
+      const val = params.get(key);
+      return val ? JSON.parse(val) : [];
+    } catch {
+      return [];
+    }
+  };
+  
+  return {
+    keywords: params.get('keywords') || '',
+    title: params.get('title') || '',
+    company: params.get('company') || '',
+    location: params.get('location') || '',
+    locationIds: parseJson('locationIds'),
+    companyIds: parseJson('companyIds'),
+    industryIds: parseJson('industryIds'),
+    schoolIds: parseJson('schoolIds'),
+    titleIds: parseJson('titleIds'),
+  };
+}
+
 export default function LinkedInSearch() {
-  const { currentWorkspace } = useAuth();
+  const { currentWorkspace, user } = useAuth();
   const { lists, createList, refetchLists } = useLeadLists();
   const { toast } = useToast();
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
 
   // Search hook
   const { 
@@ -59,24 +121,32 @@ export default function LinkedInSearch() {
     isSearching, 
     hasMore, 
     error,
+    usage,
     search, 
     clearResults 
   } = useLinkedInSearch({ workspaceId: currentWorkspace?.id });
 
-  // Filters state
-  const [filters, setFilters] = useState<LinkedInSearchFilters>({
-    keywords: '',
-    title: '',
-    company: '',
-    location: '',
-  });
+  // Saved searches hook
+  const {
+    searches: savedSearches,
+    isLoading: isSavedSearchesLoading,
+    isSaving,
+    saveSearch,
+    deleteSearch,
+    markAsRun,
+  } = useSavedSearches({ workspaceId: currentWorkspace?.id });
 
-  // Pagination state - track current and previous cursors
+  // Filters state - initialize from URL
+  const [filters, setFilters] = useState<LinkedInSearchFilters>(() => 
+    paramsToFilters(searchParams)
+  );
+
+  // Pagination state
   const [cursorHistory, setCursorHistory] = useState<string[]>([]);
   const [currentPage, setCurrentPage] = useState(1);
 
-  // Selection state - persists across pages
-  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  // Selection state - MAP that stores complete lead data across pages
+  const [selectedLeadsMap, setSelectedLeadsMap] = useState<Map<string, LinkedInSearchResult>>(new Map());
 
   // Import state
   const [isImporting, setIsImporting] = useState(false);
@@ -85,7 +155,12 @@ export default function LinkedInSearch() {
   const [newListName, setNewListName] = useState('');
   const [newListDescription, setNewListDescription] = useState('');
 
-  // Check if we have searched at least once
+  // Section open states
+  const [basicOpen, setBasicOpen] = useState(true);
+  const [companyOpen, setCompanyOpen] = useState(true);
+  const [profileOpen, setProfileOpen] = useState(true);
+
+  // Check if we have searched
   const [hasSearched, setHasSearched] = useState(false);
 
   // Get unique identifier for a result
@@ -96,20 +171,46 @@ export default function LinkedInSearch() {
   // Check if all current page results are selected
   const allPageSelected = useMemo(() => {
     if (results.length === 0) return false;
-    return results.every(r => selectedIds.has(getResultId(r)));
-  }, [results, selectedIds, getResultId]);
+    return results.every(r => selectedLeadsMap.has(getResultId(r)));
+  }, [results, selectedLeadsMap, getResultId]);
 
   // Count of current page selected
   const pageSelectedCount = useMemo(() => {
-    return results.filter(r => selectedIds.has(getResultId(r))).length;
-  }, [results, selectedIds, getResultId]);
+    return results.filter(r => selectedLeadsMap.has(getResultId(r))).length;
+  }, [results, selectedLeadsMap, getResultId]);
+
+  // Total selected count
+  const totalSelectedCount = selectedLeadsMap.size;
+
+  // Check if filters have any value
+  const hasActiveFilters = useMemo(() => {
+    return (
+      filters.keywords.trim() !== '' ||
+      filters.title.trim() !== '' ||
+      filters.company.trim() !== '' ||
+      filters.location.trim() !== '' ||
+      filters.locationIds.length > 0 ||
+      filters.companyIds.length > 0 ||
+      filters.industryIds.length > 0 ||
+      filters.schoolIds.length > 0 ||
+      filters.titleIds.length > 0
+    );
+  }, [filters]);
+
+  const canSearch = hasActiveFilters;
+
+  // Update URL when filters change
+  useEffect(() => {
+    const params = filtersToParams(filters);
+    setSearchParams(params, { replace: true });
+  }, [filters, setSearchParams]);
 
   // Handle search
   const handleSearch = useCallback(async () => {
-    if (!filters.keywords.trim() && !filters.title.trim() && !filters.company.trim()) {
+    if (!canSearch) {
       toast({
         title: 'Filtros obrigatórios',
-        description: 'Preencha pelo menos um filtro (palavras-chave, cargo ou empresa).',
+        description: 'Preencha pelo menos um filtro para buscar.',
         variant: 'destructive',
       });
       return;
@@ -119,16 +220,16 @@ export default function LinkedInSearch() {
     setCurrentPage(1);
     setHasSearched(true);
     await search(filters);
-  }, [filters, search, toast]);
+  }, [filters, search, toast, canSearch]);
 
   // Handle clear filters
   const handleClear = useCallback(() => {
-    setFilters({ keywords: '', title: '', company: '', location: '' });
+    setFilters(emptyFilters);
     clearResults();
     setCursorHistory([]);
     setCurrentPage(1);
     setHasSearched(false);
-    setSelectedIds(new Set());
+    setSelectedLeadsMap(new Map());
   }, [clearResults]);
 
   // Handle next page
@@ -144,25 +245,24 @@ export default function LinkedInSearch() {
     if (cursorHistory.length === 0) return;
     
     const newHistory = [...cursorHistory];
-    newHistory.pop(); // Remove current page's cursor
+    newHistory.pop();
     const prevCursor = newHistory.length > 0 ? newHistory[newHistory.length - 1] : undefined;
     
-    setCursorHistory(newHistory.slice(0, -1)); // Remove the last one we're going back to
+    setCursorHistory(newHistory.slice(0, -1));
     setCurrentPage(prev => Math.max(1, prev - 1));
     
-    // If going back to page 1, search without cursor
     await search(filters, prevCursor);
   }, [cursorHistory, filters, search]);
 
-  // Toggle single selection
+  // Toggle single selection - stores complete lead data
   const toggleSelect = useCallback((result: LinkedInSearchResult) => {
     const id = getResultId(result);
-    setSelectedIds(prev => {
-      const next = new Set(prev);
+    setSelectedLeadsMap(prev => {
+      const next = new Map(prev);
       if (next.has(id)) {
         next.delete(id);
       } else {
-        next.add(id);
+        next.set(id, result);
       }
       return next;
     });
@@ -171,27 +271,30 @@ export default function LinkedInSearch() {
   // Toggle all on current page
   const toggleAllPage = useCallback(() => {
     if (allPageSelected) {
-      // Deselect all on current page
-      setSelectedIds(prev => {
-        const next = new Set(prev);
+      setSelectedLeadsMap(prev => {
+        const next = new Map(prev);
         results.forEach(r => next.delete(getResultId(r)));
         return next;
       });
     } else {
-      // Select all on current page
-      setSelectedIds(prev => {
-        const next = new Set(prev);
-        results.forEach(r => next.add(getResultId(r)));
+      setSelectedLeadsMap(prev => {
+        const next = new Map(prev);
+        results.forEach(r => next.set(getResultId(r), r));
         return next;
       });
     }
   }, [allPageSelected, results, getResultId]);
 
-  // Handle import
+  // Clear all selections
+  const clearSelection = useCallback(() => {
+    setSelectedLeadsMap(new Map());
+  }, []);
+
+  // Handle import - uses selectedLeadsMap which has all data
   const handleImport = useCallback(async () => {
     if (!currentWorkspace) return;
     
-    if (selectedIds.size === 0) {
+    if (totalSelectedCount === 0) {
       toast({
         title: 'Selecione leads',
         description: 'Escolha pelo menos um lead para importar.',
@@ -200,7 +303,6 @@ export default function LinkedInSearch() {
       return;
     }
 
-    // Validate list selection
     if (listMode === 'new' && !newListName.trim()) {
       toast({
         title: 'Nome obrigatório',
@@ -222,20 +324,8 @@ export default function LinkedInSearch() {
     setIsImporting(true);
 
     try {
-      // Get selected leads from current results that are selected
-      // Note: We only have access to current page results, but selection persists
-      // For MVP, we import what's visible and selected on current page
-      const selectedResults = results.filter(r => selectedIds.has(getResultId(r)));
-
-      if (selectedResults.length === 0) {
-        toast({
-          title: 'Leads não encontrados',
-          description: 'Os leads selecionados não estão na página atual. Navegue para a página com os leads selecionados.',
-          variant: 'destructive',
-        });
-        setIsImporting(false);
-        return;
-      }
+      // Get all selected leads from the Map
+      const selectedResults = Array.from(selectedLeadsMap.values());
 
       // Create list if needed
       let targetListId = selectedListId;
@@ -247,7 +337,7 @@ export default function LinkedInSearch() {
         targetListId = newList.id;
       }
 
-      // Insert leads with deduplication by linkedin_url or provider_id
+      // Insert leads
       const leadsToInsert = selectedResults.map(lead => ({
         workspace_id: currentWorkspace.id,
         list_id: targetListId,
@@ -274,14 +364,8 @@ export default function LinkedInSearch() {
         description: `${selectedResults.length} leads importados com sucesso.`,
       });
 
-      // Clear selection for imported leads
-      setSelectedIds(prev => {
-        const next = new Set(prev);
-        selectedResults.forEach(r => next.delete(getResultId(r)));
-        return next;
-      });
-
-      // Reset form
+      // Clear selection
+      setSelectedLeadsMap(new Map());
       setNewListName('');
       setNewListDescription('');
       setSelectedListId('');
@@ -298,25 +382,41 @@ export default function LinkedInSearch() {
     }
   }, [
     currentWorkspace,
-    selectedIds,
+    totalSelectedCount,
     listMode,
     newListName,
     newListDescription,
     selectedListId,
-    results,
-    getResultId,
+    selectedLeadsMap,
     createList,
     refetchLists,
     toast,
   ]);
 
-  const canSearch = filters.keywords.trim() || filters.title.trim() || filters.company.trim();
+  // Load saved search
+  const handleLoadSavedSearch = useCallback((savedSearch: SavedSearch) => {
+    const loadedFilters = savedSearch.filters_json as LinkedInSearchFilters;
+    setFilters({
+      ...emptyFilters,
+      ...loadedFilters,
+    });
+    markAsRun(savedSearch.id);
+    toast({
+      title: 'Pesquisa carregada',
+      description: `"${savedSearch.name}" foi carregada. Clique em Buscar para executar.`,
+    });
+  }, [markAsRun, toast]);
+
+  // Save current search
+  const handleSaveSearch = useCallback(async (name: string, isShared: boolean) => {
+    await saveSearch(name, filters, 'classic', isShared);
+  }, [saveSearch, filters]);
 
   return (
     <AppLayout>
       <div className="h-full flex flex-col">
         {/* Header */}
-        <div className="flex-shrink-0 flex items-center justify-between mb-6">
+        <div className="flex-shrink-0 flex items-center justify-between mb-4">
           <div className="flex items-center gap-3">
             <Button variant="ghost" size="icon" onClick={() => navigate('/leads')}>
               <ChevronLeft className="h-5 w-5" />
@@ -327,192 +427,309 @@ export default function LinkedInSearch() {
                 Buscar no LinkedIn
               </h1>
               <p className="text-muted-foreground text-sm">
-                Encontre leads no LinkedIn e importe para suas listas
+                Encontre leads e importe para suas listas
               </p>
             </div>
           </div>
           
-          {selectedIds.size > 0 && (
-            <Badge variant="secondary" className="text-base px-3 py-1">
-              {selectedIds.size} selecionado{selectedIds.size !== 1 ? 's' : ''}
-            </Badge>
-          )}
+          <div className="flex items-center gap-3">
+            {/* Usage indicator */}
+            {usage && (
+              <Badge variant="outline" className="text-xs">
+                {usage.current}/{usage.limit} buscas hoje
+              </Badge>
+            )}
+            
+            {/* Saved searches */}
+            <SavedSearchesDropdown
+              searches={savedSearches}
+              isLoading={isSavedSearchesLoading}
+              isSaving={isSaving}
+              onLoad={handleLoadSavedSearch}
+              onSave={handleSaveSearch}
+              onDelete={deleteSearch}
+              hasActiveFilters={hasActiveFilters}
+            />
+          </div>
         </div>
+
+        {/* Selection bar */}
+        {totalSelectedCount > 0 && (
+          <div className="flex-shrink-0 flex items-center justify-between bg-primary/10 border border-primary/20 rounded-lg px-4 py-2 mb-4">
+            <div className="flex items-center gap-3">
+              <Badge className="text-sm px-3 py-1">
+                {totalSelectedCount} selecionado{totalSelectedCount !== 1 ? 's' : ''}
+              </Badge>
+              <span className="text-sm text-muted-foreground">
+                {pageSelectedCount > 0 && `(${pageSelectedCount} desta página)`}
+              </span>
+            </div>
+            <div className="flex items-center gap-2">
+              <Button variant="ghost" size="sm" onClick={clearSelection}>
+                <Trash2 className="h-4 w-4 mr-1" />
+                Limpar seleção
+              </Button>
+            </div>
+          </div>
+        )}
 
         {/* Main content - two columns */}
         <div className="flex-1 flex gap-6 min-h-0">
           {/* Left sidebar - filters */}
           <div className="w-80 flex-shrink-0">
-            <div className="sticky top-0 space-y-4">
-              <Card>
-                <CardHeader className="pb-4">
-                  <CardTitle className="text-lg flex items-center gap-2">
-                    <Search className="h-4 w-4" />
-                    Filtros de Busca
-                  </CardTitle>
-                </CardHeader>
-                <CardContent className="space-y-4">
-                  <div className="space-y-2">
-                    <Label htmlFor="keywords">Palavras-chave</Label>
-                    <Input
-                      id="keywords"
-                      placeholder="Ex: marketing digital"
-                      value={filters.keywords}
-                      onChange={e => setFilters(prev => ({ ...prev, keywords: e.target.value }))}
-                      disabled={isSearching}
-                    />
-                  </div>
-
-                  <div className="space-y-2">
-                    <Label htmlFor="title">Cargo</Label>
-                    <Input
-                      id="title"
-                      placeholder="Ex: CEO, Diretor"
-                      value={filters.title}
-                      onChange={e => setFilters(prev => ({ ...prev, title: e.target.value }))}
-                      disabled={isSearching}
-                    />
-                  </div>
-
-                  <div className="space-y-2">
-                    <Label htmlFor="company">Empresa</Label>
-                    <Input
-                      id="company"
-                      placeholder="Ex: Google, Microsoft"
-                      value={filters.company}
-                      onChange={e => setFilters(prev => ({ ...prev, company: e.target.value }))}
-                      disabled={isSearching}
-                    />
-                  </div>
-
-                  <div className="space-y-2">
-                    <Label htmlFor="location">Localização</Label>
-                    <Input
-                      id="location"
-                      placeholder="Ex: São Paulo, Brasil"
-                      value={filters.location}
-                      onChange={e => setFilters(prev => ({ ...prev, location: e.target.value }))}
-                      disabled={isSearching}
-                    />
-                  </div>
-
-                  <div className="flex gap-2 pt-2">
-                    <Button
-                      onClick={handleSearch}
-                      disabled={!canSearch || isSearching}
-                      className="flex-1"
-                    >
-                      {isSearching ? (
-                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                      ) : (
-                        <Search className="mr-2 h-4 w-4" />
-                      )}
-                      Buscar
-                    </Button>
-                    <Button
-                      variant="outline"
-                      onClick={handleClear}
-                      disabled={isSearching}
-                    >
-                      <X className="h-4 w-4" />
-                    </Button>
-                  </div>
-                </CardContent>
-              </Card>
-
-              {/* Save to list section */}
-              {selectedIds.size > 0 && (
-                <Card>
-                  <CardHeader className="pb-4">
-                    <CardTitle className="text-lg flex items-center gap-2">
-                      <Download className="h-4 w-4" />
-                      Salvar em Lista
-                    </CardTitle>
-                    <CardDescription>
-                      Importe os {selectedIds.size} lead{selectedIds.size !== 1 ? 's' : ''} selecionado{selectedIds.size !== 1 ? 's' : ''}
-                    </CardDescription>
-                  </CardHeader>
-                  <CardContent className="space-y-4">
-                    <Tabs value={listMode} onValueChange={(v) => setListMode(v as 'new' | 'existing')}>
-                      <TabsList className="grid w-full grid-cols-2">
-                        <TabsTrigger value="new" className="flex items-center gap-1">
-                          <FolderPlus className="h-3 w-3" />
-                          Nova
-                        </TabsTrigger>
-                        <TabsTrigger value="existing" className="flex items-center gap-1">
-                          <FolderOpen className="h-3 w-3" />
-                          Existente
-                        </TabsTrigger>
-                      </TabsList>
-                      
-                      <TabsContent value="new" className="space-y-3 mt-3">
+            <ScrollArea className="h-full pr-4">
+              <div className="space-y-4">
+                {/* Basic filters */}
+                <Collapsible open={basicOpen} onOpenChange={setBasicOpen}>
+                  <Card>
+                    <CollapsibleTrigger asChild>
+                      <CardHeader className="pb-3 cursor-pointer hover:bg-muted/50 rounded-t-lg">
+                        <CardTitle className="text-sm flex items-center justify-between">
+                          <span className="flex items-center gap-2">
+                            <Search className="h-4 w-4" />
+                            Básico
+                          </span>
+                          <ChevronDown className={`h-4 w-4 transition-transform ${basicOpen ? '' : '-rotate-90'}`} />
+                        </CardTitle>
+                      </CardHeader>
+                    </CollapsibleTrigger>
+                    <CollapsibleContent>
+                      <CardContent className="space-y-4 pt-0">
                         <div className="space-y-2">
-                          <Label htmlFor="new-list-name">Nome da lista *</Label>
+                          <Label htmlFor="keywords">Palavras-chave</Label>
                           <Input
-                            id="new-list-name"
-                            placeholder="Ex: CEOs Brasil 2024"
-                            value={newListName}
-                            onChange={e => setNewListName(e.target.value)}
-                            disabled={isImporting}
+                            id="keywords"
+                            placeholder="Ex: marketing digital"
+                            value={filters.keywords}
+                            onChange={e => setFilters(prev => ({ ...prev, keywords: e.target.value }))}
+                            disabled={isSearching}
                           />
                         </div>
-                        <div className="space-y-2">
-                          <Label htmlFor="new-list-desc">Descrição (opcional)</Label>
-                          <Textarea
-                            id="new-list-desc"
-                            placeholder="Detalhes sobre a busca..."
-                            value={newListDescription}
-                            onChange={e => setNewListDescription(e.target.value)}
-                            disabled={isImporting}
-                            rows={2}
-                          />
-                        </div>
-                      </TabsContent>
-                      
-                      <TabsContent value="existing" className="mt-3">
-                        <div className="space-y-2">
-                          <Label>Selecione a lista</Label>
-                          <Select
-                            value={selectedListId}
-                            onValueChange={setSelectedListId}
-                            disabled={isImporting}
-                          >
-                            <SelectTrigger>
-                              <SelectValue placeholder="Escolha uma lista" />
-                            </SelectTrigger>
-                            <SelectContent>
-                              {lists.map(list => (
-                                <SelectItem key={list.id} value={list.id}>
-                                  {list.name}
-                                </SelectItem>
-                              ))}
-                              {lists.length === 0 && (
-                                <div className="px-2 py-4 text-center text-sm text-muted-foreground">
-                                  Nenhuma lista encontrada
-                                </div>
-                              )}
-                            </SelectContent>
-                          </Select>
-                        </div>
-                      </TabsContent>
-                    </Tabs>
 
-                    <Button
-                      onClick={handleImport}
-                      disabled={isImporting || selectedIds.size === 0}
-                      className="w-full"
-                    >
-                      {isImporting ? (
-                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                      ) : (
-                        <Download className="mr-2 h-4 w-4" />
-                      )}
-                      Importar {selectedIds.size} lead{selectedIds.size !== 1 ? 's' : ''}
-                    </Button>
-                  </CardContent>
-                </Card>
-              )}
-            </div>
+                        <div className="space-y-2">
+                          <Label>Localização</Label>
+                          <LinkedInAutocomplete
+                            workspaceId={currentWorkspace?.id}
+                            type="location"
+                            placeholder="Buscar localização..."
+                            value={filters.locationIds}
+                            onChange={val => setFilters(prev => ({ ...prev, locationIds: val, location: '' }))}
+                            disabled={isSearching}
+                          />
+                        </div>
+                      </CardContent>
+                    </CollapsibleContent>
+                  </Card>
+                </Collapsible>
+
+                {/* Company filters */}
+                <Collapsible open={companyOpen} onOpenChange={setCompanyOpen}>
+                  <Card>
+                    <CollapsibleTrigger asChild>
+                      <CardHeader className="pb-3 cursor-pointer hover:bg-muted/50 rounded-t-lg">
+                        <CardTitle className="text-sm flex items-center justify-between">
+                          <span className="flex items-center gap-2">
+                            <Building2 className="h-4 w-4" />
+                            Empresa
+                          </span>
+                          <ChevronDown className={`h-4 w-4 transition-transform ${companyOpen ? '' : '-rotate-90'}`} />
+                        </CardTitle>
+                      </CardHeader>
+                    </CollapsibleTrigger>
+                    <CollapsibleContent>
+                      <CardContent className="space-y-4 pt-0">
+                        <div className="space-y-2">
+                          <Label>Empresa atual</Label>
+                          <LinkedInAutocomplete
+                            workspaceId={currentWorkspace?.id}
+                            type="company"
+                            placeholder="Buscar empresa..."
+                            value={filters.companyIds}
+                            onChange={val => setFilters(prev => ({ ...prev, companyIds: val, company: '' }))}
+                            disabled={isSearching}
+                          />
+                        </div>
+
+                        <div className="space-y-2">
+                          <Label>Indústria</Label>
+                          <LinkedInAutocomplete
+                            workspaceId={currentWorkspace?.id}
+                            type="industry"
+                            placeholder="Buscar indústria..."
+                            value={filters.industryIds}
+                            onChange={val => setFilters(prev => ({ ...prev, industryIds: val }))}
+                            disabled={isSearching}
+                          />
+                        </div>
+                      </CardContent>
+                    </CollapsibleContent>
+                  </Card>
+                </Collapsible>
+
+                {/* Profile filters */}
+                <Collapsible open={profileOpen} onOpenChange={setProfileOpen}>
+                  <Card>
+                    <CollapsibleTrigger asChild>
+                      <CardHeader className="pb-3 cursor-pointer hover:bg-muted/50 rounded-t-lg">
+                        <CardTitle className="text-sm flex items-center justify-between">
+                          <span className="flex items-center gap-2">
+                            <Briefcase className="h-4 w-4" />
+                            Perfil
+                          </span>
+                          <ChevronDown className={`h-4 w-4 transition-transform ${profileOpen ? '' : '-rotate-90'}`} />
+                        </CardTitle>
+                      </CardHeader>
+                    </CollapsibleTrigger>
+                    <CollapsibleContent>
+                      <CardContent className="space-y-4 pt-0">
+                        <div className="space-y-2">
+                          <Label>Cargo</Label>
+                          <LinkedInAutocomplete
+                            workspaceId={currentWorkspace?.id}
+                            type="title"
+                            placeholder="Buscar cargo..."
+                            value={filters.titleIds}
+                            onChange={val => setFilters(prev => ({ ...prev, titleIds: val, title: '' }))}
+                            disabled={isSearching}
+                          />
+                        </div>
+
+                        <div className="space-y-2">
+                          <Label>Formação</Label>
+                          <LinkedInAutocomplete
+                            workspaceId={currentWorkspace?.id}
+                            type="school"
+                            placeholder="Buscar escola/universidade..."
+                            value={filters.schoolIds}
+                            onChange={val => setFilters(prev => ({ ...prev, schoolIds: val }))}
+                            disabled={isSearching}
+                          />
+                        </div>
+                      </CardContent>
+                    </CollapsibleContent>
+                  </Card>
+                </Collapsible>
+
+                {/* Search buttons */}
+                <div className="flex gap-2">
+                  <Button
+                    onClick={handleSearch}
+                    disabled={!canSearch || isSearching}
+                    className="flex-1"
+                  >
+                    {isSearching ? (
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    ) : (
+                      <Search className="mr-2 h-4 w-4" />
+                    )}
+                    Buscar
+                  </Button>
+                  <Button
+                    variant="outline"
+                    onClick={handleClear}
+                    disabled={isSearching}
+                  >
+                    <X className="h-4 w-4" />
+                  </Button>
+                </div>
+
+                {/* Import section - only show when leads selected */}
+                {totalSelectedCount > 0 && (
+                  <Card className="border-primary">
+                    <CardHeader className="pb-3">
+                      <CardTitle className="text-sm flex items-center gap-2">
+                        <Download className="h-4 w-4" />
+                        Importar Leads
+                      </CardTitle>
+                      <CardDescription>
+                        {totalSelectedCount} lead{totalSelectedCount !== 1 ? 's' : ''} selecionado{totalSelectedCount !== 1 ? 's' : ''}
+                      </CardDescription>
+                    </CardHeader>
+                    <CardContent className="space-y-4 pt-0">
+                      <Tabs value={listMode} onValueChange={(v) => setListMode(v as 'new' | 'existing')}>
+                        <TabsList className="grid w-full grid-cols-2">
+                          <TabsTrigger value="new" className="flex items-center gap-1 text-xs">
+                            <FolderPlus className="h-3 w-3" />
+                            Nova
+                          </TabsTrigger>
+                          <TabsTrigger value="existing" className="flex items-center gap-1 text-xs">
+                            <FolderOpen className="h-3 w-3" />
+                            Existente
+                          </TabsTrigger>
+                        </TabsList>
+                        
+                        <TabsContent value="new" className="space-y-3 mt-3">
+                          <div className="space-y-2">
+                            <Label htmlFor="new-list-name" className="text-xs">Nome *</Label>
+                            <Input
+                              id="new-list-name"
+                              placeholder="Ex: CEOs Brasil 2024"
+                              value={newListName}
+                              onChange={e => setNewListName(e.target.value)}
+                              disabled={isImporting}
+                              className="h-8 text-sm"
+                            />
+                          </div>
+                          <div className="space-y-2">
+                            <Label htmlFor="new-list-desc" className="text-xs">Descrição</Label>
+                            <Textarea
+                              id="new-list-desc"
+                              placeholder="Detalhes..."
+                              value={newListDescription}
+                              onChange={e => setNewListDescription(e.target.value)}
+                              disabled={isImporting}
+                              rows={2}
+                              className="text-sm"
+                            />
+                          </div>
+                        </TabsContent>
+                        
+                        <TabsContent value="existing" className="mt-3">
+                          <div className="space-y-2">
+                            <Label className="text-xs">Selecione a lista</Label>
+                            <Select
+                              value={selectedListId}
+                              onValueChange={setSelectedListId}
+                              disabled={isImporting}
+                            >
+                              <SelectTrigger className="h-8 text-sm">
+                                <SelectValue placeholder="Escolha uma lista" />
+                              </SelectTrigger>
+                              <SelectContent>
+                                {lists.map(list => (
+                                  <SelectItem key={list.id} value={list.id}>
+                                    {list.name}
+                                  </SelectItem>
+                                ))}
+                                {lists.length === 0 && (
+                                  <div className="px-2 py-4 text-center text-sm text-muted-foreground">
+                                    Nenhuma lista encontrada
+                                  </div>
+                                )}
+                              </SelectContent>
+                            </Select>
+                          </div>
+                        </TabsContent>
+                      </Tabs>
+
+                      <Button
+                        onClick={handleImport}
+                        disabled={isImporting || totalSelectedCount === 0}
+                        className="w-full"
+                        size="sm"
+                      >
+                        {isImporting ? (
+                          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                        ) : (
+                          <Download className="mr-2 h-4 w-4" />
+                        )}
+                        Importar {totalSelectedCount}
+                      </Button>
+                    </CardContent>
+                  </Card>
+                )}
+              </div>
+            </ScrollArea>
           </div>
 
           {/* Right content - results */}
@@ -528,14 +745,9 @@ export default function LinkedInSearch() {
                       disabled={isSearching}
                     />
                     <span className="text-sm text-muted-foreground">
-                      Selecionar todos desta página ({results.length})
+                      Selecionar página ({results.length})
                     </span>
                   </div>
-                  {pageSelectedCount > 0 && (
-                    <Badge variant="outline">
-                      {pageSelectedCount} desta página
-                    </Badge>
-                  )}
                 </div>
 
                 {/* Pagination */}
@@ -550,7 +762,6 @@ export default function LinkedInSearch() {
                     disabled={currentPage === 1 || isSearching}
                   >
                     <ChevronLeft className="h-4 w-4" />
-                    Anterior
                   </Button>
                   <Button
                     variant="outline"
@@ -558,7 +769,6 @@ export default function LinkedInSearch() {
                     onClick={handleNextPage}
                     disabled={!hasMore || isSearching}
                   >
-                    Próxima
                     <ChevronRight className="h-4 w-4" />
                   </Button>
                 </div>
@@ -566,7 +776,7 @@ export default function LinkedInSearch() {
             )}
 
             {/* Results list */}
-            <div className="flex-1 overflow-auto">
+            <ScrollArea className="flex-1">
               {/* Error state */}
               {error && (
                 <Card className="border-destructive">
@@ -623,7 +833,7 @@ export default function LinkedInSearch() {
                 <div className="space-y-2">
                   {results.map(result => {
                     const id = getResultId(result);
-                    const isSelected = selectedIds.has(id);
+                    const isSelected = selectedLeadsMap.has(id);
                     
                     return (
                       <Card
@@ -704,7 +914,7 @@ export default function LinkedInSearch() {
                   })}
                 </div>
               )}
-            </div>
+            </ScrollArea>
 
             {/* Bottom pagination */}
             {hasSearched && results.length > 0 && (

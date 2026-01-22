@@ -665,6 +665,53 @@ export type Database = {
           },
         ]
       }
+      linkedin_saved_searches: {
+        Row: {
+          api: string
+          created_at: string
+          filters_json: Json
+          id: string
+          is_shared: boolean
+          last_run_at: string | null
+          name: string
+          updated_at: string
+          user_id: string
+          workspace_id: string
+        }
+        Insert: {
+          api?: string
+          created_at?: string
+          filters_json?: Json
+          id?: string
+          is_shared?: boolean
+          last_run_at?: string | null
+          name: string
+          updated_at?: string
+          user_id: string
+          workspace_id: string
+        }
+        Update: {
+          api?: string
+          created_at?: string
+          filters_json?: Json
+          id?: string
+          is_shared?: boolean
+          last_run_at?: string | null
+          name?: string
+          updated_at?: string
+          user_id?: string
+          workspace_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "linkedin_saved_searches_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       platform_admins: {
         Row: {
           created_at: string

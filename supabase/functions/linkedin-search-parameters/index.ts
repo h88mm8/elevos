@@ -8,6 +8,26 @@ const corsHeaders = {
 
 type ParameterType = "location" | "industry" | "company" | "school" | "title";
 
+// Helper to get the global platform LinkedIn search account
+async function getPlatformLinkedInSearchAccount(serviceClient: any): Promise<{
+  accountId: string;
+}> {
+  const { data, error } = await serviceClient.rpc("get_platform_linkedin_search_account");
+  
+  if (error) {
+    console.error("[LI_PARAMS] Error fetching platform account:", error);
+    throw new Error("Platform admin must configure the global LinkedIn search account.");
+  }
+  
+  const rows = data as Array<{ account_uuid: string; account_id: string; linkedin_feature: string | null }>;
+  
+  if (!rows || rows.length === 0) {
+    throw new Error("Platform admin must configure the global LinkedIn search account.");
+  }
+  
+  return { accountId: rows[0].account_id };
+}
+
 serve(async (req) => {
   // Handle CORS preflight
   if (req.method === "OPTIONS") {
@@ -29,10 +49,12 @@ serve(async (req) => {
     // Initialize Supabase client
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
     const supabaseAnonKey = Deno.env.get("SUPABASE_ANON_KEY")!;
+    const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 
     const supabase = createClient(supabaseUrl, supabaseAnonKey, {
       global: { headers: { Authorization: `Bearer ${token}` } },
     });
+    const serviceClient = createClient(supabaseUrl, supabaseServiceKey);
 
     // Validate user
     const { data: { user }, error: userError } = await supabase.auth.getUser();
@@ -45,14 +67,13 @@ serve(async (req) => {
 
     // Parse query parameters
     const url = new URL(req.url);
-    const accountId = url.searchParams.get("accountId");
     const parameterType = url.searchParams.get("type") as ParameterType;
     const query = url.searchParams.get("query") || "";
     const workspaceId = url.searchParams.get("workspaceId");
 
-    if (!accountId || !parameterType || !workspaceId) {
+    if (!parameterType || !workspaceId) {
       return new Response(
-        JSON.stringify({ error: "accountId, workspaceId, and type are required" }),
+        JSON.stringify({ error: "workspaceId and type are required" }),
         { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
@@ -80,6 +101,20 @@ serve(async (req) => {
       );
     }
 
+    // Get the global platform LinkedIn account (no accountId parameter needed)
+    let platformAccount;
+    try {
+      platformAccount = await getPlatformLinkedInSearchAccount(serviceClient);
+    } catch (e) {
+      return new Response(
+        JSON.stringify({ error: (e as Error).message }),
+        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
+    const unipileAccountId = platformAccount.accountId;
+    console.log(`[LI_PARAMS] Using global account: ${unipileAccountId}`);
+
     // Call Unipile to get search parameters
     const unipileDsn = Deno.env.get("UNIPILE_DSN")!;
     const unipileApiKey = Deno.env.get("UNIPILE_API_KEY")!;
@@ -96,7 +131,7 @@ serve(async (req) => {
     const unipileType = unipileTypeMap[parameterType];
     
     const searchUrl = new URL(`https://${unipileDsn}/api/v1/linkedin/search/parameters`);
-    searchUrl.searchParams.set("account_id", accountId);
+    searchUrl.searchParams.set("account_id", unipileAccountId);
     searchUrl.searchParams.set("type", unipileType);
     if (query) {
       searchUrl.searchParams.set("query", query);

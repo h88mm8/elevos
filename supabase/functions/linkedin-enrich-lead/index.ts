@@ -22,56 +22,6 @@ function extractCompanyIdentifier(companyUrl: string): string | null {
   return match ? match[1] : null;
 }
 
-// Parse headline to extract job title and company when not structured
-function parseHeadline(headline: string): { jobTitle?: string; company?: string } {
-  if (!headline) return {};
-  
-  // Common patterns: "Title at Company", "Title | Company", "Title @ Company", "Title - Company"
-  // Also handles: "Something | Title at Company" (takes last part)
-  
-  // First, try to find "at Company" pattern which is most reliable
-  const atPatterns = [
-    /\|\s*(.+?)\s+at\s+(.+?)$/i,     // "Blurb | CEO at Optimal"
-    /^(.+?)\s+at\s+(.+?)$/i,         // "CEO at Optimal"
-    /\|\s*(.+?)\s+@\s+(.+?)$/i,      // "Blurb | CTO @ Startup"
-    /^(.+?)\s+@\s+(.+?)$/i,          // "CTO @ Startup"
-  ];
-  
-  for (const pattern of atPatterns) {
-    const match = headline.match(pattern);
-    if (match) {
-      return { 
-        jobTitle: match[1].trim(), 
-        company: match[2].trim() 
-      };
-    }
-  }
-  
-  // Try pipe separator as fallback (might be "Title | Company")
-  const pipeMatch = headline.match(/^(.+?)\s*\|\s*(.+?)$/);
-  if (pipeMatch) {
-    // Check if second part looks like a company (starts with capital, no common title words)
-    const secondPart = pipeMatch[2].trim();
-    const titleWords = ['ceo', 'cto', 'cfo', 'founder', 'director', 'manager', 'head', 'vp', 'president'];
-    const lowerSecond = secondPart.toLowerCase();
-    const isLikelyCompany = !titleWords.some(w => lowerSecond.startsWith(w));
-    
-    if (isLikelyCompany && /^[A-Z]/.test(secondPart)) {
-      return { jobTitle: pipeMatch[1].trim(), company: secondPart };
-    }
-  }
-  
-  // Try dash separator
-  const dashMatch = headline.match(/^(.+?)\s+-\s+(.+?)$/);
-  if (dashMatch) {
-    const secondPart = dashMatch[2].trim();
-    if (/^[A-Z]/.test(secondPart)) {
-      return { jobTitle: dashMatch[1].trim(), company: secondPart };
-    }
-  }
-  
-  return {};
-}
 
 interface EnrichRequest {
   workspaceId: string;
@@ -299,18 +249,6 @@ serve(async (req) => {
       }
     }
 
-    // FALLBACK: Extract job_title and company from headline if not already set
-    if (profileData.headline && (!updateData.job_title || !updateData.company)) {
-      const parsed = parseHeadline(profileData.headline);
-      if (!updateData.job_title && parsed.jobTitle) {
-        updateData.job_title = parsed.jobTitle;
-        console.log("[linkedin-enrich-lead] Job title extracted from headline:", parsed.jobTitle);
-      }
-      if (!updateData.company && parsed.company) {
-        updateData.company = parsed.company;
-        console.log("[linkedin-enrich-lead] Company extracted from headline:", parsed.company);
-      }
-    }
 
     // Experiences array - Unipile uses "experiences" not "current_positions"
     const experiences = profileData.experiences;

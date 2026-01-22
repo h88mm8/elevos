@@ -154,39 +154,35 @@ serve(async (req) => {
     const unipileDsn = Deno.env.get("UNIPILE_DSN")!;
     const unipileApiKey = Deno.env.get("UNIPILE_API_KEY")!;
 
-    // Use Unipile account_id for the API call
-    const searchPayload: Record<string, unknown> = {
-      account_id: unipileAccountId,
-      api: api || "classic",
-      limit: Math.min(limit, 25),
-    };
+    // Build query params - account_id must be a query param for Unipile
+    const queryParams = new URLSearchParams();
+    queryParams.set("account_id", unipileAccountId);
+    queryParams.set("api", api || "classic");
+    queryParams.set("limit", String(Math.min(limit, 25)));
 
-    // Add filters
-    if (filters.keywords) searchPayload.keywords = filters.keywords;
-    if (filters.locations?.length) searchPayload.locations = filters.locations;
-    if (filters.industries?.length) searchPayload.industries = filters.industries;
-    if (filters.current_companies?.length) searchPayload.current_companies = filters.current_companies;
-    if (filters.past_companies?.length) searchPayload.past_companies = filters.past_companies;
-    if (filters.titles?.length) searchPayload.titles = filters.titles;
-    if (filters.schools?.length) searchPayload.schools = filters.schools;
-    if (filters.first_name) searchPayload.first_name = filters.first_name;
-    if (filters.last_name) searchPayload.last_name = filters.last_name;
-    if (filters.connection_of) searchPayload.connection_of = filters.connection_of;
-    if (cursor) searchPayload.cursor = cursor;
+    // Add filters as query params
+    if (filters.keywords) queryParams.set("keywords", filters.keywords);
+    if (filters.locations?.length) filters.locations.forEach(l => queryParams.append("locations", l));
+    if (filters.industries?.length) filters.industries.forEach(i => queryParams.append("industries", i));
+    if (filters.current_companies?.length) filters.current_companies.forEach(c => queryParams.append("current_companies", c));
+    if (filters.past_companies?.length) filters.past_companies.forEach(c => queryParams.append("past_companies", c));
+    if (filters.titles?.length) filters.titles.forEach(t => queryParams.append("titles", t));
+    if (filters.schools?.length) filters.schools.forEach(s => queryParams.append("schools", s));
+    if (filters.first_name) queryParams.set("first_name", filters.first_name);
+    if (filters.last_name) queryParams.set("last_name", filters.last_name);
+    if (filters.connection_of) queryParams.set("connection_of", filters.connection_of);
+    if (cursor) queryParams.set("cursor", cursor);
 
-    console.log("[linkedin-search] Calling Unipile search with payload:", JSON.stringify(searchPayload));
+    const searchUrl = `https://${unipileDsn}/api/v1/linkedin/search?${queryParams.toString()}`;
+    console.log("[linkedin-search] Calling Unipile search URL:", searchUrl);
 
-    const searchResponse = await fetch(
-      `https://${unipileDsn}/api/v1/linkedin/search`,
-      {
-        method: "POST",
-        headers: {
-          "X-API-KEY": unipileApiKey,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify(searchPayload),
-      }
-    );
+    const searchResponse = await fetch(searchUrl, {
+      method: "GET",
+      headers: {
+        "X-API-KEY": unipileApiKey,
+        Accept: "application/json",
+      },
+    });
 
     if (!searchResponse.ok) {
       const errorText = await searchResponse.text();

@@ -2,7 +2,6 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
 import { Campaign } from '@/types';
-import { useMemo } from 'react';
 
 export function useCampaigns() {
   const { currentWorkspace } = useAuth();
@@ -28,22 +27,13 @@ export function useCampaigns() {
       })[];
     },
     enabled: !!currentWorkspace,
-  });
-
-  // Auto-refetch every 5 seconds if there are campaigns in 'sending' or 'queued' status
-  const hasActiveCampaigns = useMemo(() => {
-    return campaignsQuery.data?.some(c => c.status === 'sending' || c.status === 'queued') ?? false;
-  }, [campaignsQuery.data]);
-
-  // Separate query for polling active campaigns
-  useQuery({
-    queryKey: ['campaigns-polling', currentWorkspace?.id],
-    queryFn: async () => {
-      await queryClient.invalidateQueries({ queryKey: ['campaigns', currentWorkspace?.id] });
-      return null;
+    // Auto-refetch every 5 seconds if there are campaigns in 'sending' or 'queued' status
+    refetchInterval: (query) => {
+      const hasActive = query.state.data?.some(
+        (c) => c.status === 'sending' || c.status === 'queued'
+      );
+      return hasActive ? 5000 : false;
     },
-    enabled: !!currentWorkspace && hasActiveCampaigns,
-    refetchInterval: hasActiveCampaigns ? 5000 : false,
     refetchIntervalInBackground: false,
   });
 

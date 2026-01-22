@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Lead } from '@/types';
 import {
@@ -11,13 +11,6 @@ import {
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Separator } from '@/components/ui/separator';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select';
 import { 
   Building2, 
   Mail, 
@@ -37,13 +30,11 @@ import {
 } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
 import { useToast } from '@/hooks/use-toast';
-import { Account } from '@/hooks/useAccounts';
 
 interface LeadDetailsDrawerProps {
   lead: Lead | null;
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  accounts?: Account[];
   workspaceId?: string;
   onLeadUpdated?: () => void;
 }
@@ -52,7 +43,6 @@ export function LeadDetailsDrawer({
   lead, 
   open, 
   onOpenChange,
-  accounts = [],
   workspaceId,
   onLeadUpdated,
 }: LeadDetailsDrawerProps) {
@@ -60,13 +50,6 @@ export function LeadDetailsDrawer({
   const { toast } = useToast();
   
   const [isEnriching, setIsEnriching] = useState(false);
-  const [selectedAccountId, setSelectedAccountId] = useState<string>('');
-
-  // Get LinkedIn accounts
-  const linkedInAccounts = useMemo(
-    () => accounts.filter(a => a.channel === 'linkedin' && a.status === 'connected'),
-    [accounts]
-  );
 
   if (!lead) return null;
 
@@ -77,7 +60,7 @@ export function LeadDetailsDrawer({
 
   const phoneNumber = lead.mobile_number || lead.phone;
   const hasLinkedIn = !!lead.linkedin_url;
-  const canEnrich = hasLinkedIn && linkedInAccounts.length > 0 && workspaceId;
+  const canEnrich = hasLinkedIn && workspaceId;
 
   const handleStartConversation = () => {
     if (!phoneNumber) return;
@@ -86,14 +69,13 @@ export function LeadDetailsDrawer({
   };
 
   const handleEnrich = async () => {
-    if (!selectedAccountId || !workspaceId || !lead.id) return;
+    if (!workspaceId || !lead.id) return;
 
     setIsEnriching(true);
     try {
       const { data, error } = await supabase.functions.invoke('linkedin-enrich-lead', {
         body: {
           workspaceId,
-          accountId: selectedAccountId,
           leadId: lead.id,
         },
       });
@@ -141,27 +123,15 @@ export function LeadDetailsDrawer({
         {/* LinkedIn Enrich Section */}
         {canEnrich && (
           <div className="mt-4 p-3 rounded-lg border bg-muted/30 space-y-3">
-            <div className="flex items-center gap-2 text-sm font-medium">
-              <Sparkles className="h-4 w-4 text-primary" />
-              Enriquecer via LinkedIn
-            </div>
-            <div className="flex items-center gap-2">
-              <Select value={selectedAccountId} onValueChange={setSelectedAccountId}>
-                <SelectTrigger className="flex-1 h-9">
-                  <SelectValue placeholder="Selecione conta LinkedIn" />
-                </SelectTrigger>
-                <SelectContent>
-                  {linkedInAccounts.map(account => (
-                    <SelectItem key={account.id} value={account.id}>
-                      {account.name || account.account_id}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2 text-sm font-medium">
+                <Sparkles className="h-4 w-4 text-primary" />
+                Enriquecer via LinkedIn
+              </div>
               <Button
                 size="sm"
                 onClick={handleEnrich}
-                disabled={!selectedAccountId || isEnriching}
+                disabled={isEnriching}
               >
                 {isEnriching ? (
                   <>

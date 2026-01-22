@@ -1114,7 +1114,6 @@ export default function Leads() {
         lead={selectedLead}
         open={drawerOpen}
         onOpenChange={setDrawerOpen}
-        accounts={accounts}
         workspaceId={currentWorkspace?.id}
         onLeadUpdated={refetchLeads}
       />
@@ -1152,7 +1151,6 @@ export default function Leads() {
         <LinkedInSearchDialog
           open={linkedInSearchOpen}
           onOpenChange={setLinkedInSearchOpen}
-          accounts={accounts}
           lists={lists}
           workspaceId={currentWorkspace.id}
           onImportComplete={() => {

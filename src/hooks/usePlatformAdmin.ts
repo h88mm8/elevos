@@ -6,6 +6,7 @@ export interface PlatformSettings {
   id: number;
   linkedin_search_account_id: string | null;
   updated_at: string;
+  updated_by: string | null;
 }
 
 export interface LinkedInAccountWithWorkspace {
@@ -22,7 +23,7 @@ export function usePlatformAdmin() {
   const queryClient = useQueryClient();
 
   // Check if current user is platform admin
-  const { data: isPlatformAdmin, isLoading: isCheckingAdmin } = useQuery({
+  const { data: isPlatformAdmin, isLoading: isCheckingAdmin, refetch: refetchAdminStatus } = useQuery({
     queryKey: ["platform-admin-check", user?.id],
     queryFn: async () => {
       if (!user?.id) return false;
@@ -41,6 +42,18 @@ export function usePlatformAdmin() {
       return !!data;
     },
     enabled: !!user?.id,
+  });
+
+  // Check if any admins exist (for bootstrap)
+  const { data: hasAnyAdmin, isLoading: isCheckingAnyAdmin } = useQuery({
+    queryKey: ["platform-has-any-admin"],
+    queryFn: async () => {
+      // We can't directly query platform_admins without being admin,
+      // so we'll let the bootstrap endpoint handle this logic
+      // This is a client-side approximation
+      return isPlatformAdmin !== false; // Will be false if we know for sure user is not admin
+    },
+    enabled: isPlatformAdmin === false,
   });
 
   // Get platform settings (only if admin)
@@ -67,7 +80,6 @@ export function usePlatformAdmin() {
   const { data: linkedInAccounts, isLoading: isLoadingAccounts } = useQuery({
     queryKey: ["all-linkedin-accounts"],
     queryFn: async () => {
-      // Use service role through edge function to get all accounts
       const { data, error } = await supabase.functions.invoke("get-all-linkedin-accounts");
       
       if (error) {
@@ -80,20 +92,32 @@ export function usePlatformAdmin() {
     enabled: isPlatformAdmin === true,
   });
 
-  // Update platform settings
-  const updateSettingsMutation = useMutation({
-    mutationFn: async (linkedinSearchAccountId: string | null) => {
-      const { data, error } = await supabase
-        .from("platform_settings")
-        .update({ 
-          linkedin_search_account_id: linkedinSearchAccountId,
-          updated_at: new Date().toISOString()
-        })
-        .eq("id", 1)
-        .select()
-        .single();
+  // Bootstrap mutation - become first admin
+  const bootstrapMutation = useMutation({
+    mutationFn: async () => {
+      const { data, error } = await supabase.functions.invoke("platform-admin-bootstrap");
       
       if (error) throw error;
+      if (data.error) throw new Error(data.error);
+      
+      return data;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["platform-admin-check"] });
+      queryClient.invalidateQueries({ queryKey: ["platform-has-any-admin"] });
+    },
+  });
+
+  // Update platform settings via edge function
+  const updateSettingsMutation = useMutation({
+    mutationFn: async (linkedinSearchAccountId: string | null) => {
+      const { data, error } = await supabase.functions.invoke("update-platform-settings", {
+        body: { linkedin_search_account_id: linkedinSearchAccountId }
+      });
+      
+      if (error) throw error;
+      if (data.error) throw new Error(data.error);
+      
       return data;
     },
     onSuccess: () => {
@@ -104,11 +128,16 @@ export function usePlatformAdmin() {
   return {
     isPlatformAdmin,
     isCheckingAdmin,
+    hasAnyAdmin,
+    isCheckingAnyAdmin,
     platformSettings,
     isLoadingSettings,
     linkedInAccounts,
     isLoadingAccounts,
     updateSettings: updateSettingsMutation.mutateAsync,
     isUpdating: updateSettingsMutation.isPending,
+    bootstrap: bootstrapMutation.mutateAsync,
+    isBootstrapping: bootstrapMutation.isPending,
+    refetchAdminStatus,
   };
 }

@@ -97,7 +97,12 @@ export interface Lead {
   keywords: string | null;
   company_technologies: string | null;
   
-  enriched_at: string | null;
+  // LinkedIn enrichment data
+  linkedin_public_identifier: string | null;
+  linkedin_provider_id: string | null;
+  linkedin_profile_json: unknown | null;
+  
+  last_enriched_at: string | null;
   created_at: string;
   updated_at: string;
 }

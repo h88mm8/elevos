@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import AppLayout from "@/components/layout/AppLayout";
 import { usePlatformAdmin } from "@/hooks/usePlatformAdmin";
@@ -9,8 +9,7 @@ import { Badge } from "@/components/ui/badge";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Skeleton } from "@/components/ui/skeleton";
 import { toast } from "sonner";
-import { Shield, AlertTriangle, Linkedin, Building2, Check } from "lucide-react";
-import { useState } from "react";
+import { Shield, AlertTriangle, Linkedin, Building2, Check, UserPlus } from "lucide-react";
 
 export default function PlatformAdmin() {
   const navigate = useNavigate();
@@ -23,17 +22,21 @@ export default function PlatformAdmin() {
     isLoadingAccounts,
     updateSettings,
     isUpdating,
+    bootstrap,
+    isBootstrapping,
+    refetchAdminStatus,
   } = usePlatformAdmin();
 
   const [selectedAccountId, setSelectedAccountId] = useState<string | null>(null);
+  const [showBootstrap, setShowBootstrap] = useState(false);
 
-  // Redirect non-admins
+  // Check if bootstrap is available when not admin
   useEffect(() => {
     if (!isCheckingAdmin && isPlatformAdmin === false) {
-      toast.error("Acesso negado. Você não é um administrador da plataforma.");
-      navigate("/dashboard");
+      // Show bootstrap option instead of redirecting
+      setShowBootstrap(true);
     }
-  }, [isCheckingAdmin, isPlatformAdmin, navigate]);
+  }, [isCheckingAdmin, isPlatformAdmin]);
 
   // Set initial selection when data loads
   useEffect(() => {
@@ -46,9 +49,26 @@ export default function PlatformAdmin() {
     try {
       await updateSettings(selectedAccountId);
       toast.success("Configurações salvas com sucesso!");
-    } catch (error) {
+    } catch (error: any) {
       console.error("Error saving settings:", error);
-      toast.error("Erro ao salvar configurações");
+      toast.error(error.message || "Erro ao salvar configurações");
+    }
+  };
+
+  const handleBootstrap = async () => {
+    try {
+      await bootstrap();
+      toast.success("Você agora é um administrador da plataforma!");
+      refetchAdminStatus();
+      setShowBootstrap(false);
+    } catch (error: any) {
+      console.error("Bootstrap error:", error);
+      if (error.message?.includes("already exists")) {
+        toast.error("Já existe um administrador da plataforma. Bootstrap não permitido.");
+        navigate("/dashboard");
+      } else {
+        toast.error(error.message || "Erro ao executar bootstrap");
+      }
     }
   };
 
@@ -63,7 +83,60 @@ export default function PlatformAdmin() {
     );
   }
 
-  // Don't render anything if not admin (will redirect)
+  // Show bootstrap option if not admin
+  if (showBootstrap && !isPlatformAdmin) {
+    return (
+      <AppLayout>
+        <div className="space-y-6">
+          <div className="flex items-center gap-3">
+            <div className="p-2 bg-primary/10 rounded-lg">
+              <Shield className="h-6 w-6 text-primary" />
+            </div>
+            <div>
+              <h1 className="text-2xl font-bold">Administração da Plataforma</h1>
+              <p className="text-muted-foreground">
+                Configurações globais que afetam toda a plataforma
+              </p>
+            </div>
+          </div>
+
+          <Card>
+            <CardHeader>
+              <div className="flex items-center gap-2">
+                <UserPlus className="h-5 w-5 text-primary" />
+                <CardTitle>Bootstrap de Administrador</CardTitle>
+              </div>
+              <CardDescription>
+                Não existe nenhum administrador da plataforma configurado. 
+                Você pode se tornar o primeiro administrador clicando no botão abaixo.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <Alert>
+                <AlertTriangle className="h-4 w-4" />
+                <AlertTitle>Atenção</AlertTitle>
+                <AlertDescription>
+                  Esta ação só está disponível quando não existe nenhum administrador.
+                  Após o primeiro administrador ser criado, novos admins só podem ser 
+                  adicionados diretamente no banco de dados.
+                </AlertDescription>
+              </Alert>
+
+              <Button 
+                onClick={handleBootstrap} 
+                disabled={isBootstrapping}
+                className="w-full"
+              >
+                {isBootstrapping ? "Processando..." : "Tornar-me Administrador da Plataforma"}
+              </Button>
+            </CardContent>
+          </Card>
+        </div>
+      </AppLayout>
+    );
+  }
+
+  // Don't render if somehow we get here without being admin
   if (!isPlatformAdmin) {
     return null;
   }

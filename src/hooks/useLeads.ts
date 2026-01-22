@@ -25,14 +25,15 @@ export function useLeads() {
 
   const createLeadMutation = useMutation({
     mutationFn: async (lead: Omit<Lead, 'id' | 'created_at' | 'updated_at'>) => {
+      // Cast to any to handle type mismatches with Supabase generated types
       const { data, error } = await supabase
         .from('leads')
-        .insert(lead)
+        .insert(lead as any)
         .select()
         .single();
       
       if (error) throw error;
-      return data;
+      return data as Lead;
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['leads', currentWorkspace?.id] });
@@ -41,15 +42,16 @@ export function useLeads() {
 
   const updateLeadMutation = useMutation({
     mutationFn: async ({ id, ...updates }: Partial<Lead> & { id: string }) => {
+      // Cast to any to handle type mismatches with Supabase generated types
       const { data, error } = await supabase
         .from('leads')
-        .update(updates)
+        .update(updates as any)
         .eq('id', id)
         .select()
         .single();
       
       if (error) throw error;
-      return data;
+      return data as Lead;
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['leads', currentWorkspace?.id] });

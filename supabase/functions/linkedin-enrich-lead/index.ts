@@ -22,10 +22,37 @@ function extractCompanyIdentifier(companyUrl: string): string | null {
   return match ? match[1] : null;
 }
 
+// Helper to get the global platform LinkedIn search account
+async function getPlatformLinkedInSearchAccount(serviceClient: any): Promise<{
+  accountUuid: string;
+  accountId: string;
+  linkedinFeature: string | null;
+}> {
+  const { data, error } = await serviceClient.rpc("get_platform_linkedin_search_account");
+  
+  if (error) {
+    console.error("[LI_ENRICH_GLOBAL] Error fetching platform account:", error);
+    throw new Error("Platform admin must configure the global LinkedIn search account.");
+  }
+  
+  const rows = data as Array<{ account_uuid: string; account_id: string; linkedin_feature: string | null }>;
+  
+  if (!rows || rows.length === 0) {
+    throw new Error("Platform admin must configure the global LinkedIn search account.");
+  }
+  
+  const account = rows[0];
+  return {
+    accountUuid: account.account_uuid,
+    accountId: account.account_id,
+    linkedinFeature: account.linkedin_feature,
+  };
+}
 
 interface EnrichRequest {
   workspaceId: string;
-  accountId: string;
+  // accountId is no longer used - we use the global platform account
+  accountId?: string; // kept for backwards compatibility but ignored
   leadId: string;
 }
 
@@ -68,11 +95,11 @@ serve(async (req) => {
 
     // Parse request body
     const body: EnrichRequest = await req.json();
-    const { workspaceId, accountId, leadId } = body;
+    const { workspaceId, leadId } = body;
 
-    if (!workspaceId || !accountId || !leadId) {
+    if (!workspaceId || !leadId) {
       return new Response(
-        JSON.stringify({ error: "workspaceId, accountId, and leadId are required" }),
+        JSON.stringify({ error: "workspaceId and leadId are required" }),
         { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
@@ -114,24 +141,20 @@ serve(async (req) => {
       );
     }
 
-    // Validate account - accountId can be UUID (id column) or Unipile account_id
-    const { data: account } = await supabase
-      .from("accounts")
-      .select("id, account_id, status, channel")
-      .eq("workspace_id", workspaceId)
-      .eq("channel", "linkedin")
-      .or(`id.eq.${accountId},account_id.eq.${accountId}`)
-      .maybeSingle();
-
-    if (!account || account.status !== "connected") {
+    // Get the global platform LinkedIn account for search/enrichment
+    let platformAccount;
+    try {
+      platformAccount = await getPlatformLinkedInSearchAccount(serviceClient);
+    } catch (e) {
       return new Response(
-        JSON.stringify({ error: "LinkedIn account not found or not connected" }),
+        JSON.stringify({ error: (e as Error).message }),
         { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
 
-    // Use the Unipile account_id for API calls
-    const unipileAccountId = account.account_id;
+    const unipileAccountId = platformAccount.accountId;
+    
+    console.log(`[LI_ENRICH_GLOBAL] workspaceId=${workspaceId} platformAccountUuid=${platformAccount.accountUuid} unipileAccountId=${unipileAccountId} feature=${platformAccount.linkedinFeature}`);
 
     // Check daily limits
     const { data: settings } = await supabase

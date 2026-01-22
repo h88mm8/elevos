@@ -22,12 +22,40 @@ interface SearchFilters {
 
 interface SearchRequest {
   workspaceId: string;
-  accountId: string;
+  // accountId is no longer used for search - we use the global platform account
+  accountId?: string; // kept for backwards compatibility but ignored
   searchType: "people" | "companies";
   api: "classic" | "sales_navigator" | "recruiter";
   filters: SearchFilters;
   cursor?: string;
   limit?: number;
+}
+
+// Helper to get the global platform LinkedIn search account
+async function getPlatformLinkedInSearchAccount(serviceClient: any): Promise<{
+  accountUuid: string;
+  accountId: string;
+  linkedinFeature: string | null;
+}> {
+  const { data, error } = await serviceClient.rpc("get_platform_linkedin_search_account");
+  
+  if (error) {
+    console.error("[LI_SEARCH_GLOBAL] Error fetching platform account:", error);
+    throw new Error("Platform admin must configure the global LinkedIn search account.");
+  }
+  
+  const rows = data as Array<{ account_uuid: string; account_id: string; linkedin_feature: string | null }>;
+  
+  if (!rows || rows.length === 0) {
+    throw new Error("Platform admin must configure the global LinkedIn search account.");
+  }
+  
+  const account = rows[0];
+  return {
+    accountUuid: account.account_uuid,
+    accountId: account.account_id,
+    linkedinFeature: account.linkedin_feature,
+  };
 }
 
 serve(async (req) => {
@@ -69,11 +97,11 @@ serve(async (req) => {
 
     // Parse request body
     const body: SearchRequest = await req.json();
-    const { workspaceId, accountId, searchType, api, filters, cursor, limit = 25 } = body;
+    const { workspaceId, searchType, api, filters, cursor, limit = 25 } = body;
 
-    if (!workspaceId || !accountId) {
+    if (!workspaceId) {
       return new Response(
-        JSON.stringify({ error: "workspaceId and accountId are required" }),
+        JSON.stringify({ error: "workspaceId is required" }),
         { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
@@ -93,31 +121,20 @@ serve(async (req) => {
       );
     }
 
-    // Validate account - accountId is the UUID (id column), not the Unipile account_id
-    const { data: account, error: accountError } = await supabase
-      .from("accounts")
-      .select("id, account_id, status, channel")
-      .eq("id", accountId)
-      .eq("workspace_id", workspaceId)
-      .eq("channel", "linkedin")
-      .maybeSingle();
-
-    if (accountError || !account) {
+    // Get the global platform LinkedIn account for search/enrichment
+    let platformAccount;
+    try {
+      platformAccount = await getPlatformLinkedInSearchAccount(serviceClient);
+    } catch (e) {
       return new Response(
-        JSON.stringify({ error: "LinkedIn account not found" }),
-        { status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
-    }
-
-    if (account.status !== "connected") {
-      return new Response(
-        JSON.stringify({ error: "LinkedIn account is not connected" }),
+        JSON.stringify({ error: (e as Error).message }),
         { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
 
-    // The Unipile account_id for API calls
-    const unipileAccountId = account.account_id;
+    const unipileAccountId = platformAccount.accountId;
+    
+    console.log(`[LI_SEARCH_GLOBAL] workspaceId=${workspaceId} platformAccountUuid=${platformAccount.accountUuid} unipileAccountId=${unipileAccountId} feature=${platformAccount.linkedinFeature}`);
 
     // Check workspace settings and daily limits
     const { data: settings } = await supabase

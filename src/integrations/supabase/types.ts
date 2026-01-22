@@ -656,6 +656,47 @@ export type Database = {
           },
         ]
       }
+      platform_admins: {
+        Row: {
+          created_at: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
+      platform_settings: {
+        Row: {
+          id: number
+          linkedin_search_account_id: string | null
+          updated_at: string
+        }
+        Insert: {
+          id?: number
+          linkedin_search_account_id?: string | null
+          updated_at?: string
+        }
+        Update: {
+          id?: number
+          linkedin_search_account_id?: string | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "platform_settings_linkedin_search_account_id_fkey"
+            columns: ["linkedin_search_account_id"]
+            isOneToOne: false
+            referencedRelation: "accounts"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       profiles: {
         Row: {
           avatar_url: string | null
@@ -1039,6 +1080,14 @@ export type Database = {
         }
         Returns: number
       }
+      get_platform_linkedin_search_account: {
+        Args: never
+        Returns: {
+          account_id: string
+          account_uuid: string
+          linkedin_feature: string
+        }[]
+      }
       get_workspace_daily_usage: {
         Args: { p_usage_date: string; p_workspace_id: string }
         Returns: {
@@ -1057,6 +1106,7 @@ export type Database = {
         }
         Returns: number
       }
+      is_platform_admin: { Args: never; Returns: boolean }
       is_valid_phone: { Args: { identifier: string }; Returns: boolean }
       is_workspace_admin: { Args: { workspace_uuid: string }; Returns: boolean }
       is_workspace_member: {

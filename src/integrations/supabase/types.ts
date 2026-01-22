@@ -1365,6 +1365,10 @@ export type Database = {
         Args: { workspace_uuid: string }
         Returns: boolean
       }
+      log_client_event: {
+        Args: { p_action: string; p_metadata?: Json; p_workspace_id: string }
+        Returns: undefined
+      }
     }
     Enums: {
       [_ in never]: never

@@ -13,7 +13,7 @@ import { CreditCard, Search, Sparkles, AlertTriangle, Rocket, ExternalLink, Mail
 import { UsageChart } from "./UsageChart";
 import { useNavigate } from "react-router-dom";
 
-// Telemetry helper - fire and forget
+// Telemetry helper - uses RPC for proper permissions
 async function trackUpgradeEvent(
   workspaceId: string | undefined,
   action: string,
@@ -21,11 +21,10 @@ async function trackUpgradeEvent(
 ) {
   if (!workspaceId) return;
   try {
-    await supabase.from("usage_events").insert({
-      workspace_id: workspaceId,
-      action,
-      metadata,
-      count: 1,
+    await supabase.rpc("log_client_event", {
+      p_workspace_id: workspaceId,
+      p_action: action,
+      p_metadata: metadata,
     });
   } catch (e) {
     // Silent fail - telemetry should not break UX
@@ -96,6 +95,7 @@ export function WorkspaceBillingCard() {
     );
     const body = encodeURIComponent(
       `Workspace: ${currentWorkspace?.name || "N/A"}\n` +
+      `Workspace ID: ${currentWorkspace?.id || "N/A"}\n` +
       `Plano atual: ${plan?.name || "Starter"}\n\n` +
       `Uso hoje:\n` +
       `  - Pesquisas: ${searchUsed} / ${searchLimit}\n` +
@@ -110,7 +110,7 @@ export function WorkspaceBillingCard() {
     trackUpgradeEvent(currentWorkspace?.id, "upgrade_cta_clicked", {
       destination: "platform-admin",
     });
-    navigate("/platform-admin");
+    navigate("/platform-admin?tab=plans");
   };
 
   const handleRequestUpgrade = () => {

@@ -50,3 +50,24 @@ verify_jwt = false
 
 [functions.webhook-messages]
 verify_jwt = false
+
+[functions.process-scheduled-campaigns]
+verify_jwt = false
+
+[functions.send-linkedin-invite]
+verify_jwt = false
+
+[functions.linkedin-search]
+verify_jwt = false
+
+[functions.linkedin-search-parameters]
+verify_jwt = false
+
+[functions.linkedin-enrich-lead]
+verify_jwt = false
+
+[functions.linkedin-check-connection]
+verify_jwt = false
+
+[functions.linkedin-engage]
+verify_jwt = false

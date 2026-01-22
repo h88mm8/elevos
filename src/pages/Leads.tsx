@@ -80,8 +80,14 @@ export default function Leads() {
   const [enrichingLeads, setEnrichingLeads] = useState<Set<string>>(new Set());
 
   // Details drawer state
-  const [selectedLead, setSelectedLead] = useState<Lead | null>(null);
+  const [selectedLeadId, setSelectedLeadId] = useState<string | null>(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
+
+  // Get the selected lead from the leads array so it updates when refetched
+  const selectedLead = useMemo(() => {
+    if (!selectedLeadId) return null;
+    return leads.find(l => l.id === selectedLeadId) || null;
+  }, [selectedLeadId, leads]);
 
   // Filter state
   const [filters, setFilters] = useState<LeadFiltersType>({
@@ -487,7 +493,7 @@ export default function Leads() {
   }
 
   function openLeadDetails(lead: Lead) {
-    setSelectedLead(lead);
+    setSelectedLeadId(lead.id);
     setDrawerOpen(true);
   }
 

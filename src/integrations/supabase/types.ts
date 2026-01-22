@@ -1242,6 +1242,17 @@ export type Database = {
           workspace_timezone: string
         }[]
       }
+      consume_workspace_quota: {
+        Args: {
+          p_account_id: string
+          p_action: string
+          p_daily_limit: number
+          p_metadata?: Json
+          p_user_id?: string
+          p_workspace_id: string
+        }
+        Returns: Json
+      }
       deduct_credits: {
         Args: {
           p_amount: number

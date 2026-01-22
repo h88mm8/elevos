@@ -6,10 +6,6 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
-function getTodayDate(): string {
-  return new Date().toISOString().split("T")[0];
-}
-
 function extractLinkedInPublicIdentifier(linkedinUrl: string): string | null {
   if (!linkedinUrl) return null;
   const match = linkedinUrl.match(/linkedin\.com\/in\/([^\/\?]+)/i);
@@ -31,6 +27,13 @@ interface WorkspacePlan {
   monthly_search_page_limit: number | null;
   monthly_enrich_limit: number | null;
   status: string;
+}
+
+interface QuotaResult {
+  allowed: boolean;
+  current: number;
+  limit: number;
+  action: string;
 }
 
 // Helper to get workspace plan with limits
@@ -69,42 +72,55 @@ async function getWorkspacePlan(serviceClient: any, workspaceId: string): Promis
   return data[0];
 }
 
-// Helper to get today's usage from usage_events
-async function getTodayEnrichCount(serviceClient: any, workspaceId: string): Promise<number> {
-  const { data, error } = await serviceClient.rpc("get_workspace_usage_today", {
-    p_workspace_id: workspaceId
+// Helper to consume quota atomically (prevents race conditions)
+async function consumeQuotaAtomic(
+  serviceClient: any,
+  workspaceId: string,
+  action: string,
+  dailyLimit: number,
+  accountId: string,
+  userId: string | null,
+  metadata: Record<string, unknown> = {}
+): Promise<QuotaResult> {
+  const { data, error } = await serviceClient.rpc("consume_workspace_quota", {
+    p_workspace_id: workspaceId,
+    p_action: action,
+    p_daily_limit: dailyLimit,
+    p_account_id: accountId,
+    p_user_id: userId,
+    p_metadata: metadata,
   });
   
   if (error) {
-    console.error("[PLAN_LIMIT] Error fetching usage:", error);
-    return 0;
+    console.error("[PLAN_LIMIT] Error consuming quota:", error);
+    // Fail open with a warning - return allowed but log error
+    return { allowed: true, current: 0, limit: dailyLimit, action };
   }
   
-  const enrichUsage = data?.find((u: any) => u.action === 'linkedin_enrich');
-  return Number(enrichUsage?.total_count ?? 0);
+  return data as QuotaResult;
 }
 
-// Helper to log usage event
-async function logUsageEvent(
-  serviceClient: any, 
-  workspaceId: string, 
+// Helper to log error event (for Unipile failures after quota consumed)
+async function logErrorEvent(
+  serviceClient: any,
+  workspaceId: string,
   userId: string | null,
-  action: string,
   accountId: string,
-  metadata: Record<string, unknown> = {}
+  leadId: string,
+  errorDetails: Record<string, unknown>
 ): Promise<void> {
   const { error } = await serviceClient
     .from("usage_events")
     .insert({
       workspace_id: workspaceId,
       user_id: userId,
-      action,
+      action: 'linkedin_enrich_error',
       account_id: accountId,
-      metadata,
+      metadata: { ...errorDetails, lead_id: leadId },
     });
   
   if (error) {
-    console.error("[PLAN_LIMIT] Error logging usage event:", error);
+    console.error("[PLAN_LIMIT] Error logging error event:", error);
   }
 }
 
@@ -253,30 +269,40 @@ serve(async (req) => {
 
     const unipileAccountId = platformAccount.accountId;
     
-    // ===== PLAN LIMIT CHECK =====
+    // ===== ATOMIC QUOTA CHECK =====
     const workspacePlan = await getWorkspacePlan(serviceClient, workspaceId);
-    const currentEnrichCount = await getTodayEnrichCount(serviceClient, workspaceId);
     
-    console.log(`[PLAN_LIMIT] workspaceId=${workspaceId} planCode=${workspacePlan.plan_code} action=linkedin_enrich current=${currentEnrichCount} limit=${workspacePlan.daily_enrich_limit}`);
+    console.log(`[PLAN_LIMIT] workspaceId=${workspaceId} planCode=${workspacePlan.plan_code} action=linkedin_enrich limit=${workspacePlan.daily_enrich_limit}`);
     
-    if (currentEnrichCount >= workspacePlan.daily_enrich_limit) {
-      await logUsageEvent(serviceClient, workspaceId, user.id, 'linkedin_enrich_blocked', unipileAccountId, {
-        blocked: true,
-        reason: 'daily_limit_reached',
-        plan_code: workspacePlan.plan_code,
+    const quotaResult = await consumeQuotaAtomic(
+      serviceClient,
+      workspaceId,
+      'linkedin_enrich',
+      workspacePlan.daily_enrich_limit,
+      unipileAccountId,
+      user.id,
+      {
         lead_id: leadId,
-      });
+        plan_code: workspacePlan.plan_code,
+      }
+    );
+    
+    if (!quotaResult.allowed) {
+      console.log(`[PLAN_LIMIT] BLOCKED workspaceId=${workspaceId} action=linkedin_enrich current=${quotaResult.current} limit=${quotaResult.limit}`);
       
       return new Response(
         JSON.stringify({
-          error: "Daily enrich limit reached",
-          usage: { current: currentEnrichCount, limit: workspacePlan.daily_enrich_limit },
+          error: "Daily limit reached",
+          action: "linkedin_enrich",
+          usage: { current: quotaResult.current, limit: quotaResult.limit },
           plan: { code: workspacePlan.plan_code, name: workspacePlan.plan_name },
         }),
         { status: 429, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
-    // ===== END PLAN LIMIT CHECK =====
+    
+    console.log(`[PLAN_LIMIT] ALLOWED workspaceId=${workspaceId} action=linkedin_enrich current=${quotaResult.current} limit=${quotaResult.limit}`);
+    // ===== END ATOMIC QUOTA CHECK =====
 
     // Extract public identifier
     const publicIdentifier = extractLinkedInPublicIdentifier(lead.linkedin_url);
@@ -307,10 +333,11 @@ serve(async (req) => {
       const errorText = await profileResponse.text();
       console.error("[linkedin-enrich-lead] Profile fetch error:", errorText);
       
-      await logUsageEvent(serviceClient, workspaceId, user.id, 'linkedin_enrich', unipileAccountId, {
+      // Log error event (quota already consumed)
+      await logErrorEvent(serviceClient, workspaceId, user.id, unipileAccountId, leadId, {
         error: true,
         status: profileResponse.status,
-        lead_id: leadId,
+        details: errorText.substring(0, 200),
       });
       
       return new Response(
@@ -490,12 +517,6 @@ serve(async (req) => {
       );
     }
 
-    // Log successful usage event
-    await logUsageEvent(serviceClient, workspaceId, user.id, 'linkedin_enrich', unipileAccountId, {
-      lead_id: leadId,
-      fields_updated: Object.keys(updateData).length,
-    });
-
     const enrichedFields = Object.keys(updateData).filter(k => k !== "enriched_at");
 
     return new Response(
@@ -505,8 +526,8 @@ serve(async (req) => {
         data: updateData,
         connectionDegree: profileData.connection_degree,
         usage: {
-          current: currentEnrichCount + 1,
-          limit: workspacePlan.daily_enrich_limit,
+          current: quotaResult.current,
+          limit: quotaResult.limit,
         },
         plan: {
           code: workspacePlan.plan_code,

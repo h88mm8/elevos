@@ -29,6 +29,8 @@ export interface WorkspacePlan {
 export interface WorkspaceUsageToday {
   linkedin_search_pages: number;
   linkedin_enrichments: number;
+  linkedin_search_blocked: number;
+  linkedin_enrich_blocked: number;
 }
 
 export function useWorkspacePlan() {
@@ -113,6 +115,8 @@ export function useWorkspacePlan() {
       const usage: WorkspaceUsageToday = {
         linkedin_search_pages: 0,
         linkedin_enrichments: 0,
+        linkedin_search_blocked: 0,
+        linkedin_enrich_blocked: 0,
       };
       
       if (data && Array.isArray(data)) {
@@ -121,6 +125,10 @@ export function useWorkspacePlan() {
             usage.linkedin_search_pages = Number(row.total_count);
           } else if (row.action === 'linkedin_enrich') {
             usage.linkedin_enrichments = Number(row.total_count);
+          } else if (row.action === 'linkedin_search_page_blocked') {
+            usage.linkedin_search_blocked = Number(row.total_count);
+          } else if (row.action === 'linkedin_enrich_blocked') {
+            usage.linkedin_enrich_blocked = Number(row.total_count);
           }
         }
       }

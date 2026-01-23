@@ -74,3 +74,6 @@ verify_jwt = false
 
 [functions.update-platform-settings]
 verify_jwt = false
+
+[functions.linkedin-enrich-profile-apify]
+verify_jwt = false

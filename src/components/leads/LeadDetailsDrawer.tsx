@@ -27,11 +27,11 @@ import {
   MessageSquare,
   Loader2,
   Sparkles,
-  Brain,
 } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
 import { useToast } from '@/hooks/use-toast';
 import { LinkedInAdvancedSection } from './LinkedInAdvancedSection';
+import { useTags } from '@/hooks/useTags';
 
 interface LeadDetailsDrawerProps {
   lead: Lead | null;
@@ -50,10 +50,13 @@ export function LeadDetailsDrawer({
 }: LeadDetailsDrawerProps) {
   const navigate = useNavigate();
   const { toast } = useToast();
+  const { getLeadTags } = useTags();
   
   const [isEnriching, setIsEnriching] = useState(false);
 
   if (!lead) return null;
+
+  const leadTags = getLeadTags(lead.id);
 
   const getLocation = () => {
     const parts = [lead.city, lead.state, lead.country].filter(Boolean);
@@ -117,11 +120,28 @@ export function LeadDetailsDrawer({
       <SheetContent className="w-[400px] sm:w-[540px] overflow-y-auto">
         <SheetHeader>
           <div className="flex items-start justify-between gap-3">
-            <div>
+            <div className="space-y-2">
               <SheetTitle className="text-xl">{lead.full_name || 'Lead sem nome'}</SheetTitle>
-              <SheetDescription>
-                {lead.headline || lead.job_title || 'Sem descrição'}
-              </SheetDescription>
+              {/* Tags aparecem logo após o nome */}
+              {leadTags.length > 0 && (
+                <div className="flex flex-wrap gap-1">
+                  {leadTags.map((tag) => (
+                    <Badge 
+                      key={tag.id} 
+                      style={{ backgroundColor: tag.color }}
+                      className="text-white text-xs"
+                    >
+                      {tag.name}
+                    </Badge>
+                  ))}
+                </div>
+              )}
+              {/* Headline aparece após as tags */}
+              {(lead.headline || lead.job_title) && (
+                <SheetDescription className="mt-1">
+                  {lead.headline || lead.job_title}
+                </SheetDescription>
+              )}
             </div>
             {phoneNumber && (
               <Button onClick={handleStartConversation} size="sm" className="shrink-0">

@@ -4,6 +4,8 @@ import { useLeads } from '@/hooks/useLeads';
 import { useLeadLists } from '@/hooks/useLeadLists';
 import { useCredits } from '@/hooks/useCredits';
 import { useTags } from '@/hooks/useTags';
+import { useWorkspacePlan } from '@/hooks/useWorkspacePlan';
+import { useEnrichmentJobs } from '@/hooks/useEnrichmentJobs';
 import AppLayout from '@/components/layout/AppLayout';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -19,8 +21,15 @@ import { LeadDetailsDrawer } from '@/components/leads/LeadDetailsDrawer';
 import { LeadFilters } from '@/components/leads/LeadFilters';
 import { MoveLeadsDialog } from '@/components/leads/MoveLeadsDialog';
 import { DeleteLeadsDialog } from '@/components/leads/DeleteLeadsDialog';
+import { DeepEnrichDialog } from '@/components/leads/DeepEnrichDialog';
 import { LeadTagsPopover, LeadTagsBadges } from '@/components/leads/LeadTagsPopover';
 import { BulkTagsPopover } from '@/components/leads/BulkTagsPopover';
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from '@/components/ui/tooltip';
 
 import { 
   Phone, 
@@ -37,6 +46,7 @@ import {
   Tag,
   Linkedin,
   Sparkles,
+  Brain,
 } from 'lucide-react';
 import {
   Popover,
@@ -53,6 +63,8 @@ export default function Leads() {
   const { lists, createList } = useLeadLists();
   const { credits, refetchCredits } = useCredits();
   const { tags, refetchTags } = useTags();
+  const { planLimits, usageToday, refetchUsage } = useWorkspacePlan();
+  const { isLeadEnriching, refetch: refetchJobs } = useEnrichmentJobs();
   
   const { toast } = useToast();
   const navigate = useNavigate();
@@ -89,6 +101,7 @@ export default function Leads() {
   // Dialog states
   const [moveDialogOpen, setMoveDialogOpen] = useState(false);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [deepEnrichDialogOpen, setDeepEnrichDialogOpen] = useState(false);
   const [isMoving, setIsMoving] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
 
@@ -537,6 +550,27 @@ export default function Leads() {
                         </div>
                       </PopoverContent>
                     </Popover>
+                    <TooltipProvider>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <Button
+                            variant="secondary"
+                            size="sm"
+                            onClick={() => setDeepEnrichDialogOpen(true)}
+                          >
+                            <Brain className="mr-2 h-4 w-4" />
+                            Enrich Deep
+                          </Button>
+                        </TooltipTrigger>
+                        <TooltipContent className="max-w-xs">
+                          <p className="font-medium">Enriquecimento profundo via LinkedIn</p>
+                          <p className="text-xs text-muted-foreground mt-1">
+                            Histórico completo de carreira, skills, educação e conexões. 
+                            Consome créditos premium.
+                          </p>
+                        </TooltipContent>
+                      </Tooltip>
+                    </TooltipProvider>
                     <Button
                       variant="outline"
                       size="sm"
@@ -623,7 +657,12 @@ export default function Leads() {
                           <div className="flex flex-col gap-0.5">
                             <div className="flex items-center gap-1.5">
                               <span>{lead.full_name || '-'}</span>
-                              {lead.last_enriched_at && (
+                              {isLeadEnriching(lead.id) ? (
+                                <Badge variant="secondary" className="text-xs gap-1 px-1.5 py-0">
+                                  <Brain className="h-3 w-3 animate-pulse" />
+                                  Enriquecendo...
+                                </Badge>
+                              ) : lead.last_enriched_at && (
                                 <span title="Enriquecido"><Sparkles className="h-3 w-3 text-primary" /></span>
                               )}
                             </div>
@@ -783,6 +822,23 @@ export default function Leads() {
         onConfirm={handleDeleteLeads}
         selectedCount={selectedLeads.size}
         isLoading={isDeleting}
+      />
+
+      {/* Deep Enrich Dialog */}
+      <DeepEnrichDialog
+        open={deepEnrichDialogOpen}
+        onOpenChange={setDeepEnrichDialogOpen}
+        selectedLeads={leads.filter(l => selectedLeads.has(l.id))}
+        workspaceId={currentWorkspace?.id || ''}
+        dailyLimit={(planLimits as any)?.daily_enrich_deep_limit || 10}
+        usedToday={usageToday?.linkedin_enrich_deep || 0}
+        onSuccess={() => {
+          setSelectedLeads(new Set());
+          refetchJobs();
+          refetchUsage();
+          // Start polling leads to see updated data
+          setTimeout(() => refetchLeads(), 5000);
+        }}
       />
     </AppLayout>
   );

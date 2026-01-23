@@ -2,7 +2,6 @@ import { useState } from 'react';
 import {
   Dialog,
   DialogContent,
-  DialogDescription,
   DialogFooter,
   DialogHeader,
   DialogTitle,
@@ -17,7 +16,8 @@ import {
   Check, 
   AlertTriangle, 
   Loader2,
-  Shield,
+  CreditCard,
+  Rocket,
 } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
 import { useToast } from '@/hooks/use-toast';
@@ -43,7 +43,7 @@ export function DeepEnrichDialog({
   onSuccess,
 }: DeepEnrichDialogProps) {
   const { toast } = useToast();
-  const [includeEmail, setIncludeEmail] = useState(false);
+  const [withEmail, setWithEmail] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   // Filter leads that have LinkedIn URL
@@ -51,8 +51,9 @@ export function DeepEnrichDialog({
   const ineligibleCount = selectedLeads.length - eligibleLeads.length;
 
   const remaining = dailyLimit - usedToday;
-  const canEnrich = Math.min(eligibleLeads.length, remaining);
-  const willExceed = eligibleLeads.length > remaining;
+  const canEnrich = Math.min(eligibleLeads.length, Math.max(0, remaining));
+  const willExceed = eligibleLeads.length > remaining && remaining > 0;
+  const isNearLimit = remaining <= Math.ceil(dailyLimit * 0.2) && remaining > 0;
 
   async function handleSubmit() {
     if (!workspaceId || eligibleLeads.length === 0) return;
@@ -64,7 +65,7 @@ export function DeepEnrichDialog({
         body: {
           workspaceId,
           leadIds: eligibleLeads.slice(0, canEnrich).map(l => l.id),
-          mode: includeEmail ? 'profile_with_email' : 'profile_only',
+          mode: withEmail ? 'profile_with_email' : 'profile_only',
         },
       });
 
@@ -84,8 +85,8 @@ export function DeepEnrichDialog({
       }
 
       toast({
-        title: 'Enriquecimento iniciado!',
-        description: 'Você pode continuar usando o sistema. Os dados aparecerão automaticamente.',
+        title: '🧠 Enriquecimento iniciado!',
+        description: 'Você pode continuar trabalhando. Os dados aparecerão automaticamente.',
       });
 
       onSuccess();
@@ -106,67 +107,44 @@ export function DeepEnrichDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-[480px]">
         <DialogHeader>
-          <DialogTitle className="flex items-center gap-2">
+          <DialogTitle className="flex items-center gap-2 text-lg">
             <Brain className="h-5 w-5 text-primary" />
-            Enriquecimento Profundo via LinkedIn
+            Enriquecimento Profundo
           </DialogTitle>
-          <DialogDescription>
-            Extraia dados completos do perfil LinkedIn dos leads selecionados.
-          </DialogDescription>
         </DialogHeader>
 
-        <div className="space-y-4 py-4">
-        {/* Features checklist */}
-          <div className="grid grid-cols-2 gap-2">
-            <div className="flex items-center gap-2 text-sm">
-              <Check className="h-4 w-4 text-primary" />
-              <span>Experiência profissional completa</span>
-            </div>
-            <div className="flex items-center gap-2 text-sm">
-              <Check className="h-4 w-4 text-primary" />
-              <span>Cargo e empresa atual</span>
-            </div>
-            <div className="flex items-center gap-2 text-sm">
-              <Check className="h-4 w-4 text-primary" />
-              <span>Skills e especializações</span>
-            </div>
-            <div className="flex items-center gap-2 text-sm">
-              <Check className="h-4 w-4 text-primary" />
-              <span>Educação e certificações</span>
-            </div>
-            <div className="flex items-center gap-2 text-sm">
-              <Check className="h-4 w-4 text-primary" />
-              <span>Localização detalhada</span>
-            </div>
-            <div className="flex items-center gap-2 text-sm">
-              <Check className="h-4 w-4 text-primary" />
-              <span>Seguidores e conexões</span>
-            </div>
+        <div className="space-y-5 py-2">
+          {/* Features checklist */}
+          <div className="space-y-2">
+            {[
+              'Experiência profissional completa',
+              'Cargo e empresa atual',
+              'Skills e especializações',
+              'Educação e certificações',
+              'Conexões e seguidores',
+            ].map((feature) => (
+              <div key={feature} className="flex items-center gap-2 text-sm">
+                <Check className="h-4 w-4 text-primary shrink-0" />
+                <span>{feature}</span>
+              </div>
+            ))}
           </div>
 
           {/* Billing box */}
-          <div className="p-4 rounded-lg bg-muted/50 border space-y-2">
-            <div className="flex items-center gap-2 font-medium text-sm">
-              <Shield className="h-4 w-4 text-primary" />
-              Consumo de créditos
+          <div className="p-4 rounded-lg bg-muted/50 border">
+            <div className="flex items-start gap-2">
+              <CreditCard className="h-4 w-4 text-muted-foreground mt-0.5" />
+              <p className="text-sm text-muted-foreground">
+                💳 Consumo: 1 crédito premium por lead enriquecido com sucesso
+              </p>
             </div>
-            <ul className="text-sm text-muted-foreground space-y-1">
-              <li className="flex items-center gap-2">
-                <span className="w-1.5 h-1.5 rounded-full bg-primary" />
-                1 crédito premium por lead enriquecido com sucesso
-              </li>
-              <li className="flex items-center gap-2">
-                <span className="w-1.5 h-1.5 rounded-full bg-muted-foreground" />
-                Nenhum crédito é consumido em falhas
-              </li>
-            </ul>
           </div>
 
           {/* Email option */}
           <div className="flex items-center justify-between p-3 rounded-lg border">
             <div className="space-y-0.5">
               <Label htmlFor="include-email" className="text-sm font-medium">
-                Incluir busca de email profissional
+                Buscar email profissional
               </Label>
               <p className="text-xs text-muted-foreground">
                 Pode aumentar o custo por lead
@@ -174,8 +152,8 @@ export function DeepEnrichDialog({
             </div>
             <Switch
               id="include-email"
-              checked={includeEmail}
-              onCheckedChange={setIncludeEmail}
+              checked={withEmail}
+              onCheckedChange={setWithEmail}
             />
           </div>
 
@@ -189,27 +167,55 @@ export function DeepEnrichDialog({
             </Alert>
           )}
 
-          {/* Quota warning */}
+          {/* Quota warning - near limit */}
+          {isNearLimit && !willExceed && (
+            <Alert className="border-warning bg-warning/10">
+              <AlertTriangle className="h-4 w-4 text-warning" />
+              <AlertDescription>
+                ⚠ Você tem {remaining} crédito{remaining !== 1 ? 's' : ''} restante{remaining !== 1 ? 's' : ''} hoje
+              </AlertDescription>
+            </Alert>
+          )}
+
+          {/* Quota warning - will exceed */}
           {willExceed && (
             <Alert variant="destructive">
               <AlertTriangle className="h-4 w-4" />
               <AlertDescription>
                 Você tem {remaining} crédito{remaining !== 1 ? 's' : ''} restante{remaining !== 1 ? 's' : ''} hoje. 
-                Apenas {canEnrich} leads serão enriquecidos.
+                Apenas {canEnrich} lead{canEnrich !== 1 ? 's' : ''} serão enriquecidos.
               </AlertDescription>
             </Alert>
           )}
 
+          {/* Quota exceeded - upsell */}
+          {remaining <= 0 && (
+            <Alert variant="destructive" className="flex flex-col gap-2">
+              <div className="flex items-center gap-2">
+                <AlertTriangle className="h-4 w-4" />
+                <AlertDescription>
+                  Você atingiu o limite diário de Enrich Deep.
+                </AlertDescription>
+              </div>
+              <Button size="sm" className="w-full gap-2 mt-1">
+                <Rocket className="h-4 w-4" />
+                Aumentar limite
+              </Button>
+            </Alert>
+          )}
+
           {/* Remaining credits */}
-          <div className="flex items-center justify-between text-sm">
-            <span className="text-muted-foreground">Créditos restantes hoje</span>
-            <Badge 
-              variant={remaining < 5 ? 'destructive' : 'secondary'}
-              className="font-mono"
-            >
-              {remaining} / {dailyLimit}
-            </Badge>
-          </div>
+          {remaining > 0 && (
+            <div className="flex items-center justify-between text-sm">
+              <span className="text-muted-foreground">Créditos restantes hoje</span>
+              <Badge 
+                variant={remaining < 5 ? 'destructive' : 'secondary'}
+                className="font-mono"
+              >
+                {remaining} / {dailyLimit}
+              </Badge>
+            </div>
+          )}
         </div>
 
         <DialogFooter>
@@ -227,7 +233,6 @@ export function DeepEnrichDialog({
               </>
             ) : (
               <>
-                <Brain className="h-4 w-4 mr-2" />
                 Enriquecer {canEnrich} lead{canEnrich !== 1 ? 's' : ''}
               </>
             )}

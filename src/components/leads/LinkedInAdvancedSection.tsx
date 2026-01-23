@@ -7,9 +7,8 @@ import {
   GraduationCap, 
   Users, 
   MapPin,
-  Calendar,
-  Building2,
   Quote,
+  Megaphone,
 } from 'lucide-react';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
@@ -67,20 +66,46 @@ export function LinkedInAdvancedSection({ lead }: LinkedInAdvancedSectionProps) 
           </h3>
           {lead.last_enriched_at && (
             <Badge variant="secondary" className="text-xs">
-              Enriquecido em {format(new Date(lead.last_enriched_at), "dd MMM yyyy", { locale: ptBR })}
+              Enriquecido profundamente • {format(new Date(lead.last_enriched_at), "dd MMM yyyy", { locale: ptBR })}
             </Badge>
           )}
         </div>
 
+        {/* Current position */}
+        {(lead.job_title || lead.company) && (
+          <div className="space-y-1">
+            <div className="flex items-center gap-2 text-sm font-medium text-muted-foreground">
+              <Briefcase className="h-4 w-4" />
+              Cargo Atual
+            </div>
+            <p className="text-sm font-medium">
+              {lead.job_title} {lead.job_title && lead.company && '·'} {lead.company}
+            </p>
+          </div>
+        )}
+
+        {/* Location */}
+        {(lead.city || lead.state || lead.country) && (
+          <div className="space-y-1">
+            <div className="flex items-center gap-2 text-sm font-medium text-muted-foreground">
+              <MapPin className="h-4 w-4" />
+              Localização
+            </div>
+            <p className="text-sm">
+              📍 {[lead.city, lead.state, lead.country].filter(Boolean).join(', ')}
+            </p>
+          </div>
+        )}
+
         {/* About section */}
         {lead.about && (
           <div className="space-y-2">
-            <div className="flex items-center gap-2 text-sm font-medium">
-              <Quote className="h-4 w-4 text-muted-foreground" />
-              Sobre
+            <div className="flex items-center gap-2 text-sm font-medium text-muted-foreground">
+              <Quote className="h-4 w-4" />
+              About
             </div>
             <div className="p-3 bg-muted/50 rounded-lg">
-              <p className="text-sm text-muted-foreground whitespace-pre-wrap">
+              <p className="text-sm text-muted-foreground whitespace-pre-wrap line-clamp-6">
                 {lead.about}
               </p>
             </div>
@@ -90,19 +115,19 @@ export function LinkedInAdvancedSection({ lead }: LinkedInAdvancedSectionProps) 
         {/* Skills */}
         {lead.skills && lead.skills.length > 0 && (
           <div className="space-y-2">
-            <div className="flex items-center gap-2 text-sm font-medium">
-              <Brain className="h-4 w-4 text-muted-foreground" />
+            <div className="flex items-center gap-2 text-sm font-medium text-muted-foreground">
+              <Brain className="h-4 w-4" />
               Skills
             </div>
             <div className="flex flex-wrap gap-1.5">
-              {lead.skills.slice(0, 15).map((skill, idx) => (
+              {lead.skills.slice(0, 12).map((skill, idx) => (
                 <Badge key={idx} variant="outline" className="text-xs">
                   {skill}
                 </Badge>
               ))}
-              {lead.skills.length > 15 && (
+              {lead.skills.length > 12 && (
                 <Badge variant="secondary" className="text-xs">
-                  +{lead.skills.length - 15}
+                  +{lead.skills.length - 12}
                 </Badge>
               )}
             </div>
@@ -112,12 +137,12 @@ export function LinkedInAdvancedSection({ lead }: LinkedInAdvancedSectionProps) 
         {/* Experience timeline */}
         {experiences.length > 0 && (
           <div className="space-y-2">
-            <div className="flex items-center gap-2 text-sm font-medium">
-              <Briefcase className="h-4 w-4 text-muted-foreground" />
+            <div className="flex items-center gap-2 text-sm font-medium text-muted-foreground">
+              <Briefcase className="h-4 w-4" />
               Experiência
             </div>
             <div className="space-y-3">
-              {experiences.slice(0, 5).map((exp, idx) => (
+              {experiences.slice(0, 4).map((exp, idx) => (
                 <div 
                   key={idx} 
                   className="relative pl-4 border-l-2 border-muted pb-3 last:pb-0"
@@ -143,22 +168,17 @@ export function LinkedInAdvancedSection({ lead }: LinkedInAdvancedSectionProps) 
         {/* Education */}
         {education.length > 0 && (
           <div className="space-y-2">
-            <div className="flex items-center gap-2 text-sm font-medium">
-              <GraduationCap className="h-4 w-4 text-muted-foreground" />
+            <div className="flex items-center gap-2 text-sm font-medium text-muted-foreground">
+              <GraduationCap className="h-4 w-4" />
               Educação
             </div>
             <div className="space-y-2">
-              {education.slice(0, 3).map((edu, idx) => (
+              {education.slice(0, 2).map((edu, idx) => (
                 <div key={idx} className="p-2 bg-muted/30 rounded-lg">
                   <p className="text-sm font-medium">{edu.schoolName}</p>
                   {(edu.degree || edu.fieldOfStudy) && (
                     <p className="text-xs text-muted-foreground">
                       {[edu.degree, edu.fieldOfStudy].filter(Boolean).join(' • ')}
-                    </p>
-                  )}
-                  {(edu.startYear || edu.endYear) && (
-                    <p className="text-xs text-muted-foreground">
-                      {edu.startYear} — {edu.endYear || 'Presente'}
                     </p>
                   )}
                 </div>
@@ -175,20 +195,24 @@ export function LinkedInAdvancedSection({ lead }: LinkedInAdvancedSectionProps) 
                 <Users className="h-4 w-4 text-primary" />
                 <div>
                   <p className="text-lg font-semibold">
-                    {lead.connections.toLocaleString('pt-BR')}
+                    {lead.connections >= 500 
+                      ? `${Math.floor(lead.connections / 1000)}k+`
+                      : lead.connections.toLocaleString('pt-BR')}
                   </p>
-                  <p className="text-xs text-muted-foreground">Conexões</p>
+                  <p className="text-xs text-muted-foreground">conexões</p>
                 </div>
               </div>
             )}
             {lead.followers && (
               <div className="flex items-center gap-2 p-3 bg-muted/30 rounded-lg">
-                <Users className="h-4 w-4 text-primary" />
+                <Megaphone className="h-4 w-4 text-primary" />
                 <div>
                   <p className="text-lg font-semibold">
-                    {lead.followers.toLocaleString('pt-BR')}
+                    {lead.followers >= 1000 
+                      ? `${(lead.followers / 1000).toFixed(1)}k`
+                      : lead.followers.toLocaleString('pt-BR')}
                   </p>
-                  <p className="text-xs text-muted-foreground">Seguidores</p>
+                  <p className="text-xs text-muted-foreground">seguidores</p>
                 </div>
               </div>
             )}

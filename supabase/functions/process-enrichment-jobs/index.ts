@@ -18,29 +18,71 @@ interface QuotaResult {
   action: string;
 }
 
+// Profile data from harvestapi/linkedin-profile-details-extractor
 interface ApifyProfileData {
+  // Identity
+  id?: string;
   publicIdentifier?: string;
-  linkedInUrl?: string;
+  linkedinUrl?: string;  // lowercase 'i' in new actor
   firstName?: string;
   lastName?: string;
-  fullName?: string;
   headline?: string;
   about?: string;
-  location?: string;
-  city?: string;
-  country?: string;
-  skills?: Array<{ name: string }>;
+  
+  // Location
+  location?: {
+    linkedinText?: string;
+    countryCode?: string;
+    parsed?: {
+      text?: string;
+      country?: string;
+      state?: string;
+      city?: string;
+    };
+  };
+  
+  // Skills (array of skill objects)
+  skills?: Array<{ name: string; positions?: string[] }>;
+  topSkills?: string;
+  
+  // Social
   connectionsCount?: number;
   followerCount?: number;
+  
+  // Contact (if email mode enabled)
   email?: string;
   phone?: string;
+  
+  // Experience
+  currentPosition?: Array<{ companyName?: string }>;
   experience?: Array<{
     companyName?: string;
     position?: string;
-    companyIndustry?: string;
-    companySize?: string;
-    jobStillWorking?: boolean;
+    employmentType?: string;
+    location?: string;
+    duration?: string;
+    description?: string;
+    startDate?: { text?: string };
+    endDate?: { text?: string };
+    skills?: string[];
   }>;
+  
+  // Education
+  education?: Array<{
+    schoolName?: string;
+    degree?: string;
+    fieldOfStudy?: string;
+    period?: string;
+  }>;
+  
+  // Status
+  status?: number;
+  openToWork?: boolean;
+  hiring?: boolean;
+  premium?: boolean;
+  influencer?: boolean;
+  verified?: boolean;
+  
   [key: string]: unknown;
 }
 
@@ -139,11 +181,22 @@ async function fetchDataset(
   return response.json();
 }
 
-// Parse location string
-function parseLocation(location: string | undefined): { city?: string; state?: string; country?: string } {
-  if (!location) return {};
+// Parse location from the new actor format
+function parseLocationFromProfile(profile: ApifyProfileData): { city?: string; state?: string; country?: string } {
+  // Try parsed location first
+  if (profile.location?.parsed) {
+    return {
+      city: profile.location.parsed.city,
+      state: profile.location.parsed.state,
+      country: profile.location.parsed.country,
+    };
+  }
   
-  const parts = location.split(",").map((p) => p.trim());
+  // Fallback to text parsing
+  const locationText = profile.location?.linkedinText;
+  if (!locationText) return {};
+  
+  const parts = locationText.split(",").map((p) => p.trim());
   
   if (parts.length === 1) return { country: parts[0] };
   if (parts.length === 2) return { city: parts[0], country: parts[1] };
@@ -265,8 +318,8 @@ Deno.serve(async (req) => {
       let errorCount = 0;
 
       for (const profile of profiles) {
-        // Find matching lead
-        const profileUrl = profile.linkedInUrl ||
+        // Find matching lead - use linkedinUrl (lowercase i in new actor)
+        const profileUrl = profile.linkedinUrl ||
           (profile.publicIdentifier ? `https://www.linkedin.com/in/${profile.publicIdentifier}` : null);
 
         if (!profileUrl) {
@@ -339,26 +392,29 @@ Deno.serve(async (req) => {
             status: "completed",
           });
 
-          // ROBUST MAPPER: Extract current experience
+          // ROBUST MAPPER for harvestapi actor format
+          // Current job: check currentPosition or first experience with no endDate
           const currentExperience =
-            profile.experience?.find((e) => e.jobStillWorking) ??
+            profile.experience?.find((e) => e.endDate?.text === "Present") ??
             profile.experience?.[0];
 
-          const location = parseLocation(profile.location || profile.city);
+          const location = parseLocationFromProfile(profile);
 
-          // Build update - NO linkedin_profile_json (already in linkedin_profiles.raw_json)
-          // deno-lint-ignore no-explicit-any
-          const updateData: Record<string, any> = {
-            full_name: profile.fullName,
+          // Build full name from first + last
+          const fullName = [profile.firstName, profile.lastName].filter(Boolean).join(" ") || undefined;
+
+          // Build update
+          const updateData: Record<string, unknown> = {
+            first_name: profile.firstName,
+            last_name: profile.lastName,
+            full_name: fullName,
             headline: profile.headline,
             about: profile.about,
-            company: currentExperience?.companyName,
+            company: currentExperience?.companyName || profile.currentPosition?.[0]?.companyName,
             job_title: currentExperience?.position,
-            industry: currentExperience?.companyIndustry,
-            company_size: currentExperience?.companySize,
             city: location.city,
             state: location.state,
-            country: profile.country || location.country,
+            country: location.country,
             skills: profile.skills?.map((s) => s.name),
             connections: profile.connectionsCount,
             followers: profile.followerCount,

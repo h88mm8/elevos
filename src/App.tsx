@@ -14,6 +14,7 @@ import Campaigns from "./pages/Campaigns";
 import Settings from "./pages/Settings";
 import Tags from "./pages/Tags";
 import PlatformAdmin from "./pages/PlatformAdmin";
+import EnrichmentJobs from "./pages/EnrichmentJobs";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -34,6 +35,7 @@ const App = () => (
             <Route path="/campaigns" element={<ProtectedRoute><Campaigns /></ProtectedRoute>} />
             <Route path="/settings" element={<ProtectedRoute><Settings /></ProtectedRoute>} />
             <Route path="/tags" element={<ProtectedRoute><Tags /></ProtectedRoute>} />
+            <Route path="/enrichment-jobs" element={<ProtectedRoute><EnrichmentJobs /></ProtectedRoute>} />
             <Route path="/platform-admin" element={<ProtectedRoute><PlatformAdmin /></ProtectedRoute>} />
             <Route path="/" element={<Navigate to="/dashboard" replace />} />
             <Route path="*" element={<NotFound />} />

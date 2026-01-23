@@ -8,6 +8,7 @@ export interface Plan {
   name: string;
   daily_search_page_limit: number;
   daily_enrich_limit: number;
+  daily_enrich_deep_limit: number;
   monthly_search_page_limit: number | null;
   monthly_enrich_limit: number | null;
   is_default: boolean;

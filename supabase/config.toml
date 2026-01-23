@@ -1,11 +1,5 @@
 project_id = "pcqompvgdgufjqibiwdj"
 
-[functions.search-leads]
-verify_jwt = false
-
-[functions.get-leads-results]
-verify_jwt = false
-
 [functions.enrich-lead]
 verify_jwt = false
 

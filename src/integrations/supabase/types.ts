@@ -532,6 +532,7 @@ export type Database = {
       }
       leads: {
         Row: {
+          about: string | null
           city: string | null
           company: string | null
           company_address: string | null
@@ -545,10 +546,12 @@ export type Database = {
           company_size: string | null
           company_technologies: string | null
           company_website: string | null
+          connections: number | null
           country: string | null
           created_at: string
           email: string | null
           first_name: string | null
+          followers: number | null
           full_name: string | null
           headline: string | null
           id: string
@@ -566,11 +569,13 @@ export type Database = {
           personal_email: string | null
           phone: string | null
           seniority_level: string | null
+          skills: string[] | null
           state: string | null
           updated_at: string
           workspace_id: string
         }
         Insert: {
+          about?: string | null
           city?: string | null
           company?: string | null
           company_address?: string | null
@@ -584,10 +589,12 @@ export type Database = {
           company_size?: string | null
           company_technologies?: string | null
           company_website?: string | null
+          connections?: number | null
           country?: string | null
           created_at?: string
           email?: string | null
           first_name?: string | null
+          followers?: number | null
           full_name?: string | null
           headline?: string | null
           id?: string
@@ -605,11 +612,13 @@ export type Database = {
           personal_email?: string | null
           phone?: string | null
           seniority_level?: string | null
+          skills?: string[] | null
           state?: string | null
           updated_at?: string
           workspace_id: string
         }
         Update: {
+          about?: string | null
           city?: string | null
           company?: string | null
           company_address?: string | null
@@ -623,10 +632,12 @@ export type Database = {
           company_size?: string | null
           company_technologies?: string | null
           company_website?: string | null
+          connections?: number | null
           country?: string | null
           created_at?: string
           email?: string | null
           first_name?: string | null
+          followers?: number | null
           full_name?: string | null
           headline?: string | null
           id?: string
@@ -644,6 +655,7 @@ export type Database = {
           personal_email?: string | null
           phone?: string | null
           seniority_level?: string | null
+          skills?: string[] | null
           state?: string | null
           updated_at?: string
           workspace_id?: string
@@ -661,6 +673,44 @@ export type Database = {
             columns: ["workspace_id"]
             isOneToOne: false
             referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      linkedin_profiles: {
+        Row: {
+          created_at: string
+          id: string
+          lead_id: string
+          raw_json: Json
+          source: string
+          updated_at: string
+          workspace_id: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          lead_id: string
+          raw_json: Json
+          source?: string
+          updated_at?: string
+          workspace_id: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          lead_id?: string
+          raw_json?: Json
+          source?: string
+          updated_at?: string
+          workspace_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "linkedin_profiles_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
+            referencedRelation: "leads"
             referencedColumns: ["id"]
           },
         ]
@@ -716,6 +766,7 @@ export type Database = {
         Row: {
           code: string
           created_at: string
+          daily_enrich_deep_limit: number
           daily_enrich_limit: number
           daily_search_page_limit: number
           id: string
@@ -728,6 +779,7 @@ export type Database = {
         Insert: {
           code: string
           created_at?: string
+          daily_enrich_deep_limit?: number
           daily_enrich_limit?: number
           daily_search_page_limit?: number
           id?: string
@@ -740,6 +792,7 @@ export type Database = {
         Update: {
           code?: string
           created_at?: string
+          daily_enrich_deep_limit?: number
           daily_enrich_limit?: number
           daily_search_page_limit?: number
           id?: string

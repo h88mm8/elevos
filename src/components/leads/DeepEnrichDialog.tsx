@@ -43,7 +43,7 @@ export function DeepEnrichDialog({
   onSuccess,
 }: DeepEnrichDialogProps) {
   const { toast } = useToast();
-  const [withEmail, setWithEmail] = useState(false);
+  const [withEmail, setWithEmail] = useState(true); // Email search enabled by default
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   // Filter leads that have LinkedIn URL

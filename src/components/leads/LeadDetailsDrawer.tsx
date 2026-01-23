@@ -27,9 +27,11 @@ import {
   MessageSquare,
   Loader2,
   Sparkles,
+  Brain,
 } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
 import { useToast } from '@/hooks/use-toast';
+import { LinkedInAdvancedSection } from './LinkedInAdvancedSection';
 
 interface LeadDetailsDrawerProps {
   lead: Lead | null;
@@ -383,6 +385,9 @@ export function LeadDetailsDrawer({
               </div>
             </>
           )}
+
+          {/* LinkedIn Advanced Section (Deep Enrichment) */}
+          <LinkedInAdvancedSection lead={lead} />
         </div>
       </SheetContent>
     </Sheet>

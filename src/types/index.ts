@@ -102,6 +102,12 @@ export interface Lead {
   linkedin_provider_id: string | null;
   linkedin_profile_json: unknown | null;
   
+  // Deep enrichment data
+  about: string | null;
+  skills: string[] | null;
+  connections: number | null;
+  followers: number | null;
+  
   last_enriched_at: string | null;
   created_at: string;
   updated_at: string;

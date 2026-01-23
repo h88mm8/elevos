@@ -28,24 +28,24 @@ function normalizeLinkedIn(url: string): string {
 }
 
 // Start Apify run - returns runId immediately
+// Using harvestapi/linkedin-profile-details-extractor (LpVuK3Zozwuipa5bp)
 async function startApifyRun(
   apifyToken: string,
   profileUrls: string[],
   mode: string
 ): Promise<ApifyRunResponse | null> {
-  const actorId = "curious_coder~linkedin-profile-scraper";
+  // Actor: LinkedIn Profile Details Extractor and Email Finder by HarvestAPI
+  const actorId = "LpVuK3Zozwuipa5bp";
   
-  // deno-lint-ignore no-explicit-any
-  const input: Record<string, any> = {
-    profileUrls: profileUrls,
-    proxyCountry: "US",
+  // Build input according to actor's expected format
+  const input: Record<string, unknown> = {
+    queries: profileUrls,
+    profileScraperMode: mode === "profile_with_email" 
+      ? "Profile details + email search ($10 per 1k)" 
+      : "Profile details no email ($4 per 1k)",
   };
 
-  if (mode === "profile_with_email") {
-    input.scrapeContactInfo = true;
-  }
-
-  console.log(`Starting Apify run with ${profileUrls.length} profiles`);
+  console.log(`Starting Apify run with actor ${actorId}, ${profileUrls.length} profiles, mode: ${input.profileScraperMode}`);
 
   const response = await fetch(
     `https://api.apify.com/v2/acts/${actorId}/runs?token=${apifyToken}`,
@@ -58,7 +58,7 @@ async function startApifyRun(
 
   if (!response.ok) {
     const errorText = await response.text();
-    console.error("Apify run start failed:", errorText);
+    console.error("Apify run start failed:", response.status, errorText);
     return null;
   }
 

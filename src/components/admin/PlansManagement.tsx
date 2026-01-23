@@ -10,7 +10,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { toast } from "sonner";
-import { Pencil, Plus, Building2, Search, Sparkles, Star } from "lucide-react";
+import { Pencil, Plus, Building2, Search, Sparkles, Star, Brain } from "lucide-react";
 
 export function PlansManagement() {
   const { 
@@ -32,6 +32,7 @@ export function PlansManagement() {
     name: '',
     daily_search_page_limit: 20,
     daily_enrich_limit: 50,
+    daily_enrich_deep_limit: 10,
     monthly_search_page_limit: null as number | null,
     monthly_enrich_limit: null as number | null,
     is_default: false,
@@ -62,6 +63,7 @@ export function PlansManagement() {
         name: '',
         daily_search_page_limit: 20,
         daily_enrich_limit: 50,
+        daily_enrich_deep_limit: 10,
         monthly_search_page_limit: null,
         monthly_enrich_limit: null,
         is_default: false,
@@ -154,6 +156,14 @@ export function PlansManagement() {
                     />
                   </div>
                 </div>
+                <div className="space-y-2">
+                  <Label>Enrich Deep/dia (Premium)</Label>
+                  <Input
+                    type="number"
+                    value={newPlan.daily_enrich_deep_limit}
+                    onChange={(e) => setNewPlan({ ...newPlan, daily_enrich_deep_limit: parseInt(e.target.value) || 0 })}
+                  />
+                </div>
               </div>
               <DialogFooter>
                 <Button variant="outline" onClick={() => setCreateDialogOpen(false)}>
@@ -184,6 +194,12 @@ export function PlansManagement() {
                     Enrich/dia
                   </div>
                 </TableHead>
+                <TableHead className="text-center">
+                  <div className="flex items-center justify-center gap-1">
+                    <Brain className="h-3 w-3" />
+                    Deep/dia
+                  </div>
+                </TableHead>
                 <TableHead>Padrão</TableHead>
                 <TableHead></TableHead>
               </TableRow>
@@ -197,6 +213,7 @@ export function PlansManagement() {
                   </TableCell>
                   <TableCell className="text-center">{plan.daily_search_page_limit}</TableCell>
                   <TableCell className="text-center">{plan.daily_enrich_limit}</TableCell>
+                  <TableCell className="text-center">{plan.daily_enrich_deep_limit}</TableCell>
                   <TableCell>
                     {plan.is_default && <Badge variant="secondary">Padrão</Badge>}
                   </TableCell>
@@ -253,6 +270,14 @@ export function PlansManagement() {
                                   onChange={(e) => setEditingPlan({ ...editingPlan, daily_enrich_limit: parseInt(e.target.value) || 0 })}
                                 />
                               </div>
+                            </div>
+                            <div className="space-y-2">
+                              <Label>Enrich Deep/dia (Premium)</Label>
+                              <Input
+                                type="number"
+                                value={editingPlan.daily_enrich_deep_limit}
+                                onChange={(e) => setEditingPlan({ ...editingPlan, daily_enrich_deep_limit: parseInt(e.target.value) || 0 })}
+                              />
                             </div>
                           </div>
                         )}

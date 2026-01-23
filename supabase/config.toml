@@ -77,3 +77,6 @@ verify_jwt = false
 
 [functions.linkedin-enrich-profile-apify]
 verify_jwt = false
+
+[functions.process-enrichment-jobs]
+verify_jwt = false

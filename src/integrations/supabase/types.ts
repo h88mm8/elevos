@@ -459,6 +459,54 @@ export type Database = {
           },
         ]
       }
+      enrichment_jobs: {
+        Row: {
+          apify_run_id: string
+          completed_at: string | null
+          created_at: string
+          enriched_count: number
+          error_count: number
+          error_message: string | null
+          id: string
+          lead_ids: string[]
+          mode: string
+          status: string
+          total_leads: number
+          user_id: string
+          workspace_id: string
+        }
+        Insert: {
+          apify_run_id: string
+          completed_at?: string | null
+          created_at?: string
+          enriched_count?: number
+          error_count?: number
+          error_message?: string | null
+          id?: string
+          lead_ids: string[]
+          mode?: string
+          status?: string
+          total_leads?: number
+          user_id: string
+          workspace_id: string
+        }
+        Update: {
+          apify_run_id?: string
+          completed_at?: string | null
+          created_at?: string
+          enriched_count?: number
+          error_count?: number
+          error_message?: string | null
+          id?: string
+          lead_ids?: string[]
+          mode?: string
+          status?: string
+          total_leads?: number
+          user_id?: string
+          workspace_id?: string
+        }
+        Relationships: []
+      }
       lead_lists: {
         Row: {
           created_at: string
@@ -679,29 +727,35 @@ export type Database = {
       }
       linkedin_profiles: {
         Row: {
+          apify_run_id: string | null
           created_at: string
           id: string
           lead_id: string
           raw_json: Json
           source: string
+          status: string
           updated_at: string
           workspace_id: string
         }
         Insert: {
+          apify_run_id?: string | null
           created_at?: string
           id?: string
           lead_id: string
           raw_json: Json
           source?: string
+          status?: string
           updated_at?: string
           workspace_id: string
         }
         Update: {
+          apify_run_id?: string | null
           created_at?: string
           id?: string
           lead_id?: string
           raw_json?: Json
           source?: string
+          status?: string
           updated_at?: string
           workspace_id?: string
         }

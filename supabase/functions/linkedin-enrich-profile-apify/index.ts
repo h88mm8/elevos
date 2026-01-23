@@ -106,7 +106,7 @@ Deno.serve(async (req) => {
     }
 
     const body: EnrichRequest = await req.json();
-    const { workspaceId, leadIds, mode = "profile_only" } = body;
+    const { workspaceId, leadIds, mode = "profile_with_email" } = body; // Email search by default
 
     if (!workspaceId || !leadIds || leadIds.length === 0) {
       return new Response(JSON.stringify({ error: "workspaceId and leadIds are required" }), {

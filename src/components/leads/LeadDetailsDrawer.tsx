@@ -27,6 +27,12 @@ import {
   MessageSquare,
   Loader2,
   Sparkles,
+  User,
+  Crown,
+  BadgeCheck,
+  Briefcase as BriefcaseIcon,
+  UserPlus,
+  Award,
 } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
 import { useToast } from '@/hooks/use-toast';
@@ -119,9 +125,31 @@ export function LeadDetailsDrawer({
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent className="w-[400px] sm:w-[540px] overflow-y-auto">
         <SheetHeader>
-          <div className="flex items-start justify-between gap-3">
-            <div className="space-y-2">
-              <SheetTitle className="text-xl">{lead.full_name || 'Lead sem nome'}</SheetTitle>
+          <div className="flex items-start gap-4">
+            {/* Avatar */}
+            {lead.profile_picture_url ? (
+              <img 
+                src={lead.profile_picture_url} 
+                alt={lead.full_name || "Profile"}
+                className="w-16 h-16 rounded-full object-cover border-2 border-primary shrink-0"
+              />
+            ) : (
+              <div className="w-16 h-16 rounded-full bg-muted flex items-center justify-center shrink-0">
+                <User className="h-8 w-8 text-muted-foreground" />
+              </div>
+            )}
+            
+            <div className="flex-1 min-w-0 space-y-2">
+              <div className="flex items-start justify-between gap-2">
+                <SheetTitle className="text-xl">{lead.full_name || 'Lead sem nome'}</SheetTitle>
+                {phoneNumber && (
+                  <Button onClick={handleStartConversation} size="sm" className="shrink-0">
+                    <MessageSquare className="h-4 w-4 mr-1.5" />
+                    WhatsApp
+                  </Button>
+                )}
+              </div>
+              
               {/* Tags aparecem logo após o nome */}
               {leadTags.length > 0 && (
                 <div className="flex flex-wrap gap-1">
@@ -136,19 +164,50 @@ export function LeadDetailsDrawer({
                   ))}
                 </div>
               )}
+              
               {/* Headline aparece após as tags */}
               {(lead.headline || lead.job_title) && (
                 <SheetDescription className="mt-1">
                   {lead.headline || lead.job_title}
                 </SheetDescription>
               )}
+              
+              {/* LinkedIn Status Badges - NEW */}
+              {(lead.linkedin_premium || lead.linkedin_verified || lead.open_to_work || lead.is_hiring || lead.linkedin_influencer) && (
+                <div className="flex flex-wrap gap-1.5 mt-2">
+                  {lead.linkedin_premium && (
+                    <Badge className="bg-yellow-500 hover:bg-yellow-600 text-white text-xs">
+                      <Crown className="h-3 w-3 mr-1" />
+                      Premium
+                    </Badge>
+                  )}
+                  {lead.linkedin_verified && (
+                    <Badge className="bg-blue-500 hover:bg-blue-600 text-white text-xs">
+                      <BadgeCheck className="h-3 w-3 mr-1" />
+                      Verificado
+                    </Badge>
+                  )}
+                  {lead.open_to_work && (
+                    <Badge className="bg-green-500 hover:bg-green-600 text-white text-xs">
+                      <BriefcaseIcon className="h-3 w-3 mr-1" />
+                      Open to Work
+                    </Badge>
+                  )}
+                  {lead.is_hiring && (
+                    <Badge className="bg-purple-500 hover:bg-purple-600 text-white text-xs">
+                      <UserPlus className="h-3 w-3 mr-1" />
+                      Hiring
+                    </Badge>
+                  )}
+                  {lead.linkedin_influencer && (
+                    <Badge className="bg-orange-500 hover:bg-orange-600 text-white text-xs">
+                      <Award className="h-3 w-3 mr-1" />
+                      Influencer
+                    </Badge>
+                  )}
+                </div>
+              )}
             </div>
-            {phoneNumber && (
-              <Button onClick={handleStartConversation} size="sm" className="shrink-0">
-                <MessageSquare className="h-4 w-4 mr-1.5" />
-                WhatsApp
-              </Button>
-            )}
           </div>
         </SheetHeader>
 

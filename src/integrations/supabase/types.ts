@@ -604,21 +604,29 @@ export type Database = {
           headline: string | null
           id: string
           industry: string | null
+          is_hiring: boolean | null
           job_title: string | null
           keywords: string | null
           last_enriched_at: string | null
           last_name: string | null
+          linkedin_influencer: boolean | null
+          linkedin_premium: boolean | null
           linkedin_profile_json: Json | null
           linkedin_provider_id: string | null
           linkedin_public_identifier: string | null
+          linkedin_registered_at: string | null
           linkedin_url: string | null
+          linkedin_verified: boolean | null
           list_id: string | null
           mobile_number: string | null
+          open_to_work: boolean | null
           personal_email: string | null
           phone: string | null
+          profile_picture_url: string | null
           seniority_level: string | null
           skills: string[] | null
           state: string | null
+          top_skills: string | null
           updated_at: string
           workspace_id: string
         }
@@ -647,21 +655,29 @@ export type Database = {
           headline?: string | null
           id?: string
           industry?: string | null
+          is_hiring?: boolean | null
           job_title?: string | null
           keywords?: string | null
           last_enriched_at?: string | null
           last_name?: string | null
+          linkedin_influencer?: boolean | null
+          linkedin_premium?: boolean | null
           linkedin_profile_json?: Json | null
           linkedin_provider_id?: string | null
           linkedin_public_identifier?: string | null
+          linkedin_registered_at?: string | null
           linkedin_url?: string | null
+          linkedin_verified?: boolean | null
           list_id?: string | null
           mobile_number?: string | null
+          open_to_work?: boolean | null
           personal_email?: string | null
           phone?: string | null
+          profile_picture_url?: string | null
           seniority_level?: string | null
           skills?: string[] | null
           state?: string | null
+          top_skills?: string | null
           updated_at?: string
           workspace_id: string
         }
@@ -690,21 +706,29 @@ export type Database = {
           headline?: string | null
           id?: string
           industry?: string | null
+          is_hiring?: boolean | null
           job_title?: string | null
           keywords?: string | null
           last_enriched_at?: string | null
           last_name?: string | null
+          linkedin_influencer?: boolean | null
+          linkedin_premium?: boolean | null
           linkedin_profile_json?: Json | null
           linkedin_provider_id?: string | null
           linkedin_public_identifier?: string | null
+          linkedin_registered_at?: string | null
           linkedin_url?: string | null
+          linkedin_verified?: boolean | null
           list_id?: string | null
           mobile_number?: string | null
+          open_to_work?: boolean | null
           personal_email?: string | null
           phone?: string | null
+          profile_picture_url?: string | null
           seniority_level?: string | null
           skills?: string[] | null
           state?: string | null
+          top_skills?: string | null
           updated_at?: string
           workspace_id?: string
         }

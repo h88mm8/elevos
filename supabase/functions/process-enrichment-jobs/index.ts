@@ -23,11 +23,12 @@ interface ApifyProfileData {
   // Identity
   id?: string;
   publicIdentifier?: string;
-  linkedinUrl?: string;  // lowercase 'i' in new actor
+  linkedinUrl?: string;
   firstName?: string;
   lastName?: string;
   headline?: string;
   about?: string;
+  photo?: string;
   
   // Location
   location?: {
@@ -75,13 +76,14 @@ interface ApifyProfileData {
     period?: string;
   }>;
   
-  // Status
+  // Status flags - NEW fields to capture
   status?: number;
   openToWork?: boolean;
   hiring?: boolean;
   premium?: boolean;
   influencer?: boolean;
   verified?: boolean;
+  registeredAt?: string;
   
   [key: string]: unknown;
 }
@@ -403,25 +405,46 @@ Deno.serve(async (req) => {
           // Build full name from first + last
           const fullName = [profile.firstName, profile.lastName].filter(Boolean).join(" ") || undefined;
 
-          // Build update
+          // Build update with ALL Apify fields
           const updateData: Record<string, unknown> = {
+            // Identity
             first_name: profile.firstName,
             last_name: profile.lastName,
             full_name: fullName,
             headline: profile.headline,
             about: profile.about,
+            profile_picture_url: profile.photo,
+            
+            // Professional
             company: currentExperience?.companyName || profile.currentPosition?.[0]?.companyName,
             job_title: currentExperience?.position,
+            
+            // Location
             city: location.city,
             state: location.state,
             country: location.country,
+            
+            // Skills
             skills: profile.skills?.map((s) => s.name),
+            top_skills: profile.topSkills,
+            
+            // Social metrics
             connections: profile.connectionsCount,
             followers: profile.followerCount,
+            
+            // LinkedIn status flags - NEW
+            open_to_work: profile.openToWork ?? null,
+            is_hiring: profile.hiring ?? null,
+            linkedin_premium: profile.premium ?? null,
+            linkedin_influencer: profile.influencer ?? null,
+            linkedin_verified: profile.verified ?? null,
+            linkedin_registered_at: profile.registeredAt || null,
+            
+            // Timestamp
             last_enriched_at: new Date().toISOString(),
           };
 
-          // Only update email/phone if not already set (don't overwrite)
+          // Only update email/phone if not already set (don't overwrite existing data)
           if (!matchingLead.email && profile.email) {
             updateData.email = profile.email;
           }
@@ -429,7 +452,7 @@ Deno.serve(async (req) => {
             updateData.phone = profile.phone;
           }
 
-          // Remove undefined values
+          // Remove undefined values (keep null for explicit "no data")
           Object.keys(updateData).forEach((key) => {
             if (updateData[key] === undefined) delete updateData[key];
           });

@@ -1,0 +1,9 @@
+-- Add new columns to leads table for complete Apify data capture
+ALTER TABLE public.leads ADD COLUMN IF NOT EXISTS open_to_work BOOLEAN DEFAULT NULL;
+ALTER TABLE public.leads ADD COLUMN IF NOT EXISTS is_hiring BOOLEAN DEFAULT NULL;
+ALTER TABLE public.leads ADD COLUMN IF NOT EXISTS linkedin_premium BOOLEAN DEFAULT NULL;
+ALTER TABLE public.leads ADD COLUMN IF NOT EXISTS linkedin_influencer BOOLEAN DEFAULT NULL;
+ALTER TABLE public.leads ADD COLUMN IF NOT EXISTS linkedin_verified BOOLEAN DEFAULT NULL;
+ALTER TABLE public.leads ADD COLUMN IF NOT EXISTS linkedin_registered_at TIMESTAMP WITH TIME ZONE DEFAULT NULL;
+ALTER TABLE public.leads ADD COLUMN IF NOT EXISTS profile_picture_url TEXT DEFAULT NULL;
+ALTER TABLE public.leads ADD COLUMN IF NOT EXISTS top_skills TEXT DEFAULT NULL;

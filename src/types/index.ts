@@ -108,6 +108,16 @@ export interface Lead {
   connections: number | null;
   followers: number | null;
   
+  // New status fields from Apify deep enrichment
+  open_to_work: boolean | null;
+  is_hiring: boolean | null;
+  linkedin_premium: boolean | null;
+  linkedin_influencer: boolean | null;
+  linkedin_verified: boolean | null;
+  linkedin_registered_at: string | null;
+  profile_picture_url: string | null;
+  top_skills: string | null;
+  
   last_enriched_at: string | null;
   created_at: string;
   updated_at: string;

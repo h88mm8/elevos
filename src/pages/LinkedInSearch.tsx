@@ -845,6 +845,21 @@ export default function LinkedInSearch() {
                       Selecionar página ({results.length})
                     </span>
                   </div>
+                  
+                  {/* Enrichment progress indicator */}
+                  {enrichProgress.total > 0 && (
+                    <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                      <Sparkles className="h-3 w-3" />
+                      <span>
+                        {enrichProgress.completed}/{enrichProgress.total} enriquecidos
+                        {enrichProgress.failed > 0 && (
+                          <span className="text-destructive ml-1">
+                            ({enrichProgress.failed} falhas)
+                          </span>
+                        )}
+                      </span>
+                    </div>
+                  )}
                 </div>
 
                 {/* Pagination */}
@@ -933,9 +948,13 @@ export default function LinkedInSearch() {
                     const result = getMergedLead(rawResult); // Use enriched data
                     const isSelected = selectedLeadsMap.has(id);
                     const status = getStatus(rawResult.public_identifier);
-                    const hasEnrichedData = !!(result.email || result.keywords || result.about);
                     
-                    // Determine badge
+                    // Determine if we have structured data (from enrich, not headline parse)
+                    const hasJobTitle = !!result.job_title;
+                    const hasCompany = !!result.company;
+                    const hasEnrichedData = !!(result.email || result.keywords || result.about || hasJobTitle);
+                    
+                    // Determine badge based on enrich status
                     let enrichBadge = null;
                     if (status?.status === 'loading') {
                       enrichBadge = (
@@ -963,6 +982,12 @@ export default function LinkedInSearch() {
                         </Badge>
                       );
                     }
+                    
+                    // Build display: prioritize structured job_title/company, headline as fallback
+                    const displayTitle = hasJobTitle ? result.job_title : null;
+                    const displayCompany = hasCompany ? result.company : null;
+                    // Only show headline if we don't have structured data
+                    const showHeadline = !hasJobTitle && !hasCompany && result.headline;
                     
                     return (
                       <Card
@@ -997,6 +1022,7 @@ export default function LinkedInSearch() {
                           
                           {/* Info */}
                           <div className="flex-1 min-w-0">
+                            {/* Name + badges */}
                             <div className="flex items-center gap-2">
                               <span className="font-medium truncate">
                                 {result.full_name || `${result.first_name} ${result.last_name}`}
@@ -1008,31 +1034,53 @@ export default function LinkedInSearch() {
                               )}
                               {enrichBadge}
                             </div>
-                            {result.headline && (
-                              <p className="text-sm text-muted-foreground truncate">
+                            
+                            {/* Primary: Job Title + Company (structured) */}
+                            {(displayTitle || displayCompany) && (
+                              <div className="flex items-center gap-2 mt-0.5">
+                                {displayTitle && (
+                                  <span className="text-sm font-medium text-foreground truncate">
+                                    {displayTitle}
+                                  </span>
+                                )}
+                                {displayTitle && displayCompany && (
+                                  <span className="text-muted-foreground">@</span>
+                                )}
+                                {displayCompany && (
+                                  <span className="text-sm text-muted-foreground truncate">
+                                    {displayCompany}
+                                  </span>
+                                )}
+                              </div>
+                            )}
+                            
+                            {/* Fallback: Headline only if no structured data */}
+                            {showHeadline && (
+                              <p className="text-sm text-muted-foreground truncate italic">
                                 {result.headline}
                               </p>
                             )}
                             
-                            {/* Location and Company row */}
-                            <div className="flex items-center gap-3 mt-1">
+                            {/* Secondary row: Location + Industry + Seniority */}
+                            <div className="flex items-center gap-3 mt-1 flex-wrap">
                               {(result.city || result.location) && (
                                 <div className="flex items-center gap-1 text-xs text-muted-foreground">
-                                  <MapPin className="h-3 w-3" />
+                                  <MapPin className="h-3 w-3 flex-shrink-0" />
                                   <span className="truncate">
                                     {result.city ? [result.city, result.state, result.country].filter(Boolean).join(', ') : result.location}
                                   </span>
                                 </div>
                               )}
-                              {result.company && (
-                                <div className="flex items-center gap-1 text-xs text-muted-foreground">
-                                  <Building2 className="h-3 w-3" />
-                                  <span className="truncate">{result.company}</span>
-                                </div>
-                              )}
                               {result.industry && (
                                 <Badge variant="outline" className="text-xs">
+                                  <Factory className="h-3 w-3 mr-1" />
                                   {result.industry}
+                                </Badge>
+                              )}
+                              {result.seniority_level && (
+                                <Badge variant="outline" className="text-xs">
+                                  <Briefcase className="h-3 w-3 mr-1" />
+                                  {result.seniority_level}
                                 </Badge>
                               )}
                             </div>
@@ -1041,13 +1089,13 @@ export default function LinkedInSearch() {
                             {(result.email || result.phone) && (
                               <div className="flex items-center gap-3 mt-1">
                                 {result.email && (
-                                  <div className="flex items-center gap-1 text-xs text-green-600">
+                                  <div className="flex items-center gap-1 text-xs text-primary">
                                     <Mail className="h-3 w-3" />
                                     <span className="truncate">{result.email}</span>
                                   </div>
                                 )}
                                 {result.phone && (
-                                  <div className="flex items-center gap-1 text-xs text-green-600">
+                                  <div className="flex items-center gap-1 text-xs text-primary">
                                     <Phone className="h-3 w-3" />
                                     <span className="truncate">{result.phone}</span>
                                   </div>

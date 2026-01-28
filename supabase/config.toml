@@ -86,3 +86,6 @@ verify_jwt = false
 
 [functions.linkedin-enrich-preview]
 verify_jwt = false
+
+[functions.linkedin-company-enrich]
+verify_jwt = false

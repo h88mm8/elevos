@@ -16,6 +16,21 @@ export interface LinkedInSearchResult {
   connection_degree?: number;
   company?: string;
   job_title?: string;
+  // Enriched fields (from Unipile auto-enrichment)
+  industry?: string;
+  seniority_level?: string;
+  city?: string;
+  state?: string;
+  country?: string;
+  email?: string;
+  personal_email?: string;
+  phone?: string;
+  mobile_number?: string;
+  company_linkedin?: string;
+  keywords?: string;
+  about?: string;
+  connections?: number;
+  followers?: number;
 }
 
 export interface LinkedInSearchFilters {

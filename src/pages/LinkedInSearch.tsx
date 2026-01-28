@@ -57,6 +57,9 @@ import {
   GraduationCap,
   Briefcase,
   Factory,
+  Mail,
+  Phone,
+  Tag,
 } from 'lucide-react';
 
 // Custom LinkedIn icon
@@ -338,7 +341,7 @@ export default function LinkedInSearch() {
         targetListId = newList.id;
       }
 
-      // Insert leads
+      // Insert leads with enriched data
       const leadsToInsert = selectedResults.map(lead => ({
         workspace_id: currentWorkspace.id,
         list_id: targetListId,
@@ -349,9 +352,31 @@ export default function LinkedInSearch() {
         linkedin_url: lead.profile_url,
         linkedin_public_identifier: lead.public_identifier || null,
         linkedin_provider_id: lead.provider_id || null,
-        city: lead.location || null,
+        // Location fields
+        city: lead.city || null,
+        state: lead.state || null,
+        country: lead.country || null,
+        // Professional data
         company: lead.company || null,
+        company_linkedin: lead.company_linkedin || null,
         job_title: lead.job_title || null,
+        industry: lead.industry || null,
+        seniority_level: lead.seniority_level || null,
+        // Contact info
+        email: lead.email || null,
+        personal_email: lead.personal_email || null,
+        phone: lead.phone || null,
+        mobile_number: lead.mobile_number || null,
+        // Skills and about
+        keywords: lead.keywords || null,
+        about: lead.about || null,
+        // Social metrics
+        connections: lead.connections || null,
+        followers: lead.followers || null,
+        // Profile picture
+        profile_picture_url: lead.profile_picture_url || null,
+        // Mark as enriched
+        last_enriched_at: new Date().toISOString(),
       }));
 
       const { error: insertError } = await supabase
@@ -853,6 +878,7 @@ export default function LinkedInSearch() {
                   {results.map(result => {
                     const id = getResultId(result);
                     const isSelected = selectedLeadsMap.has(id);
+                    const hasEnrichedData = !!(result.email || result.keywords || result.about);
                     
                     return (
                       <Card
@@ -864,11 +890,12 @@ export default function LinkedInSearch() {
                         }`}
                         onClick={() => toggleSelect(result)}
                       >
-                        <CardContent className="flex items-center gap-4 py-3">
+                        <CardContent className="flex items-start gap-4 py-3">
                           <Checkbox
                             checked={isSelected}
                             onCheckedChange={() => toggleSelect(result)}
                             onClick={e => e.stopPropagation()}
+                            className="mt-1"
                           />
                           
                           {/* Avatar */}
@@ -895,17 +922,26 @@ export default function LinkedInSearch() {
                                   {result.connection_degree}º
                                 </Badge>
                               )}
+                              {hasEnrichedData && (
+                                <Badge variant="outline" className="text-xs flex-shrink-0 text-green-600 border-green-600">
+                                  Enriquecido
+                                </Badge>
+                              )}
                             </div>
                             {result.headline && (
                               <p className="text-sm text-muted-foreground truncate">
                                 {result.headline}
                               </p>
                             )}
+                            
+                            {/* Location and Company row */}
                             <div className="flex items-center gap-3 mt-1">
-                              {result.location && (
+                              {(result.city || result.location) && (
                                 <div className="flex items-center gap-1 text-xs text-muted-foreground">
                                   <MapPin className="h-3 w-3" />
-                                  <span className="truncate">{result.location}</span>
+                                  <span className="truncate">
+                                    {result.city ? [result.city, result.state, result.country].filter(Boolean).join(', ') : result.location}
+                                  </span>
                                 </div>
                               )}
                               {result.company && (
@@ -914,7 +950,38 @@ export default function LinkedInSearch() {
                                   <span className="truncate">{result.company}</span>
                                 </div>
                               )}
+                              {result.industry && (
+                                <Badge variant="outline" className="text-xs">
+                                  {result.industry}
+                                </Badge>
+                              )}
                             </div>
+                            
+                            {/* Contact info row (enriched) */}
+                            {(result.email || result.phone) && (
+                              <div className="flex items-center gap-3 mt-1">
+                                {result.email && (
+                                  <div className="flex items-center gap-1 text-xs text-green-600">
+                                    <Mail className="h-3 w-3" />
+                                    <span className="truncate">{result.email}</span>
+                                  </div>
+                                )}
+                                {result.phone && (
+                                  <div className="flex items-center gap-1 text-xs text-green-600">
+                                    <Phone className="h-3 w-3" />
+                                    <span className="truncate">{result.phone}</span>
+                                  </div>
+                                )}
+                              </div>
+                            )}
+                            
+                            {/* Skills row (enriched) */}
+                            {result.keywords && (
+                              <div className="flex items-center gap-1 mt-1 text-xs text-muted-foreground">
+                                <Tag className="h-3 w-3 flex-shrink-0" />
+                                <span className="truncate">{result.keywords}</span>
+                              </div>
+                            )}
                           </div>
                           
                           {/* External link */}
@@ -923,7 +990,7 @@ export default function LinkedInSearch() {
                             target="_blank"
                             rel="noopener noreferrer"
                             onClick={e => e.stopPropagation()}
-                            className="text-muted-foreground hover:text-primary flex-shrink-0"
+                            className="text-muted-foreground hover:text-primary flex-shrink-0 mt-1"
                           >
                             <ExternalLink className="h-4 w-4" />
                           </a>

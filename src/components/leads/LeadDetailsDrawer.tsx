@@ -58,7 +58,6 @@ export function LeadDetailsDrawer({
   const { toast } = useToast();
   const { getLeadTags } = useTags();
   
-  const [isEnriching, setIsEnriching] = useState(false);
   const [isDeepEnriching, setIsDeepEnriching] = useState(false);
 
   if (!lead) return null;
@@ -78,48 +77,6 @@ export function LeadDetailsDrawer({
     if (!phoneNumber) return;
     navigate(`/messages?startConversation=${encodeURIComponent(phoneNumber)}&leadName=${encodeURIComponent(lead.full_name || '')}`);
     onOpenChange(false);
-  };
-
-  const handleEnrich = async () => {
-    if (!workspaceId || !lead.id) return;
-
-    setIsEnriching(true);
-    try {
-      const { data, error } = await supabase.functions.invoke('linkedin-enrich-lead', {
-        body: {
-          workspaceId,
-          leadId: lead.id,
-        },
-      });
-
-      if (error) throw error;
-      if (data.error) throw new Error(data.error);
-
-      toast({
-        title: 'Lead enriquecido',
-        description: `${data.enrichedFields?.length || 0} campos atualizados com dados do LinkedIn.`,
-      });
-
-      onLeadUpdated?.();
-    } catch (error: any) {
-      // Check if global account not configured
-      const errorMsg = error.message || '';
-      if (errorMsg.includes('global') || errorMsg.includes('configurada') || errorMsg.includes('not configured')) {
-        toast({
-          title: 'Enriquecimento indisponível',
-          description: 'Peça ao administrador para configurar a conta global do LinkedIn.',
-          variant: 'destructive',
-        });
-      } else {
-        toast({
-          title: 'Erro ao enriquecer',
-          description: errorMsg || 'Não foi possível enriquecer o lead',
-          variant: 'destructive',
-        });
-      }
-    } finally {
-      setIsEnriching(false);
-    }
   };
 
   const handleDeepEnrich = async () => {
@@ -268,40 +225,20 @@ export function LeadDetailsDrawer({
           </div>
         </SheetHeader>
 
-        {/* LinkedIn Enrich Section */}
+        {/* LinkedIn Deep Enrich Section */}
         {canEnrich && (
           <div className="mt-4 p-3 rounded-lg border bg-muted/30 space-y-3">
             <div className="flex items-center gap-2 text-sm font-medium">
               <Sparkles className="h-4 w-4 text-primary" />
-              Enriquecer via LinkedIn
+              Enriquecimento Profundo
             </div>
             
             <div className="flex flex-wrap gap-2">
-              {/* Basic Enrich (Unipile) */}
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={handleEnrich}
-                disabled={isEnriching || isDeepEnriching}
-              >
-                {isEnriching ? (
-                  <>
-                    <Loader2 className="h-4 w-4 mr-1.5 animate-spin" />
-                    Enriquecendo...
-                  </>
-                ) : (
-                  <>
-                    <Linkedin className="h-4 w-4 mr-1.5" />
-                    Básico
-                  </>
-                )}
-              </Button>
-              
               {/* Deep Enrich (Apify) */}
               <Button
                 size="sm"
                 onClick={handleDeepEnrich}
-                disabled={isEnriching || isDeepEnriching}
+                disabled={isDeepEnriching}
               >
                 {isDeepEnriching ? (
                   <>
@@ -318,7 +255,7 @@ export function LeadDetailsDrawer({
             </div>
             
             <p className="text-xs text-muted-foreground">
-              <strong>Básico:</strong> Nome, cargo, empresa • <strong>Deep:</strong> Skills, experiência, email
+              Captura experiências, educação, certificações, about, e muito mais.
             </p>
             
             {lead.last_enriched_at && (

@@ -43,6 +43,35 @@ interface QuotaResult {
   action: string;
 }
 
+interface EnrichedResult {
+  provider_id: string | null;
+  public_identifier: string | null;
+  profile_url: string | null;
+  profile_picture_url: string | null;
+  connection_degree: string | null;
+  first_name: string | null;
+  last_name: string | null;
+  full_name: string | null;
+  headline: string | null;
+  industry: string | null;
+  job_title: string | null;
+  company: string | null;
+  company_linkedin: string | null;
+  seniority_level: string | null;
+  city: string | null;
+  state: string | null;
+  country: string | null;
+  location: string | null;
+  email: string | null;
+  personal_email: string | null;
+  phone: string | null;
+  mobile_number: string | null;
+  keywords: string | null;
+  about: string | null;
+  connections: number | null;
+  followers: number | null;
+}
+
 // Helper to get workspace plan with limits
 async function getWorkspacePlan(serviceClient: any, workspaceId: string): Promise<WorkspacePlan> {
   const { data, error } = await serviceClient.rpc("get_workspace_plan", {
@@ -177,6 +206,299 @@ async function getPlatformLinkedInSearchAccount(serviceClient: any): Promise<{
     linkedinFeature: account.linkedin_feature,
   };
 }
+
+// ===== ENRICHMENT HELPER FUNCTIONS =====
+
+// Fetch profile details from Unipile with timeout
+async function enrichProfile(
+  unipileDsn: string,
+  unipileApiKey: string,
+  accountId: string,
+  publicIdentifier: string,
+  timeoutMs: number = 5000
+): Promise<Record<string, unknown> | null> {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+  
+  try {
+    const url = `https://${unipileDsn}/api/v1/users/${encodeURIComponent(publicIdentifier)}?account_id=${encodeURIComponent(accountId)}`;
+    
+    const response = await fetch(url, {
+      method: "GET",
+      headers: { 
+        "X-API-KEY": unipileApiKey,
+        "Accept": "application/json",
+      },
+      signal: controller.signal,
+    });
+    
+    clearTimeout(timeoutId);
+    
+    if (!response.ok) {
+      console.log(`[linkedin-search] Enrich failed for ${publicIdentifier}: ${response.status}`);
+      return null;
+    }
+    
+    return await response.json();
+  } catch (err) {
+    clearTimeout(timeoutId);
+    if (err instanceof Error && err.name === 'AbortError') {
+      console.log(`[linkedin-search] Enrich timeout for ${publicIdentifier}`);
+    } else {
+      console.log(`[linkedin-search] Enrich error for ${publicIdentifier}:`, err);
+    }
+    return null;
+  }
+}
+
+// Extract job title from experiences or occupation
+function extractJobTitle(enrichedData: Record<string, unknown> | null): string | null {
+  if (!enrichedData) return null;
+  
+  // First try occupation
+  if (enrichedData.occupation && typeof enrichedData.occupation === 'string') {
+    return enrichedData.occupation;
+  }
+  
+  // Then try experiences array
+  const experiences = enrichedData.experiences as Array<Record<string, unknown>> | undefined;
+  if (experiences && Array.isArray(experiences) && experiences.length > 0) {
+    const current = experiences[0];
+    return (current.title as string) || null;
+  }
+  
+  return null;
+}
+
+// Extract company name from experiences
+function extractCompany(enrichedData: Record<string, unknown> | null): string | null {
+  if (!enrichedData) return null;
+  
+  const experiences = enrichedData.experiences as Array<Record<string, unknown>> | undefined;
+  if (experiences && Array.isArray(experiences) && experiences.length > 0) {
+    const current = experiences[0];
+    const company = current.company as Record<string, unknown> | string | undefined;
+    
+    if (typeof company === 'string') {
+      return company;
+    }
+    if (company && typeof company === 'object') {
+      return (company.name as string) || null;
+    }
+  }
+  
+  return null;
+}
+
+// Extract company LinkedIn URL from experiences
+function extractCompanyLinkedIn(enrichedData: Record<string, unknown> | null): string | null {
+  if (!enrichedData) return null;
+  
+  const experiences = enrichedData.experiences as Array<Record<string, unknown>> | undefined;
+  if (experiences && Array.isArray(experiences) && experiences.length > 0) {
+    const current = experiences[0];
+    const company = current.company as Record<string, unknown> | undefined;
+    
+    if (company && typeof company === 'object') {
+      const publicId = company.public_identifier as string | undefined;
+      if (publicId) {
+        return `https://www.linkedin.com/company/${publicId}`;
+      }
+      return (company.linkedin_url as string) || (company.url as string) || null;
+    }
+  }
+  
+  return null;
+}
+
+// Extract location components
+function extractCity(enrichedData: Record<string, unknown> | null): string | null {
+  if (!enrichedData) return null;
+  
+  const location = enrichedData.location as Record<string, unknown> | string | undefined;
+  if (typeof location === 'object' && location) {
+    return (location.city as string) || null;
+  }
+  
+  // Try to parse from location string
+  if (typeof location === 'string') {
+    const parts = location.split(',').map(s => s.trim());
+    return parts[0] || null;
+  }
+  
+  return null;
+}
+
+function extractState(enrichedData: Record<string, unknown> | null): string | null {
+  if (!enrichedData) return null;
+  
+  const location = enrichedData.location as Record<string, unknown> | string | undefined;
+  if (typeof location === 'object' && location) {
+    return (location.state as string) || (location.region as string) || null;
+  }
+  
+  if (typeof location === 'string') {
+    const parts = location.split(',').map(s => s.trim());
+    return parts.length > 1 ? parts[1] : null;
+  }
+  
+  return null;
+}
+
+function extractCountry(enrichedData: Record<string, unknown> | null): string | null {
+  if (!enrichedData) return null;
+  
+  const location = enrichedData.location as Record<string, unknown> | string | undefined;
+  if (typeof location === 'object' && location) {
+    return (location.country as string) || (location.country_code as string) || null;
+  }
+  
+  if (typeof location === 'string') {
+    const parts = location.split(',').map(s => s.trim());
+    return parts.length > 2 ? parts[parts.length - 1] : null;
+  }
+  
+  return null;
+}
+
+function extractLocationString(enrichedData: Record<string, unknown> | null): string | null {
+  if (!enrichedData) return null;
+  
+  const location = enrichedData.location as Record<string, unknown> | string | undefined;
+  if (typeof location === 'string') {
+    return location;
+  }
+  
+  if (typeof location === 'object' && location) {
+    const parts = [
+      location.city,
+      location.state || location.region,
+      location.country
+    ].filter(Boolean);
+    return parts.length > 0 ? parts.join(', ') : null;
+  }
+  
+  return null;
+}
+
+// Extract email from emails array
+function extractEmail(enrichedData: Record<string, unknown> | null): string | null {
+  if (!enrichedData) return null;
+  
+  const emails = enrichedData.emails as Array<Record<string, unknown> | string> | undefined;
+  if (emails && Array.isArray(emails) && emails.length > 0) {
+    const first = emails[0];
+    if (typeof first === 'string') return first;
+    if (typeof first === 'object' && first.email) return first.email as string;
+    if (typeof first === 'object' && first.address) return first.address as string;
+  }
+  
+  // Direct email field
+  if (enrichedData.email && typeof enrichedData.email === 'string') {
+    return enrichedData.email;
+  }
+  
+  return null;
+}
+
+// Extract phone from phone_numbers array
+function extractPhone(enrichedData: Record<string, unknown> | null): string | null {
+  if (!enrichedData) return null;
+  
+  const phones = enrichedData.phone_numbers as Array<Record<string, unknown> | string> | undefined;
+  if (phones && Array.isArray(phones) && phones.length > 0) {
+    const first = phones[0];
+    if (typeof first === 'string') return first;
+    if (typeof first === 'object' && first.number) return first.number as string;
+    if (typeof first === 'object' && first.phone) return first.phone as string;
+  }
+  
+  return null;
+}
+
+// Extract skills as comma-separated keywords
+function extractSkills(enrichedData: Record<string, unknown> | null): string | null {
+  if (!enrichedData) return null;
+  
+  const skills = enrichedData.skills as Array<Record<string, unknown> | string> | undefined;
+  if (skills && Array.isArray(skills) && skills.length > 0) {
+    const skillNames = skills.map(s => {
+      if (typeof s === 'string') return s;
+      if (typeof s === 'object' && s.name) return s.name as string;
+      return null;
+    }).filter(Boolean);
+    
+    return skillNames.length > 0 ? skillNames.join(', ') : null;
+  }
+  
+  return null;
+}
+
+// Merge search item with enriched data
+function mergeEnrichedData(
+  searchItem: Record<string, unknown>,
+  enrichedData: Record<string, unknown> | null
+): EnrichedResult {
+  const publicIdentifier = searchItem.public_identifier as string | undefined;
+  const profileUrl = publicIdentifier
+    ? `https://www.linkedin.com/in/${publicIdentifier}`
+    : (searchItem.profile_url as string | null) ?? null;
+  
+  // Get company from search item as fallback
+  const searchCompany = typeof searchItem.current_company === "object"
+    ? (searchItem.current_company as Record<string, unknown>)?.name as string | undefined
+    : searchItem.current_company as string | undefined;
+  
+  return {
+    // IDs from search
+    provider_id: (searchItem.id as string) || null,
+    public_identifier: publicIdentifier || null,
+    profile_url: profileUrl,
+    connection_degree: (searchItem.connection_degree as string) || null,
+    
+    // Profile picture - prefer enriched
+    profile_picture_url: (enrichedData?.profile_picture as string) || 
+                         (enrichedData?.picture_url as string) ||
+                         (searchItem.profile_picture as string) || null,
+    
+    // Names - prefer enriched
+    first_name: (enrichedData?.first_name as string) || (searchItem.first_name as string) || null,
+    last_name: (enrichedData?.last_name as string) || (searchItem.last_name as string) || null,
+    full_name: (enrichedData?.name as string) || (searchItem.name as string) || null,
+    
+    // Professional data
+    headline: (enrichedData?.headline as string) || (searchItem.headline as string) || null,
+    industry: (enrichedData?.industry as string) || null,
+    seniority_level: (enrichedData?.seniority as string) || null,
+    
+    // Job and company
+    job_title: extractJobTitle(enrichedData) || (searchItem.current_title as string) || null,
+    company: extractCompany(enrichedData) || searchCompany || null,
+    company_linkedin: extractCompanyLinkedIn(enrichedData),
+    
+    // Location
+    city: extractCity(enrichedData),
+    state: extractState(enrichedData),
+    country: extractCountry(enrichedData),
+    location: extractLocationString(enrichedData) || (searchItem.location as string) || null,
+    
+    // Contact info
+    email: extractEmail(enrichedData),
+    personal_email: extractEmail(enrichedData), // same source for now
+    phone: extractPhone(enrichedData),
+    mobile_number: extractPhone(enrichedData), // same source for now
+    
+    // Skills
+    keywords: extractSkills(enrichedData),
+    
+    // About and social metrics
+    about: (enrichedData?.about as string) || (enrichedData?.summary as string) || null,
+    connections: typeof enrichedData?.connections === 'number' ? enrichedData.connections : null,
+    followers: typeof enrichedData?.followers === 'number' ? enrichedData.followers : null,
+  };
+}
+
+// ===== END ENRICHMENT HELPERS =====
 
 serve(async (req) => {
   if (req.method === "OPTIONS") {
@@ -393,33 +715,34 @@ serve(async (req) => {
     }
 
     const searchData = await searchResponse.json();
-    console.log("[linkedin-search] Unipile response items:", searchData.items?.length ?? 0);
+    const searchItems = searchData.items || [];
+    console.log("[linkedin-search] Unipile response items:", searchItems.length);
 
-    // Transform results
-    const results = (searchData.items || []).map((item: Record<string, unknown>) => {
-      const publicIdentifier = item.public_identifier as string | undefined;
-      const profileUrl = publicIdentifier
-        ? `https://www.linkedin.com/in/${publicIdentifier}`
-        : (item.profile_url as string | undefined) ?? null;
-
-      return {
-        provider_id: item.id,
-        public_identifier: publicIdentifier,
-        full_name: item.name,
-        first_name: item.first_name,
-        last_name: item.last_name,
-        headline: item.headline,
-        profile_url: profileUrl,
-        profile_picture_url: item.profile_picture,
-        location: item.location,
-        connection_degree: item.connection_degree,
-        company:
-          typeof item.current_company === "object"
-            ? (item.current_company as Record<string, unknown>)?.name
-            : item.current_company,
-        job_title: item.current_title,
-      };
+    // ===== ENRICH EACH RESULT IN PARALLEL =====
+    console.log(`[linkedin-search] Starting parallel enrichment for ${searchItems.length} profiles`);
+    
+    const enrichmentPromises = searchItems.map(async (item: Record<string, unknown>) => {
+      const publicId = item.public_identifier as string | undefined;
+      
+      if (!publicId) {
+        // No public_identifier, return basic data only
+        return mergeEnrichedData(item, null);
+      }
+      
+      const enrichedProfile = await enrichProfile(unipileDsn, unipileApiKey, unipileAccountId, publicId);
+      return mergeEnrichedData(item, enrichedProfile);
     });
+    
+    const enrichedResults = await Promise.allSettled(enrichmentPromises);
+    
+    // Filter successful results
+    const results: EnrichedResult[] = enrichedResults
+      .filter((r): r is PromiseFulfilledResult<EnrichedResult> => r.status === 'fulfilled')
+      .map(r => r.value);
+    
+    const enrichedCount = results.filter(r => r.email || r.keywords || r.about).length;
+    console.log(`[linkedin-search] Enrichment complete: ${enrichedCount}/${results.length} with extra data`);
+    // ===== END ENRICHMENT =====
 
     return new Response(
       JSON.stringify({

@@ -97,7 +97,13 @@ export function LinkedInAutocomplete({
     return value.some(v => v.id === id);
   }, [value]);
 
-  const showDropdown = isOpen && options.length > 0;
+  // Only show dropdown with results when we have query >= 2
+  const showDropdown = isOpen && inputValue.length >= 2 && options.length > 0;
+  
+  // Limit displayed options to 20
+  const displayedOptions = [...options]
+    .sort((a, b) => a.name.localeCompare(b.name, 'pt-BR'))
+    .slice(0, 20);
 
   return (
     <div ref={containerRef} className={cn('relative', className)}>
@@ -130,9 +136,16 @@ export function LinkedInAutocomplete({
           value={inputValue}
           onChange={e => {
             setInputValue(e.target.value);
-            setIsOpen(true);
+            if (e.target.value.length >= 2) {
+              setIsOpen(true);
+            }
           }}
-          onFocus={() => setIsOpen(true)}
+          onFocus={() => {
+            // Only open dropdown if we already have a valid query
+            if (inputValue.length >= 2) {
+              setIsOpen(true);
+            }
+          }}
           placeholder={placeholder}
           disabled={disabled}
           className="pr-8"
@@ -142,14 +155,19 @@ export function LinkedInAutocomplete({
         )}
       </div>
 
-      {/* Dropdown - sorted alphabetically */}
+      {/* "Type to search" hint when focused but not enough characters */}
+      {isOpen && inputValue.length > 0 && inputValue.length < 2 && (
+        <div className="absolute z-50 w-full mt-1 bg-popover border rounded-md shadow-lg p-3 text-sm text-muted-foreground text-center">
+          Digite ao menos 2 caracteres para buscar
+        </div>
+      )}
+
+      {/* Dropdown with results */}
       {showDropdown && (
         <div className="absolute z-50 w-full mt-1 bg-popover border rounded-md shadow-lg">
           <ScrollArea className="h-[200px]">
             <div className="p-1">
-              {[...options]
-                .sort((a, b) => a.name.localeCompare(b.name, 'pt-BR'))
-                .map(option => {
+              {displayedOptions.map(option => {
                 const selected = isSelected(option.id);
                 return (
                   <button
@@ -178,6 +196,7 @@ export function LinkedInAutocomplete({
         </div>
       )}
 
+      {/* No results message */}
       {isOpen && inputValue.length >= 2 && !isLoading && options.length === 0 && (
         <div className="absolute z-50 w-full mt-1 bg-popover border rounded-md shadow-lg p-3 text-sm text-muted-foreground text-center">
           Nenhum resultado encontrado

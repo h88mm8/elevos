@@ -79,9 +79,6 @@ function filtersToParams(filters: LinkedInSearchFilters): URLSearchParams {
   if (filters.company) params.set('company', filters.company);
   if (filters.location) params.set('location', filters.location);
   if (filters.locationIds.length) params.set('locationIds', JSON.stringify(filters.locationIds));
-  if (filters.countryIds.length) params.set('countryIds', JSON.stringify(filters.countryIds));
-  if (filters.stateIds.length) params.set('stateIds', JSON.stringify(filters.stateIds));
-  if (filters.cityIds.length) params.set('cityIds', JSON.stringify(filters.cityIds));
   if (filters.companyIds.length) params.set('companyIds', JSON.stringify(filters.companyIds));
   if (filters.industryIds.length) params.set('industryIds', JSON.stringify(filters.industryIds));
   if (filters.schoolIds.length) params.set('schoolIds', JSON.stringify(filters.schoolIds));
@@ -106,9 +103,6 @@ function paramsToFilters(params: URLSearchParams): LinkedInSearchFilters {
     company: params.get('company') || '',
     location: params.get('location') || '',
     locationIds: parseJson('locationIds'),
-    countryIds: parseJson('countryIds'),
-    stateIds: parseJson('stateIds'),
-    cityIds: parseJson('cityIds'),
     companyIds: parseJson('companyIds'),
     industryIds: parseJson('industryIds'),
     schoolIds: parseJson('schoolIds'),
@@ -200,9 +194,6 @@ export default function LinkedInSearch() {
       filters.company.trim() !== '' ||
       filters.location.trim() !== '' ||
       filters.locationIds.length > 0 ||
-      filters.countryIds.length > 0 ||
-      filters.stateIds.length > 0 ||
-      filters.cityIds.length > 0 ||
       filters.companyIds.length > 0 ||
       filters.industryIds.length > 0 ||
       filters.schoolIds.length > 0 ||
@@ -212,13 +203,7 @@ export default function LinkedInSearch() {
 
   // Check if at least one location is filled
   const hasLocation = useMemo(() => {
-    return (
-      filters.countryIds.length > 0 ||
-      filters.stateIds.length > 0 ||
-      filters.cityIds.length > 0 ||
-      filters.locationIds.length > 0 ||
-      filters.location.trim() !== ''
-    );
+    return filters.locationIds.length > 0 || filters.location.trim() !== '';
   }, [filters]);
 
   const canSearch = hasLocation;
@@ -571,42 +556,18 @@ export default function LinkedInSearch() {
                         </div>
 
                         <div className="space-y-2">
-                          <Label>País <span className="text-destructive">*</span></Label>
+                          <Label>Localização <span className="text-destructive">*</span></Label>
                           <LinkedInAutocomplete
                             workspaceId={currentWorkspace?.id}
                             type="location"
-                            placeholder="Ex: Brasil, Estados Unidos..."
-                            value={filters.countryIds}
-                            onChange={val => setFilters(prev => ({ ...prev, countryIds: val }))}
+                            placeholder="Buscar país, estado ou cidade..."
+                            value={filters.locationIds}
+                            onChange={val => setFilters(prev => ({ ...prev, locationIds: val }))}
                             disabled={isSearching}
-                            disableSuggestions
                           />
-                        </div>
-
-                        <div className="space-y-2">
-                          <Label>Estado / Região</Label>
-                          <LinkedInAutocomplete
-                            workspaceId={currentWorkspace?.id}
-                            type="location"
-                            placeholder="Ex: São Paulo, Paraná..."
-                            value={filters.stateIds}
-                            onChange={val => setFilters(prev => ({ ...prev, stateIds: val }))}
-                            disabled={isSearching}
-                            disableSuggestions
-                          />
-                        </div>
-
-                        <div className="space-y-2">
-                          <Label>Cidade</Label>
-                          <LinkedInAutocomplete
-                            workspaceId={currentWorkspace?.id}
-                            type="location"
-                            placeholder="Ex: Londrina, São Paulo..."
-                            value={filters.cityIds}
-                            onChange={val => setFilters(prev => ({ ...prev, cityIds: val }))}
-                            disabled={isSearching}
-                            disableSuggestions
-                          />
+                          <p className="text-xs text-muted-foreground">
+                            Digite para buscar e selecione da lista
+                          </p>
                         </div>
                       </CardContent>
                     </CollapsibleContent>

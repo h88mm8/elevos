@@ -13,6 +13,12 @@ interface SearchFilters {
   title?: string;
   company?: string;
   location?: string;
+  // Advanced filters with IDs
+  location_ids?: string[];
+  company_ids?: string[];
+  industry_ids?: string[];
+  school_ids?: string[];
+  title_ids?: string[];
 }
 
 interface SearchRequest {
@@ -215,13 +221,15 @@ async function enrichProfile(
   unipileApiKey: string,
   accountId: string,
   publicIdentifier: string,
-  timeoutMs: number = 5000
+  timeoutMs: number = 8000
 ): Promise<Record<string, unknown> | null> {
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
   
   try {
     const url = `https://${unipileDsn}/api/v1/users/${encodeURIComponent(publicIdentifier)}?account_id=${encodeURIComponent(accountId)}`;
+    
+    console.log(`[linkedin-search] Enriching profile: ${publicIdentifier}`);
     
     const response = await fetch(url, {
       method: "GET",
@@ -235,11 +243,14 @@ async function enrichProfile(
     clearTimeout(timeoutId);
     
     if (!response.ok) {
-      console.log(`[linkedin-search] Enrich failed for ${publicIdentifier}: ${response.status}`);
+      const errorText = await response.text();
+      console.log(`[linkedin-search] Enrich failed for ${publicIdentifier}: ${response.status} - ${errorText.substring(0, 100)}`);
       return null;
     }
     
-    return await response.json();
+    const data = await response.json();
+    console.log(`[linkedin-search] Enrich success for ${publicIdentifier}`);
+    return data;
   } catch (err) {
     clearTimeout(timeoutId);
     if (err instanceof Error && err.name === 'AbortError') {
@@ -670,7 +681,10 @@ serve(async (req) => {
     if (filters.company) advancedKeywords.company = filters.company;
     if (Object.keys(advancedKeywords).length) searchPayload.advanced_keywords = advancedKeywords;
 
-    if (filters.location) {
+    // Location filter - prefer IDs, fallback to text resolution
+    if (filters.location_ids && filters.location_ids.length > 0) {
+      searchPayload.location = filters.location_ids;
+    } else if (filters.location) {
       const trimmed = filters.location.trim();
       if (/^\d+$/.test(trimmed)) {
         searchPayload.location = [trimmed];
@@ -680,6 +694,26 @@ serve(async (req) => {
           searchPayload.location = [resolvedId];
         }
       }
+    }
+
+    // Industry filter (IDs only)
+    if (filters.industry_ids && filters.industry_ids.length > 0) {
+      searchPayload.industry = filters.industry_ids;
+    }
+
+    // Company filter - prefer IDs, fallback to text
+    if (filters.company_ids && filters.company_ids.length > 0) {
+      searchPayload.current_company = filters.company_ids;
+    }
+
+    // Title filter - prefer IDs, fallback to text  
+    if (filters.title_ids && filters.title_ids.length > 0) {
+      searchPayload.current_title = filters.title_ids;
+    }
+
+    // School filter (IDs only)
+    if (filters.school_ids && filters.school_ids.length > 0) {
+      searchPayload.school = filters.school_ids;
     }
 
     if (cursor) searchPayload.cursor = cursor;

@@ -40,6 +40,9 @@ export interface LinkedInSearchFilters {
   location: string;
   // Advanced filters with IDs for autocomplete
   locationIds: AutocompleteOption[];
+  countryIds: AutocompleteOption[];     // Granular: Country
+  stateIds: AutocompleteOption[];       // Granular: State  
+  cityIds: AutocompleteOption[];        // Granular: City
   companyIds: AutocompleteOption[];
   industryIds: AutocompleteOption[];
   schoolIds: AutocompleteOption[];
@@ -52,6 +55,9 @@ export const emptyFilters: LinkedInSearchFilters = {
   company: '',
   location: '',
   locationIds: [],
+  countryIds: [],
+  stateIds: [],
+  cityIds: [],
   companyIds: [],
   industryIds: [],
   schoolIds: [],
@@ -123,9 +129,16 @@ export function useLinkedInSearch({ workspaceId }: UseLinkedInSearchOptions) {
         filtersPayload.company = filters.company.trim();
       }
       
-      // Location IDs from autocomplete
-      if (filters.locationIds.length > 0) {
-        filtersPayload.location_ids = filters.locationIds.map(l => l.id);
+      // Location IDs - combine all granular location fields
+      const allLocationIds: string[] = [
+        ...filters.locationIds.map(l => l.id),
+        ...filters.countryIds.map(l => l.id),
+        ...filters.stateIds.map(l => l.id),
+        ...filters.cityIds.map(l => l.id),
+      ];
+      
+      if (allLocationIds.length > 0) {
+        filtersPayload.location_ids = allLocationIds;
       } else if (filters.location.trim()) {
         filtersPayload.location = filters.location.trim();
       }

@@ -1,227 +1,297 @@
 
-# Plano: Busca LinkedIn com Enriquecimento Unipile Automático
 
-## Objetivo
-Quando o usuário fizer uma busca no LinkedIn, automaticamente enriquecer cada resultado via Unipile antes de retornar, trazendo dados completos em vez de dados básicos.
+# Implementação: Fallback Bulletproof para Convites Aceitos
 
-## Dados que Serão Trazidos Automaticamente
+## Contexto
 
-| Campo | Origem |
-|-------|--------|
-| `first_name`, `last_name`, `full_name` | Perfil Unipile |
-| `headline` | Perfil Unipile |
-| `job_title` (occupation ou experience[0]) | Perfil Unipile |
-| `company`, `company_linkedin` | Experience Unipile |
-| `industry`, `seniority_level` | Perfil Unipile |
-| `city`, `state`, `country` | Location Unipile |
-| `email`, `personal_email` | Contatos Unipile |
-| `phone`, `mobile_number` | Contatos Unipile |
-| `skills` (keywords) | Skills array Unipile |
-| `company_industry`, `company_size`, `company_website` | Company endpoint |
+O arquivo `webhook-unipile-events/index.ts` atualmente só faz match por `provider_message_id`. Eventos de convite aceito (`relation.new`, `connection.new`) frequentemente chegam sem `message_id`, apenas com `provider_id`, causando falha no tracking de `accepted_at`.
 
-## Arquitetura Proposta
+## Análise do Código Atual
+
+| Linha | Conteúdo | Observação |
+|-------|----------|------------|
+| 23-52 | `MESSAGE_STATUS_MAP` | Já inclui eventos de convite |
+| 138-142 | Extração `providerId` | Limitada - precisa expandir |
+| 218-286 | Match por `messageId` | Funciona, não alterar |
+| 287-290 | Response | Inserir fallback ANTES |
+
+## Alterações Planejadas
+
+### 1. Adicionar constante INVITE_EVENT_TYPES (após linha 52)
+
+```typescript
+const INVITE_EVENT_TYPES = [
+  'relation.new',
+  'connection.new', 
+  'connection.accepted',
+  'invitation.accepted',
+];
+```
+
+### 2. Expandir extração de providerId (linhas 138-142)
+
+**De:**
+```typescript
+const providerId = 
+  eventData.provider_id ||
+  eventData.user_id ||
+  eventData.attendee_id ||
+  eventData.recipient_id;
+```
+
+**Para:**
+```typescript
+const providerId = 
+  eventData.provider_id ||
+  eventData.user_id ||
+  eventData.attendee_id ||
+  eventData.recipient_id ||
+  eventData.profile_id ||
+  eventData.member_id ||
+  eventData.sender_id ||
+  payload.provider_id ||
+  payload.user_id;
+```
+
+### 3. Inserir bloco de fallback (após linha 286, antes da linha 288)
+
+O fallback implementa:
+
+1. **Lead lookup seguro**: `.limit(5)` + warning se múltiplos
+2. **pendingCount com filtro invite**: join `campaigns!inner(linkedin_action)` + `.eq('campaigns.linkedin_action', 'invite')`
+3. **Busca inviteLead**: mesmo filtro, sem alias, `maybeSingle()`
+4. **Update idempotente**: `.is('accepted_at', null).select('id')` para obter rows atualizadas
+5. **Sempre marcar matched**: mesmo se accepted_at já existia
+6. **Sempre inserir campaign_event**: com `metadata.match_method` e `metadata.provider_id`
+
+```typescript
+// ============================================
+// FALLBACK: MATCH BY PROVIDER_ID FOR INVITES
+// ============================================
+const isInviteEvent = INVITE_EVENT_TYPES.includes(eventType);
+
+if (!matchedLeadId && isInviteEvent && providerId) {
+  console.log(`[${correlationId}] Fallback invite match: provider_id=${providerId}`);
+  
+  // 1) Lead lookup (safe on duplicates)
+  let leadQuery = serviceClient
+    .from('leads')
+    .select('id, workspace_id')
+    .eq('linkedin_provider_id', providerId);
+  
+  if (workspaceId) leadQuery = leadQuery.eq('workspace_id', workspaceId);
+  
+  const { data: leadResults, error: leadError } = await leadQuery.limit(5);
+  
+  if (leadError) console.error(`[${correlationId}] lead lookup error`, leadError);
+  
+  if (leadResults && leadResults.length > 0) {
+    if (leadResults.length > 1) {
+      console.warn(`[${correlationId}] WARNING: ${leadResults.length} leads found for provider_id=${providerId}. Using first.`);
+    }
+    
+    const leadData = leadResults[0];
+    
+    // 2) pendingCount ONLY for invite campaigns
+    const { count: pendingCount, error: pendingErr } = await serviceClient
+      .from('campaign_leads')
+      .select('id, campaigns!inner(linkedin_action)', { count: 'exact', head: true })
+      .eq('lead_id', leadData.id)
+      .eq('status', 'sent')
+      .is('accepted_at', null)
+      .eq('campaigns.linkedin_action', 'invite');
+    
+    if (pendingErr) console.error(`[${correlationId}] pendingCount error`, pendingErr);
+    
+    if (pendingCount && pendingCount > 1) {
+      console.warn(`[${correlationId}] WARNING: ${pendingCount} pending INVITE campaign_leads for lead=${leadData.id}. Using most recent.`);
+    }
+    
+    // 3) Find most recent invite campaign_lead
+    const { data: inviteLead, error: inviteError } = await serviceClient
+      .from('campaign_leads')
+      .select(`
+        id,
+        campaign_id,
+        lead_id,
+        status,
+        provider_message_id,
+        campaigns!inner(linkedin_action)
+      `)
+      .eq('lead_id', leadData.id)
+      .eq('status', 'sent')
+      .is('accepted_at', null)
+      .eq('campaigns.linkedin_action', 'invite')
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    
+    if (inviteError) {
+      console.error(`[${correlationId}] inviteLead lookup error`, inviteError);
+    } else if (inviteLead) {
+      matchedLeadId = inviteLead.id;
+      const timestamp = new Date().toISOString();
+      
+      // 4) Idempotent accepted_at update
+      const { data: updatedRows, error: updateError } = await serviceClient
+        .from('campaign_leads')
+        .update({ accepted_at: timestamp })
+        .eq('id', matchedLeadId)
+        .is('accepted_at', null)
+        .select('id');
+      
+      if (updateError) {
+        console.error(`[${correlationId}] accepted_at update error`, updateError);
+      }
+      
+      const updated = (updatedRows?.length ?? 0);
+      if (updated === 0) {
+        console.log(`[${correlationId}] Idempotent skip: campaign_lead=${matchedLeadId} already had accepted_at`);
+      } else {
+        console.log(`[${correlationId}] accepted_at set for campaign_lead=${matchedLeadId}`);
+      }
+      
+      // 5) ALWAYS mark event as matched
+      await serviceClient
+        .from('unipile_events')
+        .update({
+          campaign_lead_id: matchedLeadId,
+          lead_id: leadData.id,
+          workspace_id: leadData.workspace_id,
+          matched: true,
+          processed_at: timestamp,
+        })
+        .eq('event_id', eventId);
+      
+      // 6) ALWAYS insert campaign_event
+      await serviceClient
+        .from('campaign_events')
+        .insert({
+          campaign_id: inviteLead.campaign_id,
+          campaign_lead_id: matchedLeadId,
+          event_type: eventType,
+          provider_message_id: inviteLead.provider_message_id || null,
+          metadata: {
+            correlation_id: correlationId,
+            unipile_event_id: eventId,
+            match_method: 'fallback_provider_id',
+            provider_id: providerId,
+          },
+        });
+    } else {
+      console.log(`[${correlationId}] No pending INVITE campaign_lead found for lead=${leadData.id}`);
+    }
+  } else {
+    console.log(`[${correlationId}] No lead found for provider_id=${providerId}${workspaceId ? ` workspace=${workspaceId}` : ''}`);
+  }
+}
+```
+
+## Fluxo de Decisão
 
 ```text
-┌─────────────────────────────────────────────────────────────────┐
-│                     FLUXO ATUAL                                  │
-├─────────────────────────────────────────────────────────────────┤
-│ Busca → Dados Básicos → Importa → Enriquece Manualmente         │
-└─────────────────────────────────────────────────────────────────┘
-
-                              ↓
-
-┌─────────────────────────────────────────────────────────────────┐
-│                     FLUXO NOVO                                   │
-├─────────────────────────────────────────────────────────────────┤
-│ Busca → Para cada resultado:                                     │
-│         └─→ Chama /users/{public_identifier} (paralelo)         │
-│         └─→ Mescla dados enriquecidos                           │
-│ → Retorna lista com dados completos                             │
-└─────────────────────────────────────────────────────────────────┘
+Webhook recebe evento
+        │
+        ▼
+┌───────────────────┐
+│ Tem messageId?    │
+│ SIM → Match por   │───► Atualiza timestamps
+│       message_id  │     (DM/InMail funcionam)
+│ NÃO → Continua    │
+└───────────────────┘
+        │
+        ▼
+┌───────────────────┐
+│ É evento invite?  │
+│ NÃO → Fim         │
+│ SIM → Continua    │
+└───────────────────┘
+        │
+        ▼
+┌───────────────────┐
+│ Tem providerId?   │
+│ NÃO → Log warning │
+│ SIM → Continua    │
+└───────────────────┘
+        │
+        ▼
+┌───────────────────┐
+│ Busca lead por    │
+│ provider_id +     │
+│ workspace scope   │
+└───────────────────┘
+        │
+        ▼
+┌───────────────────┐
+│ Busca invite      │
+│ campaign_lead     │
+│ pendente          │
+└───────────────────┘
+        │
+        ▼
+┌───────────────────┐
+│ Update idempotente│
+│ accepted_at       │
+│ (só se null)      │
+└───────────────────┘
+        │
+        ▼
+┌───────────────────┐
+│ SEMPRE:           │
+│ - matched = true  │
+│ - campaign_event  │
+└───────────────────┘
 ```
 
-## Implementação Técnica
+## Checklist de Requisitos
 
-### 1. Modificar `linkedin-search/index.ts`
+| # | Requisito | Implementação |
+|---|-----------|---------------|
+| 1 | Join sem alias | `campaigns!inner(linkedin_action)` + `.eq('campaigns.linkedin_action', 'invite')` |
+| 2 | pendingCount só invites | Mesmo join/filtro aplicado |
+| 3 | Update idempotente | `.is('accepted_at', null)` |
+| 4 | Lead lookup safe | `.limit(5)` + warning se >1 |
+| 5 | Não usar updateCount | `.select('id')` + `updatedRows?.length` |
+| 6 | Sempre marcar matched | Executa mesmo se update=0 |
 
-**Adicionar função de enriquecimento inline:**
-```typescript
-async function enrichProfile(
-  unipileDsn: string,
-  unipileApiKey: string,
-  accountId: string,
-  publicIdentifier: string
-): Promise<Record<string, unknown> | null> {
-  const response = await fetch(
-    `https://${unipileDsn}/api/v1/users/${publicIdentifier}?account_id=${accountId}`,
-    { method: "GET", headers: { "X-API-KEY": unipileApiKey } }
-  );
-  if (!response.ok) return null;
-  return await response.json();
-}
+## Queries de Validação
+
+**Eventos não matchados:**
+```sql
+SELECT id, created_at, event_type, matched 
+FROM unipile_events
+WHERE matched = false 
+  AND event_type IN ('relation.new', 'connection.new', 'connection.accepted', 'invitation.accepted')
+ORDER BY created_at DESC 
+LIMIT 20;
 ```
 
-**Processar resultados em paralelo (após linha ~396):**
-```typescript
-// Enriquecer cada resultado em paralelo
-const enrichedResults = await Promise.allSettled(
-  searchData.items.map(async (item) => {
-    const publicId = item.public_identifier;
-    if (!publicId) return transformBasicResult(item);
-    
-    const enriched = await enrichProfile(unipileDsn, unipileApiKey, accountId, publicId);
-    return mergeEnrichedData(item, enriched);
-  })
-);
-
-// Filtrar resultados bem sucedidos
-const results = enrichedResults
-  .filter(r => r.status === 'fulfilled')
-  .map(r => r.value);
+**Convites aceitos:**
+```sql
+SELECT cl.id, cl.accepted_at, c.linkedin_action
+FROM campaign_leads cl 
+JOIN campaigns c ON c.id = cl.campaign_id
+WHERE c.linkedin_action = 'invite' AND cl.accepted_at IS NOT NULL
+ORDER BY cl.accepted_at DESC 
+LIMIT 20;
 ```
 
-**Função para mesclar dados:**
-```typescript
-function mergeEnrichedData(searchItem: any, enrichedData: any): EnrichedResult {
-  return {
-    // Dados da busca
-    provider_id: searchItem.id,
-    public_identifier: searchItem.public_identifier,
-    profile_url: `https://linkedin.com/in/${searchItem.public_identifier}`,
-    profile_picture_url: enrichedData?.profile_picture || searchItem.profile_picture,
-    connection_degree: searchItem.connection_degree,
-    
-    // Dados enriquecidos (com fallback para busca)
-    first_name: enrichedData?.first_name || searchItem.first_name,
-    last_name: enrichedData?.last_name || searchItem.last_name,
-    full_name: enrichedData?.name || searchItem.name,
-    headline: enrichedData?.headline || searchItem.headline,
-    industry: enrichedData?.industry,
-    job_title: enrichedData?.occupation || extractJobTitle(enrichedData?.experiences),
-    company: extractCompany(enrichedData?.experiences) || searchItem.current_company?.name,
-    company_linkedin: extractCompanyLinkedIn(enrichedData?.experiences),
-    seniority_level: enrichedData?.seniority,
-    
-    // Location
-    city: extractCity(enrichedData?.location),
-    state: extractState(enrichedData?.location),
-    country: extractCountry(enrichedData?.location),
-    
-    // Contatos
-    email: extractEmail(enrichedData?.emails),
-    phone: extractPhone(enrichedData?.phone_numbers),
-    
-    // Skills
-    keywords: extractSkills(enrichedData?.skills),
-  };
-}
+**Eventos com fallback:**
+```sql
+SELECT id, event_type, metadata->>'match_method', metadata->>'provider_id'
+FROM campaign_events
+WHERE metadata->>'match_method' = 'fallback_provider_id'
+ORDER BY created_at DESC 
+LIMIT 20;
 ```
 
-### 2. Atualizar Frontend (`LinkedInSearch.tsx`)
+## Definition of Done
 
-**Expandir interface `LinkedInSearchResult`:**
-```typescript
-interface LinkedInSearchResult {
-  // Existentes
-  provider_id?: string;
-  public_identifier?: string;
-  full_name?: string;
-  first_name?: string;
-  last_name?: string;
-  headline?: string;
-  profile_url?: string;
-  profile_picture_url?: string;
-  location?: string;
-  connection_degree?: string;
-  company?: string;
-  job_title?: string;
-  
-  // Novos (enriquecimento automático)
-  industry?: string;
-  seniority_level?: string;
-  city?: string;
-  state?: string;
-  country?: string;
-  email?: string;
-  phone?: string;
-  company_linkedin?: string;
-  keywords?: string;
-}
-```
+- DM/InMail continuam funcionando via messageId (não afetados)
+- `relation.new`/`connection.*` sem message_id mas com provider_id:
+  - `campaign_leads.accepted_at` preenchido (ou skip idempotente)
+  - `unipile_events.matched = true` com `campaign_lead_id`
+  - `campaign_events` com `metadata.match_method = 'fallback_provider_id'`
+- Sem exceptions com leads duplicados
+- Logs claros indicando método de match usado
 
-**Atualizar importação de leads (linha ~342):**
-```typescript
-const leadsToInsert = selectedResults.map(lead => ({
-  workspace_id: currentWorkspace.id,
-  list_id: targetListId,
-  full_name: lead.full_name,
-  first_name: lead.first_name,
-  last_name: lead.last_name,
-  headline: lead.headline,
-  linkedin_url: lead.profile_url,
-  linkedin_public_identifier: lead.public_identifier,
-  linkedin_provider_id: lead.provider_id,
-  city: lead.city,
-  state: lead.state,
-  country: lead.country,
-  company: lead.company,
-  company_linkedin: lead.company_linkedin,
-  job_title: lead.job_title,
-  industry: lead.industry,
-  seniority_level: lead.seniority_level,
-  email: lead.email,
-  phone: lead.phone,
-  keywords: lead.keywords,
-  last_enriched_at: new Date().toISOString(), // Marca como enriquecido
-}));
-```
-
-### 3. Atualizar UI dos Resultados
-
-**Exibir mais campos no card de resultado:**
-- Email (se disponível) com ícone
-- Telefone (se disponível) com ícone
-- Industry badge
-- Skills como tags
-
-### 4. Decisões de Quota
-
-**Opção A - Quota Única (Recomendado):**
-- Consumir apenas `linkedin_search_page`
-- O enriquecimento é parte do processo de busca
-- Mais simples para o usuário entender
-
-**Opção B - Quotas Separadas:**
-- `linkedin_search_page` para a busca
-- `linkedin_enrich` × N para cada resultado enriquecido
-- Mais complexo, pode frustrar usuários
-
-## Considerações de Performance
-
-1. **Paralelização**: Usar `Promise.allSettled` para não bloquear se um enriquecimento falhar
-2. **Timeout**: Adicionar timeout de 5s por enriquecimento para não travar
-3. **Fallback**: Se enriquecimento falhar, retornar dados básicos da busca
-4. **Limite**: Máximo de 25 resultados = 25 chamadas paralelas (aceitável)
-
-## Tempo Estimado de Resposta
-
-- Busca atual: ~1-2 segundos
-- Busca + Enriquecimento: ~3-8 segundos (paralelo)
-- Adicionar loading state com progresso
-
-## Arquivos a Modificar
-
-1. `supabase/functions/linkedin-search/index.ts` - Adicionar lógica de enriquecimento
-2. `src/hooks/useLinkedInSearch.ts` - Atualizar interface de resultados
-3. `src/pages/LinkedInSearch.tsx` - Atualizar importação e exibição
-4. Remover botão "Básico" do `LeadDetailsDrawer.tsx` (opcional - já vem enriquecido)
-
-## Resultado Final
-
-O usuário fará uma busca e receberá leads com:
-- Nome completo, cargo, empresa
-- Localização (cidade, estado, país)
-- Email e telefone (quando disponíveis)
-- Industry e seniority
-- Skills como keywords
-- Todos prontos para importar e usar em campanhas

@@ -1,7 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { useLinkedInAutocomplete, AutocompleteOption } from '@/hooks/useLinkedInAutocomplete';
 import { Input } from '@/components/ui/input';
-import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Loader2, X, Check } from 'lucide-react';
@@ -18,6 +17,8 @@ interface LinkedInAutocompleteProps {
   disabled?: boolean;
   multiple?: boolean;
   className?: string;
+  /** When true, doesn't show suggestions - user types freely and presses Enter to add */
+  disableSuggestions?: boolean;
 }
 
 export function LinkedInAutocomplete({
@@ -29,6 +30,7 @@ export function LinkedInAutocomplete({
   disabled = false,
   multiple = true,
   className,
+  disableSuggestions = false,
 }: LinkedInAutocompleteProps) {
   const [inputValue, setInputValue] = useState('');
   const [isOpen, setIsOpen] = useState(false);
@@ -40,8 +42,10 @@ export function LinkedInAutocomplete({
     type,
   });
 
-  // Debounced search
+  // Debounced search - only when suggestions are enabled
   useEffect(() => {
+    if (disableSuggestions) return;
+    
     if (debounceTimer) {
       clearTimeout(debounceTimer);
     }
@@ -60,7 +64,7 @@ export function LinkedInAutocomplete({
         clearTimeout(debounceTimer);
       }
     };
-  }, [inputValue]);
+  }, [inputValue, disableSuggestions]);
 
   // Close on click outside
   useEffect(() => {
@@ -98,6 +102,29 @@ export function LinkedInAutocomplete({
     return value.some(v => v.id === id);
   }, [value]);
 
+  // Handle Enter key for manual input mode
+  const handleKeyDown = useCallback((e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Enter' && disableSuggestions && inputValue.trim()) {
+      e.preventDefault();
+      const newOption: AutocompleteOption = {
+        id: inputValue.trim(),
+        name: inputValue.trim(),
+      };
+      
+      if (multiple) {
+        const isAlreadySelected = value.some(v => v.name.toLowerCase() === inputValue.trim().toLowerCase());
+        if (!isAlreadySelected) {
+          onChange([...value, newOption]);
+        }
+      } else {
+        onChange([newOption]);
+      }
+      setInputValue('');
+    }
+  }, [disableSuggestions, inputValue, value, onChange, multiple]);
+
+  const showDropdown = !disableSuggestions && isOpen && options.length > 0;
+
   return (
     <div ref={containerRef} className={cn('relative', className)}>
       {/* Selected items */}
@@ -129,22 +156,29 @@ export function LinkedInAutocomplete({
           value={inputValue}
           onChange={e => {
             setInputValue(e.target.value);
-            setIsOpen(true);
+            if (!disableSuggestions) {
+              setIsOpen(true);
+            }
           }}
-          onFocus={() => setIsOpen(true)}
-          placeholder={placeholder}
+          onFocus={() => {
+            if (!disableSuggestions) {
+              setIsOpen(true);
+            }
+          }}
+          onKeyDown={handleKeyDown}
+          placeholder={disableSuggestions ? `${placeholder} (Enter para adicionar)` : placeholder}
           disabled={disabled}
           className="pr-8"
         />
-        {isLoading && (
+        {isLoading && !disableSuggestions && (
           <Loader2 className="absolute right-2 top-1/2 -translate-y-1/2 h-4 w-4 animate-spin text-muted-foreground" />
         )}
       </div>
 
       {/* Dropdown */}
-      {isOpen && options.length > 0 && (
+      {showDropdown && (
         <div className="absolute z-50 w-full mt-1 bg-popover border rounded-md shadow-lg">
-          <ScrollArea className="max-h-[200px]">
+          <ScrollArea className="h-[200px]">
             <div className="p-1">
               {options.map(option => {
                 const selected = isSelected(option.id);
@@ -160,7 +194,7 @@ export function LinkedInAutocomplete({
                   >
                     {multiple && (
                       <div className={cn(
-                        'h-4 w-4 border rounded flex items-center justify-center',
+                        'h-4 w-4 border rounded flex items-center justify-center flex-shrink-0',
                         selected && 'bg-primary border-primary'
                       )}>
                         {selected && <Check className="h-3 w-3 text-primary-foreground" />}
@@ -175,7 +209,7 @@ export function LinkedInAutocomplete({
         </div>
       )}
 
-      {isOpen && inputValue.length >= 2 && !isLoading && options.length === 0 && (
+      {!disableSuggestions && isOpen && inputValue.length >= 2 && !isLoading && options.length === 0 && (
         <div className="absolute z-50 w-full mt-1 bg-popover border rounded-md shadow-lg p-3 text-sm text-muted-foreground text-center">
           Nenhum resultado encontrado
         </div>

@@ -210,7 +210,18 @@ export default function LinkedInSearch() {
     );
   }, [filters]);
 
-  const canSearch = hasActiveFilters;
+  // Check if at least one location is filled
+  const hasLocation = useMemo(() => {
+    return (
+      filters.countryIds.length > 0 ||
+      filters.stateIds.length > 0 ||
+      filters.cityIds.length > 0 ||
+      filters.locationIds.length > 0 ||
+      filters.location.trim() !== ''
+    );
+  }, [filters]);
+
+  const canSearch = hasLocation;
 
   // Update URL when filters change
   useEffect(() => {
@@ -222,8 +233,8 @@ export default function LinkedInSearch() {
   const handleSearch = useCallback(async () => {
     if (!canSearch) {
       toast({
-        title: 'Filtros obrigatórios',
-        description: 'Preencha pelo menos um filtro para buscar.',
+        title: 'Localização obrigatória',
+        description: 'Preencha pelo menos um campo de localização (País, Estado ou Cidade) para buscar.',
         variant: 'destructive',
       });
       return;
@@ -560,7 +571,7 @@ export default function LinkedInSearch() {
                         </div>
 
                         <div className="space-y-2">
-                          <Label>País</Label>
+                          <Label>País <span className="text-destructive">*</span></Label>
                           <LinkedInAutocomplete
                             workspaceId={currentWorkspace?.id}
                             type="location"
@@ -568,6 +579,7 @@ export default function LinkedInSearch() {
                             value={filters.countryIds}
                             onChange={val => setFilters(prev => ({ ...prev, countryIds: val }))}
                             disabled={isSearching}
+                            disableSuggestions
                           />
                         </div>
 
@@ -580,6 +592,7 @@ export default function LinkedInSearch() {
                             value={filters.stateIds}
                             onChange={val => setFilters(prev => ({ ...prev, stateIds: val }))}
                             disabled={isSearching}
+                            disableSuggestions
                           />
                         </div>
 
@@ -592,6 +605,7 @@ export default function LinkedInSearch() {
                             value={filters.cityIds}
                             onChange={val => setFilters(prev => ({ ...prev, cityIds: val }))}
                             disabled={isSearching}
+                            disableSuggestions
                           />
                         </div>
                       </CardContent>

@@ -1,245 +1,227 @@
 
-
-# Plano: Simplificar Arquitetura de Enriquecimento LinkedIn
+# Plano: Busca LinkedIn com Enriquecimento Unipile Automático
 
 ## Objetivo
-Criar uma estrutura mais simples e estável com dois fluxos claros:
-1. **Unipile (Básico)** = Busca + Enriquecimento padrão (automático, sempre junto)
-2. **Apify (Deep Enrich)** = Enriquecimento profundo com TODOS os campos
+Quando o usuário fizer uma busca no LinkedIn, automaticamente enriquecer cada resultado via Unipile antes de retornar, trazendo dados completos em vez de dados básicos.
 
----
+## Dados que Serão Trazidos Automaticamente
 
-## Análise da Situação Atual
+| Campo | Origem |
+|-------|--------|
+| `first_name`, `last_name`, `full_name` | Perfil Unipile |
+| `headline` | Perfil Unipile |
+| `job_title` (occupation ou experience[0]) | Perfil Unipile |
+| `company`, `company_linkedin` | Experience Unipile |
+| `industry`, `seniority_level` | Perfil Unipile |
+| `city`, `state`, `country` | Location Unipile |
+| `email`, `personal_email` | Contatos Unipile |
+| `phone`, `mobile_number` | Contatos Unipile |
+| `skills` (keywords) | Skills array Unipile |
+| `company_industry`, `company_size`, `company_website` | Company endpoint |
 
-### Fluxo Atual (Complexo)
+## Arquitetura Proposta
+
 ```text
 ┌─────────────────────────────────────────────────────────────────┐
-│ 1. LinkedIn Search (Unipile) → Retorna resultados básicos       │
-│ 2. Adicionar leads → Salva no banco com dados mínimos           │
-│ 3. Enrich Lead (Unipile) → Chamada separada para enriquecer     │
-│ 4. Deep Enrich (Apify) → Enriquecimento profundo opcional       │
+│                     FLUXO ATUAL                                  │
+├─────────────────────────────────────────────────────────────────┤
+│ Busca → Dados Básicos → Importa → Enriquece Manualmente         │
+└─────────────────────────────────────────────────────────────────┘
+
+                              ↓
+
+┌─────────────────────────────────────────────────────────────────┐
+│                     FLUXO NOVO                                   │
+├─────────────────────────────────────────────────────────────────┤
+│ Busca → Para cada resultado:                                     │
+│         └─→ Chama /users/{public_identifier} (paralelo)         │
+│         └─→ Mescla dados enriquecidos                           │
+│ → Retorna lista com dados completos                             │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
-### Fluxo Proposto (Simples)
-```text
-┌─────────────────────────────────────────────────────────────────┐
-│ 1. LinkedIn Search + Enrich (Unipile)                           │
-│    → Busca + Enriquece AUTOMATICAMENTE em uma operação          │
-│    → Lead salvo já com todos dados básicos do Unipile           │
-│                                                                 │
-│ 2. Deep Enrich (Apify) - Quando usuário solicitar               │
-│    → Enriquecimento profundo com TODOS os 20+ campos            │
-│    → Email search incluído por padrão                           │
-└─────────────────────────────────────────────────────────────────┘
-```
+## Implementação Técnica
 
----
+### 1. Modificar `linkedin-search/index.ts`
 
-## Campos do Apify que NÃO Estamos Capturando Atualmente
-
-Com base no output de exemplo do actor HarvestAPI, identificamos campos que precisam ser mapeados:
-
-| Campo Apify | Status Atual | Ação |
-|-------------|--------------|------|
-| `openToWork` | ❌ Não capturado | Adicionar coluna `open_to_work` |
-| `hiring` | ❌ Não capturado | Adicionar coluna `is_hiring` |
-| `premium` | ❌ Não capturado | Adicionar coluna `linkedin_premium` |
-| `influencer` | ❌ Não capturado | Adicionar coluna `linkedin_influencer` |
-| `verified` | ❌ Não capturado | Adicionar coluna `linkedin_verified` |
-| `registeredAt` | ❌ Não capturado | Adicionar coluna `linkedin_registered_at` |
-| `photo` | ❌ Não capturado | Adicionar coluna `profile_picture_url` |
-| `topSkills` | ❌ Não capturado | Usar junto com `skills` |
-| `publications` | ❌ Não capturado | Armazenar no `raw_json` |
-| `courses` | ❌ Não capturado | Armazenar no `raw_json` |
-| `patents` | ❌ Não capturado | Armazenar no `raw_json` |
-| `volunteering` | ❌ Não capturado | Armazenar no `raw_json` |
-
----
-
-## Implementação Detalhada
-
-### 1. Migração do Banco de Dados
-
-Adicionar novos campos na tabela `leads`:
-
-```sql
-ALTER TABLE public.leads ADD COLUMN IF NOT EXISTS open_to_work BOOLEAN DEFAULT NULL;
-ALTER TABLE public.leads ADD COLUMN IF NOT EXISTS is_hiring BOOLEAN DEFAULT NULL;
-ALTER TABLE public.leads ADD COLUMN IF NOT EXISTS linkedin_premium BOOLEAN DEFAULT NULL;
-ALTER TABLE public.leads ADD COLUMN IF NOT EXISTS linkedin_influencer BOOLEAN DEFAULT NULL;
-ALTER TABLE public.leads ADD COLUMN IF NOT EXISTS linkedin_verified BOOLEAN DEFAULT NULL;
-ALTER TABLE public.leads ADD COLUMN IF NOT EXISTS linkedin_registered_at TIMESTAMP WITH TIME ZONE DEFAULT NULL;
-ALTER TABLE public.leads ADD COLUMN IF NOT EXISTS profile_picture_url TEXT DEFAULT NULL;
-ALTER TABLE public.leads ADD COLUMN IF NOT EXISTS top_skills TEXT DEFAULT NULL;
-```
-
-### 2. Modificar `linkedin-search/index.ts`
-
-**Mudança Principal**: Após buscar resultados, enriquecer cada perfil automaticamente ANTES de retornar.
-
+**Adicionar função de enriquecimento inline:**
 ```typescript
-// Após obter resultados da busca
-for (const result of searchData.items) {
-  const publicIdentifier = result.public_identifier;
-  if (publicIdentifier) {
-    // Enriquecer perfil automaticamente
-    const profileResponse = await fetch(
-      `https://${unipileDsn}/api/v1/users/${publicIdentifier}?account_id=${unipileAccountId}`,
-      { headers: { "X-API-KEY": unipileApiKey } }
-    );
+async function enrichProfile(
+  unipileDsn: string,
+  unipileApiKey: string,
+  accountId: string,
+  publicIdentifier: string
+): Promise<Record<string, unknown> | null> {
+  const response = await fetch(
+    `https://${unipileDsn}/api/v1/users/${publicIdentifier}?account_id=${accountId}`,
+    { method: "GET", headers: { "X-API-KEY": unipileApiKey } }
+  );
+  if (!response.ok) return null;
+  return await response.json();
+}
+```
+
+**Processar resultados em paralelo (após linha ~396):**
+```typescript
+// Enriquecer cada resultado em paralelo
+const enrichedResults = await Promise.allSettled(
+  searchData.items.map(async (item) => {
+    const publicId = item.public_identifier;
+    if (!publicId) return transformBasicResult(item);
     
-    if (profileResponse.ok) {
-      const profileData = await profileResponse.json();
-      // Merge dados enriquecidos no resultado
-      result.enrichedProfile = profileData;
-    }
-  }
+    const enriched = await enrichProfile(unipileDsn, unipileApiKey, accountId, publicId);
+    return mergeEnrichedData(item, enriched);
+  })
+);
+
+// Filtrar resultados bem sucedidos
+const results = enrichedResults
+  .filter(r => r.status === 'fulfilled')
+  .map(r => r.value);
+```
+
+**Função para mesclar dados:**
+```typescript
+function mergeEnrichedData(searchItem: any, enrichedData: any): EnrichedResult {
+  return {
+    // Dados da busca
+    provider_id: searchItem.id,
+    public_identifier: searchItem.public_identifier,
+    profile_url: `https://linkedin.com/in/${searchItem.public_identifier}`,
+    profile_picture_url: enrichedData?.profile_picture || searchItem.profile_picture,
+    connection_degree: searchItem.connection_degree,
+    
+    // Dados enriquecidos (com fallback para busca)
+    first_name: enrichedData?.first_name || searchItem.first_name,
+    last_name: enrichedData?.last_name || searchItem.last_name,
+    full_name: enrichedData?.name || searchItem.name,
+    headline: enrichedData?.headline || searchItem.headline,
+    industry: enrichedData?.industry,
+    job_title: enrichedData?.occupation || extractJobTitle(enrichedData?.experiences),
+    company: extractCompany(enrichedData?.experiences) || searchItem.current_company?.name,
+    company_linkedin: extractCompanyLinkedIn(enrichedData?.experiences),
+    seniority_level: enrichedData?.seniority,
+    
+    // Location
+    city: extractCity(enrichedData?.location),
+    state: extractState(enrichedData?.location),
+    country: extractCountry(enrichedData?.location),
+    
+    // Contatos
+    email: extractEmail(enrichedData?.emails),
+    phone: extractPhone(enrichedData?.phone_numbers),
+    
+    // Skills
+    keywords: extractSkills(enrichedData?.skills),
+  };
 }
 ```
 
-### 3. Refatorar `process-enrichment-jobs/index.ts`
+### 2. Atualizar Frontend (`LinkedInSearch.tsx`)
 
-**Capturar TODOS os campos do Apify**:
-
+**Expandir interface `LinkedInSearchResult`:**
 ```typescript
-const updateData: Record<string, unknown> = {
-  // Identidade
-  first_name: profile.firstName,
-  last_name: profile.lastName,
-  full_name: fullName,
-  headline: profile.headline,
-  about: profile.about,
-  profile_picture_url: profile.photo,
+interface LinkedInSearchResult {
+  // Existentes
+  provider_id?: string;
+  public_identifier?: string;
+  full_name?: string;
+  first_name?: string;
+  last_name?: string;
+  headline?: string;
+  profile_url?: string;
+  profile_picture_url?: string;
+  location?: string;
+  connection_degree?: string;
+  company?: string;
+  job_title?: string;
   
-  // Status LinkedIn
-  open_to_work: profile.openToWork ?? false,
-  is_hiring: profile.hiring ?? false,
-  linkedin_premium: profile.premium ?? false,
-  linkedin_influencer: profile.influencer ?? false,
-  linkedin_verified: profile.verified ?? false,
-  linkedin_registered_at: profile.registeredAt,
-  
-  // Profissional
-  company: currentExperience?.companyName || profile.currentPosition?.[0]?.companyName,
-  job_title: currentExperience?.position,
-  
-  // Localização
-  city: location.city,
-  state: location.state,
-  country: location.country,
-  
-  // Skills (array + top skills string)
-  skills: profile.skills?.map((s) => s.name),
-  top_skills: profile.topSkills,
-  
-  // Métricas sociais
-  connections: profile.connectionsCount,
-  followers: profile.followerCount,
-  
-  // Contato (prioridade para dados não existentes)
-  email: matchingLead.email || profile.email,
-  phone: matchingLead.phone || profile.phone,
-  
-  // Timestamp
-  last_enriched_at: new Date().toISOString(),
-};
-```
-
-### 4. Atualizar Interface `Lead` em `src/types/index.ts`
-
-```typescript
-export interface Lead {
-  // ... campos existentes ...
-  
-  // Novos campos de status LinkedIn
-  open_to_work: boolean | null;
-  is_hiring: boolean | null;
-  linkedin_premium: boolean | null;
-  linkedin_influencer: boolean | null;
-  linkedin_verified: boolean | null;
-  linkedin_registered_at: string | null;
-  profile_picture_url: string | null;
-  top_skills: string | null;
+  // Novos (enriquecimento automático)
+  industry?: string;
+  seniority_level?: string;
+  city?: string;
+  state?: string;
+  country?: string;
+  email?: string;
+  phone?: string;
+  company_linkedin?: string;
+  keywords?: string;
 }
 ```
 
-### 5. Exibir Novos Campos no `LeadDetailsDrawer`
-
-Adicionar badges visuais para status:
-
-```tsx
-// Após o nome/headline
-<div className="flex flex-wrap gap-1 mt-2">
-  {lead.linkedin_premium && (
-    <Badge className="bg-yellow-500">Premium</Badge>
-  )}
-  {lead.linkedin_verified && (
-    <Badge className="bg-blue-500">Verificado</Badge>
-  )}
-  {lead.open_to_work && (
-    <Badge className="bg-green-500">Open to Work</Badge>
-  )}
-  {lead.is_hiring && (
-    <Badge className="bg-purple-500">Hiring</Badge>
-  )}
-  {lead.linkedin_influencer && (
-    <Badge className="bg-orange-500">Influencer</Badge>
-  )}
-</div>
+**Atualizar importação de leads (linha ~342):**
+```typescript
+const leadsToInsert = selectedResults.map(lead => ({
+  workspace_id: currentWorkspace.id,
+  list_id: targetListId,
+  full_name: lead.full_name,
+  first_name: lead.first_name,
+  last_name: lead.last_name,
+  headline: lead.headline,
+  linkedin_url: lead.profile_url,
+  linkedin_public_identifier: lead.public_identifier,
+  linkedin_provider_id: lead.provider_id,
+  city: lead.city,
+  state: lead.state,
+  country: lead.country,
+  company: lead.company,
+  company_linkedin: lead.company_linkedin,
+  job_title: lead.job_title,
+  industry: lead.industry,
+  seniority_level: lead.seniority_level,
+  email: lead.email,
+  phone: lead.phone,
+  keywords: lead.keywords,
+  last_enriched_at: new Date().toISOString(), // Marca como enriquecido
+}));
 ```
 
-### 6. Exibir Avatar no Drawer
+### 3. Atualizar UI dos Resultados
 
-```tsx
-// Header com avatar
-<div className="flex items-center gap-4">
-  {lead.profile_picture_url ? (
-    <img 
-      src={lead.profile_picture_url} 
-      alt={lead.full_name || "Profile"}
-      className="w-16 h-16 rounded-full object-cover border-2 border-primary"
-    />
-  ) : (
-    <div className="w-16 h-16 rounded-full bg-muted flex items-center justify-center">
-      <User className="h-8 w-8 text-muted-foreground" />
-    </div>
-  )}
-  <div>
-    <SheetTitle>{lead.full_name}</SheetTitle>
-    {/* Tags e headline */}
-  </div>
-</div>
-```
+**Exibir mais campos no card de resultado:**
+- Email (se disponível) com ícone
+- Telefone (se disponível) com ícone
+- Industry badge
+- Skills como tags
 
----
+### 4. Decisões de Quota
 
-## Resumo das Alterações por Arquivo
+**Opção A - Quota Única (Recomendado):**
+- Consumir apenas `linkedin_search_page`
+- O enriquecimento é parte do processo de busca
+- Mais simples para o usuário entender
 
-| Arquivo | Alteração |
-|---------|-----------|
-| **Migração SQL** | Adicionar 8 novas colunas na tabela `leads` |
-| `process-enrichment-jobs/index.ts` | Mapear TODOS os campos do Apify (20+ campos) |
-| `linkedin-search/index.ts` | (Opcional) Auto-enriquecer durante busca |
-| `src/types/index.ts` | Adicionar novos campos na interface `Lead` |
-| `LeadDetailsDrawer.tsx` | Exibir avatar e badges de status |
-| `LinkedInAdvancedSection.tsx` | Já preparado para exibir dados adicionais |
+**Opção B - Quotas Separadas:**
+- `linkedin_search_page` para a busca
+- `linkedin_enrich` × N para cada resultado enriquecido
+- Mais complexo, pode frustrar usuários
 
----
+## Considerações de Performance
 
-## Garantia de Estabilidade
+1. **Paralelização**: Usar `Promise.allSettled` para não bloquear se um enriquecimento falhar
+2. **Timeout**: Adicionar timeout de 5s por enriquecimento para não travar
+3. **Fallback**: Se enriquecimento falhar, retornar dados básicos da busca
+4. **Limite**: Máximo de 25 resultados = 25 chamadas paralelas (aceitável)
 
-1. **Fail-safe**: Se enriquecimento falhar durante busca, retorna resultado básico sem erro
-2. **Idempotência**: Campos não sobrescrevem dados existentes (email/phone)
-3. **Raw JSON preservado**: `linkedin_profiles.raw_json` mantém dados completos para auditoria
-4. **Quota atômica**: Sistema de quota existente continua funcionando
+## Tempo Estimado de Resposta
 
----
+- Busca atual: ~1-2 segundos
+- Busca + Enriquecimento: ~3-8 segundos (paralelo)
+- Adicionar loading state com progresso
 
-## Benefícios
+## Arquivos a Modificar
 
-- **Simplicidade**: 2 operações claras (Busca+Básico vs Deep)
-- **Dados completos**: 100% dos campos do Apify capturados
-- **UX melhorada**: Avatar e badges visuais imediatos
-- **Estabilidade**: Fallbacks e tratamento de erros em cada etapa
+1. `supabase/functions/linkedin-search/index.ts` - Adicionar lógica de enriquecimento
+2. `src/hooks/useLinkedInSearch.ts` - Atualizar interface de resultados
+3. `src/pages/LinkedInSearch.tsx` - Atualizar importação e exibição
+4. Remover botão "Básico" do `LeadDetailsDrawer.tsx` (opcional - já vem enriquecido)
 
+## Resultado Final
+
+O usuário fará uma busca e receberá leads com:
+- Nome completo, cargo, empresa
+- Localização (cidade, estado, país)
+- Email e telefone (quando disponíveis)
+- Industry e seniority
+- Skills como keywords
+- Todos prontos para importar e usar em campanhas

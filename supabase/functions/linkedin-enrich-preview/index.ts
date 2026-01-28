@@ -53,14 +53,42 @@ function extractCompanyLinkedIn(data: Record<string, unknown> | null): string | 
   return null;
 }
 
+function extractCompanySlugFromUrl(url: string): string | null {
+  // Supports both full URLs and partial paths.
+  // Examples:
+  // - https://www.linkedin.com/company/acme-inc/
+  // - linkedin.com/company/acme-inc
+  // - /company/acme-inc/
+  const match = url.match(/(?:linkedin\.com)?\/?company\/([^/?#]+)/i);
+  if (!match?.[1]) return null;
+  try {
+    return decodeURIComponent(match[1]);
+  } catch {
+    return match[1];
+  }
+}
+
 function extractCompanyIdentifier(data: Record<string, unknown> | null): string | null {
   if (!data) return null;
   const experiences = data.experiences as Array<Record<string, unknown>> | undefined;
   if (experiences?.length) {
-    const company = experiences[0].company as Record<string, unknown>;
-    if (company && company.public_identifier) {
-      return company.public_identifier as string;
+    const company = experiences[0].company as Record<string, unknown> | string | undefined;
+    if (!company) return null;
+
+    // Preferred: public_identifier
+    if (company && typeof company === 'object') {
+      const publicId = company.public_identifier as string | undefined;
+      if (publicId) return publicId;
+
+      // Fallback: extract slug from company.linkedin_url/company.url
+      const url = (company.linkedin_url as string) || (company.url as string) || null;
+      if (url) {
+        const slug = extractCompanySlugFromUrl(url);
+        if (slug) return slug;
+      }
     }
+
+    // If company is a plain string, we don't have a stable identifier.
   }
   return null;
 }
@@ -155,12 +183,13 @@ interface EnrichedPreview {
 }
 
 function normalizeEnrichedData(data: Record<string, unknown>): EnrichedPreview {
+  const companyIdentifier = extractCompanyIdentifier(data);
   return {
     headline: (data.headline as string) || null,
     job_title: extractJobTitle(data),
     company: extractCompany(data),
     company_linkedin: extractCompanyLinkedIn(data),
-    company_identifier: extractCompanyIdentifier(data),
+    company_identifier: companyIdentifier,
     industry: (data.industry as string) || null,
     seniority_level: (data.seniority as string) || null,
     city: extractCity(data),
@@ -279,6 +308,18 @@ serve(async (req) => {
         { account_id: globalAccount.accountId },
         { timeoutMs: ENRICH_TIMEOUT_MS }
       );
+
+      // TEMP DEBUG (remove later): help validate company identifier extraction
+      const raw = response.data as Record<string, unknown>;
+      const experiences = raw.experiences as Array<Record<string, unknown>> | undefined;
+      const company0 = experiences?.length ? (experiences[0].company as unknown) : undefined;
+      const extractedCompanyIdentifier = extractCompanyIdentifier(raw);
+      logger.info('[TEMP_DEBUG] company identifier extraction', {
+        company_identifier: extractedCompanyIdentifier,
+        company_type: typeof company0,
+        company_keys: typeof company0 === 'object' && company0 ? Object.keys(company0 as Record<string, unknown>).slice(0, 12) : undefined,
+        company_sample: typeof company0 === 'string' ? (company0 as string).slice(0, 120) : undefined,
+      });
 
       const enriched = normalizeEnrichedData(response.data);
       

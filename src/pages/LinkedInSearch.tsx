@@ -331,6 +331,19 @@ export default function LinkedInSearch() {
     });
   }, [getResultId, enrichCompany]);
 
+  // Ensure company enrichment triggers even if company_identifier only arrives AFTER preview enrichment
+  useEffect(() => {
+    if (!currentWorkspace?.id) return;
+    if (selectedLeadsMap.size === 0) return;
+
+    for (const lead of selectedLeadsMap.values()) {
+      const merged = getMergedLead(lead);
+      if (merged.company_identifier) {
+        enrichCompany(merged.company_identifier);
+      }
+    }
+  }, [selectedLeadsMap, getMergedLead, enrichCompany, currentWorkspace?.id]);
+
   // Toggle all on current page
   const toggleAllPage = useCallback(() => {
     if (allPageSelected) {
@@ -1116,10 +1129,30 @@ export default function LinkedInSearch() {
                                 </Badge>
                               )}
                               {/* Show loading indicator when company is being enriched */}
-                              {isSelected && companyStatus?.status === 'loading' && (
+                              {isSelected && (companyStatus?.status === 'pending' || companyStatus?.status === 'loading') && (
                                 <Badge variant="outline" className="text-xs animate-pulse">
                                   <Building2 className="h-3 w-3 mr-1" />
                                   Carregando empresa...
+                                </Badge>
+                              )}
+                              {/* Explicit reason when we cannot enrich company (no ID) */}
+                              {isSelected && !result.company_identifier && (
+                                <Badge variant="outline" className="text-xs text-muted-foreground">
+                                  <Building2 className="h-3 w-3 mr-1" />
+                                  Empresa sem ID (não foi possível enriquecer)
+                                </Badge>
+                              )}
+                              {/* Show error reason when company enrich fails */}
+                              {isSelected && result.company_identifier && companyStatus?.status === 'error' && (
+                                <Badge variant="outline" className="text-xs text-muted-foreground">
+                                  <Building2 className="h-3 w-3 mr-1" />
+                                  {companyStatus.errorReason === 'not_found'
+                                    ? 'Empresa não encontrada'
+                                    : companyStatus.errorReason === 'rate_limited'
+                                      ? 'Limite atingido ao enriquecer empresa'
+                                      : companyStatus.errorReason === 'timeout'
+                                        ? 'Timeout ao enriquecer empresa'
+                                        : 'Falha ao enriquecer empresa'}
                                 </Badge>
                               )}
                             </div>

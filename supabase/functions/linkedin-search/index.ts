@@ -686,11 +686,16 @@ serve(async (req) => {
       limit: Math.min(limit, 25),
     };
 
-    if (filters.keywords) searchPayload.keywords = filters.keywords;
+    // Cargo (title) precisa funcionar mesmo sem ID: sempre incluir o texto em keywords
+    const baseKeywords = (filters.keywords || '').toString().trim();
+    const titleText = (filters.title || '').toString().trim();
+    const combinedKeywords = [baseKeywords, titleText].filter(Boolean).join(' ').trim();
+    if (combinedKeywords) searchPayload.keywords = combinedKeywords;
 
     const advancedKeywords: Record<string, unknown> = {};
     if (filters.first_name) advancedKeywords.first_name = filters.first_name;
     if (filters.last_name) advancedKeywords.last_name = filters.last_name;
+    // Keep advanced keywords for backward compatibility, but DO NOT rely on it for title filtering
     if (filters.title) advancedKeywords.title = filters.title;
     if (filters.company) advancedKeywords.company = filters.company;
     if (Object.keys(advancedKeywords).length) searchPayload.advanced_keywords = advancedKeywords;

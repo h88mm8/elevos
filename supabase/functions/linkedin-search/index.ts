@@ -1,10 +1,16 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { mapWithConcurrency } from "../_shared/semaphore.ts";
+import { createLogger } from "../_shared/log.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
+
+// Configuration from env
+const ENRICH_TIMEOUT_MS = parseInt(Deno.env.get('UNIPILE_ENRICH_TIMEOUT_MS') || '', 10) || 15000;
+const ENRICH_CONCURRENCY = parseInt(Deno.env.get('UNIPILE_ENRICH_CONCURRENCY') || '', 10) || 5;
 
 interface SearchFilters {
   keywords?: string;
@@ -215,21 +221,29 @@ async function getPlatformLinkedInSearchAccount(serviceClient: any): Promise<{
 
 // ===== ENRICHMENT HELPER FUNCTIONS =====
 
+// Enrichment result tracking
+interface EnrichmentSummary {
+  attempted: number;
+  success: number;
+  failed: number;
+  reasons: Record<string, number>;
+}
+
 // Fetch profile details from Unipile with timeout
 async function enrichProfile(
   unipileDsn: string,
   unipileApiKey: string,
   accountId: string,
   publicIdentifier: string,
-  timeoutMs: number = 8000
-): Promise<Record<string, unknown> | null> {
+  timeoutMs: number = ENRICH_TIMEOUT_MS
+): Promise<{ data: Record<string, unknown> | null; error?: string }> {
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
   
   try {
-    const url = `https://${unipileDsn}/api/v1/users/${encodeURIComponent(publicIdentifier)}?account_id=${encodeURIComponent(accountId)}`;
-    
-    console.log(`[linkedin-search] Enriching profile: ${publicIdentifier}`);
+    // Normalize public_identifier (handle both camelCase and snake_case)
+    const normalizedId = publicIdentifier.trim();
+    const url = `https://${unipileDsn}/api/v1/users/${encodeURIComponent(normalizedId)}?account_id=${encodeURIComponent(accountId)}`;
     
     const response = await fetch(url, {
       method: "GET",
@@ -244,21 +258,20 @@ async function enrichProfile(
     
     if (!response.ok) {
       const errorText = await response.text();
-      console.log(`[linkedin-search] Enrich failed for ${publicIdentifier}: ${response.status} - ${errorText.substring(0, 100)}`);
-      return null;
+      const reason = response.status === 404 ? 'not_found' : 
+                     response.status === 429 ? 'rate_limited' :
+                     response.status >= 500 ? 'server_error' : 'api_error';
+      return { data: null, error: reason };
     }
     
     const data = await response.json();
-    console.log(`[linkedin-search] Enrich success for ${publicIdentifier}`);
-    return data;
+    return { data };
   } catch (err) {
     clearTimeout(timeoutId);
     if (err instanceof Error && err.name === 'AbortError') {
-      console.log(`[linkedin-search] Enrich timeout for ${publicIdentifier}`);
-    } else {
-      console.log(`[linkedin-search] Enrich error for ${publicIdentifier}:`, err);
+      return { data: null, error: 'timeout' };
     }
-    return null;
+    return { data: null, error: 'network_error' };
   }
 }
 
@@ -752,30 +765,63 @@ serve(async (req) => {
     const searchItems = searchData.items || [];
     console.log("[linkedin-search] Unipile response items:", searchItems.length);
 
-    // ===== ENRICH EACH RESULT IN PARALLEL =====
-    console.log(`[linkedin-search] Starting parallel enrichment for ${searchItems.length} profiles`);
-    
-    const enrichmentPromises = searchItems.map(async (item: Record<string, unknown>) => {
-      const publicId = item.public_identifier as string | undefined;
-      
-      if (!publicId) {
-        // No public_identifier, return basic data only
-        return mergeEnrichedData(item, null);
-      }
-      
-      const enrichedProfile = await enrichProfile(unipileDsn, unipileApiKey, unipileAccountId, publicId);
-      return mergeEnrichedData(item, enrichedProfile);
+    // ===== ENRICH EACH RESULT WITH CONCURRENCY LIMIT =====
+    const logger = createLogger('linkedin-search');
+    logger.info(`Starting enrichment for ${searchItems.length} profiles`, { 
+      concurrency: ENRICH_CONCURRENCY, 
+      timeoutMs: ENRICH_TIMEOUT_MS 
     });
     
-    const enrichedResults = await Promise.allSettled(enrichmentPromises);
+    // Track enrichment summary
+    const enrichSummary: EnrichmentSummary = {
+      attempted: 0,
+      success: 0,
+      failed: 0,
+      reasons: {},
+    };
     
-    // Filter successful results
-    const results: EnrichedResult[] = enrichedResults
-      .filter((r): r is PromiseFulfilledResult<EnrichedResult> => r.status === 'fulfilled')
-      .map(r => r.value);
+    // Use semaphore for controlled concurrency
+    const enrichmentResults = await mapWithConcurrency(
+      searchItems,
+      ENRICH_CONCURRENCY,
+      async (item: Record<string, unknown>) => {
+        // Handle both public_identifier and publicIdentifier
+        const publicId = (item.public_identifier || item.publicIdentifier) as string | undefined;
+        
+        if (!publicId) {
+          return { item, enrichedData: null, error: 'no_identifier' };
+        }
+        
+        enrichSummary.attempted++;
+        const result = await enrichProfile(unipileDsn, unipileApiKey, unipileAccountId, publicId, ENRICH_TIMEOUT_MS);
+        
+        if (result.error) {
+          enrichSummary.failed++;
+          enrichSummary.reasons[result.error] = (enrichSummary.reasons[result.error] || 0) + 1;
+          return { item, enrichedData: null, error: result.error };
+        }
+        
+        enrichSummary.success++;
+        return { item, enrichedData: result.data, error: null };
+      }
+    );
     
-    const enrichedCount = results.filter(r => r.email || r.keywords || r.about).length;
-    console.log(`[linkedin-search] Enrichment complete: ${enrichedCount}/${results.length} with extra data`);
+    // Process results and merge enriched data
+    const results: EnrichedResult[] = enrichmentResults
+      .filter(r => r.status === 'fulfilled')
+      .map(r => {
+        const fulfilled = r as { status: 'fulfilled'; value: { item: Record<string, unknown>; enrichedData: Record<string, unknown> | null } };
+        const { item, enrichedData } = fulfilled.value;
+        return mergeEnrichedData(item, enrichedData);
+      });
+    
+    // Log enrichment summary
+    const enrichedWithData = results.filter(r => r.email || r.keywords || r.about).length;
+    logger.info(`Enrichment complete`, { 
+      summary: enrichSummary,
+      resultsWithData: enrichedWithData,
+      totalResults: results.length,
+    });
     // ===== END ENRICHMENT =====
 
     return new Response(
@@ -791,6 +837,9 @@ serve(async (req) => {
         plan: {
           code: workspacePlan.plan_code,
           name: workspacePlan.plan_name,
+        },
+        enrich: {
+          summary: enrichSummary,
         },
       }),
       { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }

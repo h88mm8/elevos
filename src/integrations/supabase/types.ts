@@ -148,6 +148,7 @@ export type Database = {
       }
       campaign_leads: {
         Row: {
+          accepted_at: string | null
           campaign_id: string
           created_at: string
           delivered_at: string | null
@@ -163,6 +164,7 @@ export type Database = {
           status: string
         }
         Insert: {
+          accepted_at?: string | null
           campaign_id: string
           created_at?: string
           delivered_at?: string | null
@@ -178,6 +180,7 @@ export type Database = {
           status?: string
         }
         Update: {
+          accepted_at?: string | null
           campaign_id?: string
           created_at?: string
           delivered_at?: string | null
@@ -1067,6 +1070,79 @@ export type Database = {
         Relationships: [
           {
             foreignKeyName: "tags_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      unipile_events: {
+        Row: {
+          account_id: string | null
+          campaign_lead_id: string | null
+          created_at: string
+          event_id: string
+          event_type: string
+          id: string
+          lead_id: string | null
+          matched: boolean
+          object_id: string | null
+          object_type: string | null
+          payload: Json
+          processed_at: string | null
+          provider: string
+          workspace_id: string | null
+        }
+        Insert: {
+          account_id?: string | null
+          campaign_lead_id?: string | null
+          created_at?: string
+          event_id: string
+          event_type: string
+          id?: string
+          lead_id?: string | null
+          matched?: boolean
+          object_id?: string | null
+          object_type?: string | null
+          payload?: Json
+          processed_at?: string | null
+          provider?: string
+          workspace_id?: string | null
+        }
+        Update: {
+          account_id?: string | null
+          campaign_lead_id?: string | null
+          created_at?: string
+          event_id?: string
+          event_type?: string
+          id?: string
+          lead_id?: string | null
+          matched?: boolean
+          object_id?: string | null
+          object_type?: string | null
+          payload?: Json
+          processed_at?: string | null
+          provider?: string
+          workspace_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "unipile_events_campaign_lead_id_fkey"
+            columns: ["campaign_lead_id"]
+            isOneToOne: false
+            referencedRelation: "campaign_leads"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "unipile_events_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
+            referencedRelation: "leads"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "unipile_events_workspace_id_fkey"
             columns: ["workspace_id"]
             isOneToOne: false
             referencedRelation: "workspaces"

@@ -1,5 +1,5 @@
 // =============================================
-// UNIPILE MESSENGER - TYPE DEFINITIONS
+// ELEV OS - TYPE DEFINITIONS
 // =============================================
 
 export interface Profile {

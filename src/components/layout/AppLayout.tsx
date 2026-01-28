@@ -3,6 +3,7 @@ import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { usePlatformAdmin } from '@/hooks/usePlatformAdmin';
 import { Button } from '@/components/ui/button';
+import { ElevOSLogo } from '@/components/ElevOSLogo';
 import { 
   DropdownMenu, 
   DropdownMenuContent, 
@@ -20,7 +21,6 @@ import {
   ChevronDown,
   Building2,
   Menu,
-  Zap,
   Tag,
   Shield
 } from 'lucide-react';
@@ -87,9 +87,8 @@ export default function AppLayout({ children }: { children: ReactNode }) {
     <div className="h-screen overflow-hidden bg-background">
       {/* Desktop Sidebar */}
       <aside className="hidden lg:fixed lg:inset-y-0 lg:flex lg:w-64 lg:flex-col border-r bg-card">
-        <div className="flex h-16 items-center gap-2 px-6 border-b">
-          <Zap className="h-6 w-6 text-primary" />
-          <span className="font-bold text-lg">Elevos</span>
+        <div className="flex h-16 items-center px-6 border-b">
+          <ElevOSLogo />
         </div>
         
         <div className="flex-1 p-4">
@@ -136,9 +135,8 @@ export default function AppLayout({ children }: { children: ReactNode }) {
               </Button>
             </SheetTrigger>
             <SheetContent side="left" className="w-64 p-0">
-              <div className="flex h-16 items-center gap-2 px-6 border-b">
-                <Zap className="h-6 w-6 text-primary" />
-                <span className="font-bold text-lg">Elevos</span>
+              <div className="flex h-16 items-center px-6 border-b">
+                <ElevOSLogo />
               </div>
               <div className="p-4">
                 <NavItems onItemClick={() => setMobileOpen(false)} isPlatformAdmin={isPlatformAdmin} />

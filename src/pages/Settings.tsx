@@ -1791,7 +1791,7 @@ export default function Settings() {
                   <CardHeader>
                     <CardTitle>Tipos de Conta Suportados</CardTitle>
                     <CardDescription>
-                      A Elevos suporta diferentes tipos de conta LinkedIn
+                      A ELEV OS suporta diferentes tipos de conta LinkedIn
                     </CardDescription>
                   </CardHeader>
                   <CardContent>

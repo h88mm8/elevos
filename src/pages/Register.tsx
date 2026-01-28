@@ -6,7 +6,8 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { useToast } from '@/hooks/use-toast';
-import { Loader2, MessageSquare } from 'lucide-react';
+import { ElevOSLogo } from '@/components/ElevOSLogo';
+import { Loader2 } from 'lucide-react';
 
 export default function Register() {
   const [email, setEmail] = useState('');
@@ -32,7 +33,7 @@ export default function Register() {
     } else {
       toast({
         title: 'Conta criada!',
-        description: 'Bem-vindo ao Unipile Messenger.',
+        description: 'Bem-vindo ao ELEV OS.',
       });
       navigate('/dashboard');
     }
@@ -44,9 +45,8 @@ export default function Register() {
     <div className="min-h-screen flex items-center justify-center bg-background p-4">
       <Card className="w-full max-w-md">
         <CardHeader className="text-center">
-          <div className="flex items-center justify-center gap-2 mb-4">
-            <MessageSquare className="h-8 w-8 text-primary" />
-            <span className="text-2xl font-bold">Unipile Messenger</span>
+          <div className="flex items-center justify-center mb-4">
+            <ElevOSLogo size="lg" />
           </div>
           <CardTitle className="text-2xl">Criar conta</CardTitle>
           <CardDescription>

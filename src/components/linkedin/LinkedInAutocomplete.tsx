@@ -17,8 +17,6 @@ interface LinkedInAutocompleteProps {
   disabled?: boolean;
   multiple?: boolean;
   className?: string;
-  /** When true, doesn't show suggestions - user types freely and presses Enter to add */
-  disableSuggestions?: boolean;
 }
 
 export function LinkedInAutocomplete({
@@ -30,7 +28,6 @@ export function LinkedInAutocomplete({
   disabled = false,
   multiple = true,
   className,
-  disableSuggestions = false,
 }: LinkedInAutocompleteProps) {
   const [inputValue, setInputValue] = useState('');
   const [isOpen, setIsOpen] = useState(false);
@@ -42,10 +39,8 @@ export function LinkedInAutocomplete({
     type,
   });
 
-  // Debounced search - only when suggestions are enabled
+  // Debounced search
   useEffect(() => {
-    if (disableSuggestions) return;
-    
     if (debounceTimer) {
       clearTimeout(debounceTimer);
     }
@@ -64,7 +59,7 @@ export function LinkedInAutocomplete({
         clearTimeout(debounceTimer);
       }
     };
-  }, [inputValue, disableSuggestions]);
+  }, [inputValue]);
 
   // Close on click outside
   useEffect(() => {
@@ -102,28 +97,7 @@ export function LinkedInAutocomplete({
     return value.some(v => v.id === id);
   }, [value]);
 
-  // Handle Enter key for manual input mode
-  const handleKeyDown = useCallback((e: React.KeyboardEvent<HTMLInputElement>) => {
-    if (e.key === 'Enter' && disableSuggestions && inputValue.trim()) {
-      e.preventDefault();
-      const newOption: AutocompleteOption = {
-        id: inputValue.trim(),
-        name: inputValue.trim(),
-      };
-      
-      if (multiple) {
-        const isAlreadySelected = value.some(v => v.name.toLowerCase() === inputValue.trim().toLowerCase());
-        if (!isAlreadySelected) {
-          onChange([...value, newOption]);
-        }
-      } else {
-        onChange([newOption]);
-      }
-      setInputValue('');
-    }
-  }, [disableSuggestions, inputValue, value, onChange, multiple]);
-
-  const showDropdown = !disableSuggestions && isOpen && options.length > 0;
+  const showDropdown = isOpen && options.length > 0;
 
   return (
     <div ref={containerRef} className={cn('relative', className)}>
@@ -156,31 +130,26 @@ export function LinkedInAutocomplete({
           value={inputValue}
           onChange={e => {
             setInputValue(e.target.value);
-            if (!disableSuggestions) {
-              setIsOpen(true);
-            }
+            setIsOpen(true);
           }}
-          onFocus={() => {
-            if (!disableSuggestions) {
-              setIsOpen(true);
-            }
-          }}
-          onKeyDown={handleKeyDown}
-          placeholder={disableSuggestions ? `${placeholder} (Enter para adicionar)` : placeholder}
+          onFocus={() => setIsOpen(true)}
+          placeholder={placeholder}
           disabled={disabled}
           className="pr-8"
         />
-        {isLoading && !disableSuggestions && (
+        {isLoading && (
           <Loader2 className="absolute right-2 top-1/2 -translate-y-1/2 h-4 w-4 animate-spin text-muted-foreground" />
         )}
       </div>
 
-      {/* Dropdown */}
+      {/* Dropdown - sorted alphabetically */}
       {showDropdown && (
         <div className="absolute z-50 w-full mt-1 bg-popover border rounded-md shadow-lg">
           <ScrollArea className="h-[200px]">
             <div className="p-1">
-              {options.map(option => {
+              {[...options]
+                .sort((a, b) => a.name.localeCompare(b.name, 'pt-BR'))
+                .map(option => {
                 const selected = isSelected(option.id);
                 return (
                   <button
@@ -209,7 +178,7 @@ export function LinkedInAutocomplete({
         </div>
       )}
 
-      {!disableSuggestions && isOpen && inputValue.length >= 2 && !isLoading && options.length === 0 && (
+      {isOpen && inputValue.length >= 2 && !isLoading && options.length === 0 && (
         <div className="absolute z-50 w-full mt-1 bg-popover border rounded-md shadow-lg p-3 text-sm text-muted-foreground text-center">
           Nenhum resultado encontrado
         </div>

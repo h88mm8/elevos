@@ -21,18 +21,22 @@ const corsHeaders = {
 
 // Map Unipile event types to internal status
 const MESSAGE_STATUS_MAP: Record<string, { field: string; status: string }> = {
-  // Message events
+  // Message events (Unipile formats)
   'message.sent': { field: 'sent_at', status: 'sent' },
   'message.delivered': { field: 'delivered_at', status: 'sent' },
   'message.seen': { field: 'seen_at', status: 'sent' },
+  'message.read': { field: 'seen_at', status: 'sent' },
   'message.replied': { field: 'replied_at', status: 'sent' },
   'message.failed': { field: 'error', status: 'failed' },
+  'message.reaction': { field: 'seen_at', status: 'sent' }, // Reaction implies seen
   
-  // Chat events (alternative format)
+  // Chat events (alternative format from Unipile dashboard)
+  'chat.new_message': { field: 'sent_at', status: 'sent' },
   'chat.message_sent': { field: 'sent_at', status: 'sent' },
   'chat.message_delivered': { field: 'delivered_at', status: 'sent' },
   'chat.message_read': { field: 'seen_at', status: 'sent' },
   'chat.message_replied': { field: 'replied_at', status: 'sent' },
+  'chat.message_reaction': { field: 'seen_at', status: 'sent' },
   
   // Invite events
   'invitation.sent': { field: 'sent_at', status: 'sent' },
@@ -40,7 +44,9 @@ const MESSAGE_STATUS_MAP: Record<string, { field: string; status: string }> = {
   'invitation.withdrawn': { field: 'error', status: 'failed' },
   'invitation.failed': { field: 'error', status: 'failed' },
   
-  // Connection events (alternative format)
+  // Connection/relation events (on new relation = accepted invitation)
+  'relation.new': { field: 'accepted_at', status: 'sent' },
+  'connection.new': { field: 'accepted_at', status: 'sent' },
   'connection.accepted': { field: 'accepted_at', status: 'sent' },
   'connection.rejected': { field: 'error', status: 'failed' },
 };

@@ -115,11 +115,12 @@ export function useLinkedInSearch({ workspaceId }: UseLinkedInSearchOptions) {
         filtersPayload.keywords = filters.keywords.trim();
       }
       
-      // Title: prefer titleIds, fallback to text
+      // Title: always send text (for keywords fallback on backend), and send IDs when available
+      if (filters.title.trim()) {
+        filtersPayload.title = filters.title.trim();
+      }
       if (filters.titleIds.length > 0) {
         filtersPayload.title_ids = filters.titleIds.map(t => t.id);
-      } else if (filters.title.trim()) {
-        filtersPayload.title = filters.title.trim();
       }
       
       // Company: prefer companyIds, fallback to text

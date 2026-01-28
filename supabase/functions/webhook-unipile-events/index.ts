@@ -51,6 +51,14 @@ const MESSAGE_STATUS_MAP: Record<string, { field: string; status: string }> = {
   'connection.rejected': { field: 'error', status: 'failed' },
 };
 
+// Events that use fallback matching by provider_id (invite events without message_id)
+const INVITE_EVENT_TYPES = [
+  'relation.new',
+  'connection.new',
+  'connection.accepted',
+  'invitation.accepted',
+];
+
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
@@ -139,7 +147,12 @@ serve(async (req) => {
       eventData.provider_id ||
       eventData.user_id ||
       eventData.attendee_id ||
-      eventData.recipient_id;
+      eventData.recipient_id ||
+      eventData.profile_id ||
+      eventData.member_id ||
+      eventData.sender_id ||
+      payload.provider_id ||
+      payload.user_id;
     
     const objectType = 
       eventData.object_type ||
@@ -282,6 +295,127 @@ serve(async (req) => {
         }
       } else {
         console.log(`[${correlationId}] No campaign_lead matched for message_id: ${messageId}`);
+      }
+    }
+
+    // ============================================
+    // FALLBACK: MATCH BY PROVIDER_ID FOR INVITES
+    // ============================================
+    const isInviteEvent = INVITE_EVENT_TYPES.includes(eventType);
+
+    if (!matchedLeadId && isInviteEvent && providerId) {
+      console.log(`[${correlationId}] Fallback invite match: provider_id=${providerId}`);
+      
+      // 1) Lead lookup (safe on duplicates)
+      let leadQuery = serviceClient
+        .from('leads')
+        .select('id, workspace_id')
+        .eq('linkedin_provider_id', providerId);
+      
+      if (workspaceId) leadQuery = leadQuery.eq('workspace_id', workspaceId);
+      
+      const { data: leadResults, error: leadError } = await leadQuery.limit(5);
+      
+      if (leadError) console.error(`[${correlationId}] lead lookup error`, leadError);
+      
+      if (leadResults && leadResults.length > 0) {
+        if (leadResults.length > 1) {
+          console.warn(`[${correlationId}] WARNING: ${leadResults.length} leads found for provider_id=${providerId}. Using first.`);
+        }
+        
+        const leadData = leadResults[0];
+        
+        // 2) pendingCount ONLY for invite campaigns
+        const { count: pendingCount, error: pendingErr } = await serviceClient
+          .from('campaign_leads')
+          .select('id, campaigns!inner(linkedin_action)', { count: 'exact', head: true })
+          .eq('lead_id', leadData.id)
+          .eq('status', 'sent')
+          .is('accepted_at', null)
+          .eq('campaigns.linkedin_action', 'invite');
+        
+        if (pendingErr) console.error(`[${correlationId}] pendingCount error`, pendingErr);
+        
+        if (pendingCount && pendingCount > 1) {
+          console.warn(`[${correlationId}] WARNING: ${pendingCount} pending INVITE campaign_leads for lead=${leadData.id}. Using most recent.`);
+        }
+        
+        // 3) Find most recent invite campaign_lead
+        const { data: inviteLead, error: inviteError } = await serviceClient
+          .from('campaign_leads')
+          .select(`
+            id,
+            campaign_id,
+            lead_id,
+            status,
+            provider_message_id,
+            campaigns!inner(linkedin_action)
+          `)
+          .eq('lead_id', leadData.id)
+          .eq('status', 'sent')
+          .is('accepted_at', null)
+          .eq('campaigns.linkedin_action', 'invite')
+          .order('created_at', { ascending: false })
+          .limit(1)
+          .maybeSingle();
+        
+        if (inviteError) {
+          console.error(`[${correlationId}] inviteLead lookup error`, inviteError);
+        } else if (inviteLead) {
+          matchedLeadId = inviteLead.id;
+          const timestamp = new Date().toISOString();
+          
+          // 4) Idempotent accepted_at update
+          const { data: updatedRows, error: updateError } = await serviceClient
+            .from('campaign_leads')
+            .update({ accepted_at: timestamp })
+            .eq('id', matchedLeadId)
+            .is('accepted_at', null)
+            .select('id');
+          
+          if (updateError) {
+            console.error(`[${correlationId}] accepted_at update error`, updateError);
+          }
+          
+          const updated = (updatedRows?.length ?? 0);
+          if (updated === 0) {
+            console.log(`[${correlationId}] Idempotent skip: campaign_lead=${matchedLeadId} already had accepted_at`);
+          } else {
+            console.log(`[${correlationId}] accepted_at set for campaign_lead=${matchedLeadId}`);
+          }
+          
+          // 5) ALWAYS mark event as matched
+          await serviceClient
+            .from('unipile_events')
+            .update({
+              campaign_lead_id: matchedLeadId,
+              lead_id: leadData.id,
+              workspace_id: leadData.workspace_id,
+              matched: true,
+              processed_at: timestamp,
+            })
+            .eq('event_id', eventId);
+          
+          // 6) ALWAYS insert campaign_event
+          await serviceClient
+            .from('campaign_events')
+            .insert({
+              campaign_id: inviteLead.campaign_id,
+              campaign_lead_id: matchedLeadId,
+              event_type: eventType,
+              provider_message_id: inviteLead.provider_message_id || null,
+              metadata: {
+                correlation_id: correlationId,
+                unipile_event_id: eventId,
+                match_method: 'fallback_provider_id',
+                provider_id: providerId,
+              },
+            });
+        } else {
+          console.log(`[${correlationId}] No pending INVITE campaign_lead found for lead=${leadData.id}`);
+        }
+      } else {
+        console.log(`[${correlationId}] No lead found for provider_id=${providerId}${workspaceId ? ` workspace=${workspaceId}` : ''}`);
       }
     }
 

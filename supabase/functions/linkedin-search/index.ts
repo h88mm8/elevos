@@ -35,6 +35,7 @@ interface SearchRequest {
   filters: SearchFilters;
   cursor?: string;
   limit?: number;
+  enrich?: boolean; // Optional: if true, do blocking enrichment (for debug). Default: false
 }
 
 interface WorkspacePlan {
@@ -558,7 +559,7 @@ serve(async (req) => {
     }
 
     const body: SearchRequest = await req.json();
-    const { workspaceId, searchType, api, filters, cursor, limit = 25 } = body;
+    const { workspaceId, searchType, api, filters, cursor, limit = 25, enrich = false } = body;
 
     if (!workspaceId) {
       return new Response(
@@ -765,63 +766,71 @@ serve(async (req) => {
     const searchItems = searchData.items || [];
     console.log("[linkedin-search] Unipile response items:", searchItems.length);
 
-    // ===== ENRICH EACH RESULT WITH CONCURRENCY LIMIT =====
-    const logger = createLogger('linkedin-search');
-    logger.info(`Starting enrichment for ${searchItems.length} profiles`, { 
-      concurrency: ENRICH_CONCURRENCY, 
-      timeoutMs: ENRICH_TIMEOUT_MS 
-    });
+    // ===== ENRICHMENT (CONDITIONAL) =====
+    // Default: NO enrichment (fast response). Set enrich=true for debug/legacy behavior.
     
-    // Track enrichment summary
-    const enrichSummary: EnrichmentSummary = {
-      attempted: 0,
-      success: 0,
-      failed: 0,
-      reasons: {},
-    };
+    let results: EnrichedResult[];
+    let enrichSummary: EnrichmentSummary | null = null;
     
-    // Use semaphore for controlled concurrency
-    const enrichmentResults = await mapWithConcurrency(
-      searchItems,
-      ENRICH_CONCURRENCY,
-      async (item: Record<string, unknown>) => {
-        // Handle both public_identifier and publicIdentifier
-        const publicId = (item.public_identifier || item.publicIdentifier) as string | undefined;
-        
-        if (!publicId) {
-          return { item, enrichedData: null, error: 'no_identifier' };
-        }
-        
-        enrichSummary.attempted++;
-        const result = await enrichProfile(unipileDsn, unipileApiKey, unipileAccountId, publicId, ENRICH_TIMEOUT_MS);
-        
-        if (result.error) {
-          enrichSummary.failed++;
-          enrichSummary.reasons[result.error] = (enrichSummary.reasons[result.error] || 0) + 1;
-          return { item, enrichedData: null, error: result.error };
-        }
-        
-        enrichSummary.success++;
-        return { item, enrichedData: result.data, error: null };
-      }
-    );
-    
-    // Process results and merge enriched data
-    const results: EnrichedResult[] = enrichmentResults
-      .filter(r => r.status === 'fulfilled')
-      .map(r => {
-        const fulfilled = r as { status: 'fulfilled'; value: { item: Record<string, unknown>; enrichedData: Record<string, unknown> | null } };
-        const { item, enrichedData } = fulfilled.value;
-        return mergeEnrichedData(item, enrichedData);
+    if (enrich) {
+      // BLOCKING ENRICHMENT (legacy/debug mode)
+      const logger = createLogger('linkedin-search');
+      logger.info(`Starting BLOCKING enrichment for ${searchItems.length} profiles`, { 
+        concurrency: ENRICH_CONCURRENCY, 
+        timeoutMs: ENRICH_TIMEOUT_MS 
       });
-    
-    // Log enrichment summary
-    const enrichedWithData = results.filter(r => r.email || r.keywords || r.about).length;
-    logger.info(`Enrichment complete`, { 
-      summary: enrichSummary,
-      resultsWithData: enrichedWithData,
-      totalResults: results.length,
-    });
+      
+      enrichSummary = {
+        attempted: 0,
+        success: 0,
+        failed: 0,
+        reasons: {},
+      };
+      
+      const enrichmentResults = await mapWithConcurrency(
+        searchItems,
+        ENRICH_CONCURRENCY,
+        async (item: Record<string, unknown>) => {
+          const publicId = (item.public_identifier || item.publicIdentifier) as string | undefined;
+          
+          if (!publicId) {
+            return { item, enrichedData: null, error: 'no_identifier' };
+          }
+          
+          enrichSummary!.attempted++;
+          const result = await enrichProfile(unipileDsn, unipileApiKey, unipileAccountId, publicId, ENRICH_TIMEOUT_MS);
+          
+          if (result.error) {
+            enrichSummary!.failed++;
+            enrichSummary!.reasons[result.error] = (enrichSummary!.reasons[result.error] || 0) + 1;
+            return { item, enrichedData: null, error: result.error };
+          }
+          
+          enrichSummary!.success++;
+          return { item, enrichedData: result.data, error: null };
+        }
+      );
+      
+      results = enrichmentResults
+        .filter(r => r.status === 'fulfilled')
+        .map(r => {
+          const fulfilled = r as { status: 'fulfilled'; value: { item: Record<string, unknown>; enrichedData: Record<string, unknown> | null } };
+          const { item, enrichedData } = fulfilled.value;
+          return mergeEnrichedData(item, enrichedData);
+        });
+      
+      const enrichedWithData = results.filter(r => r.email || r.keywords || r.about).length;
+      logger.info(`Enrichment complete`, { 
+        summary: enrichSummary,
+        resultsWithData: enrichedWithData,
+        totalResults: results.length,
+      });
+    } else {
+      // FAST MODE (default): Return raw search results without enrichment
+      // UI will enrich progressively via linkedin-enrich-preview
+      results = searchItems.map((item: Record<string, unknown>) => mergeEnrichedData(item, null));
+      console.log(`[linkedin-search] Fast mode: returning ${results.length} raw results (no enrichment)`);
+    }
     // ===== END ENRICHMENT =====
 
     return new Response(
@@ -838,9 +847,7 @@ serve(async (req) => {
           code: workspacePlan.plan_code,
           name: workspacePlan.plan_name,
         },
-        enrich: {
-          summary: enrichSummary,
-        },
+        enrich: enrichSummary ? { summary: enrichSummary } : { mode: 'fast' },
       }),
       { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );

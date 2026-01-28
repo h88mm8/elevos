@@ -83,3 +83,6 @@ verify_jwt = false
 
 [functions.webhook-unipile-events]
 verify_jwt = false
+
+[functions.linkedin-enrich-preview]
+verify_jwt = false

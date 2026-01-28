@@ -12,10 +12,13 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { toast } from "sonner";
-import { Shield, AlertTriangle, Linkedin, Building2, Check, UserPlus, Star, Activity } from "lucide-react";
+import { Shield, AlertTriangle, Linkedin, Check, UserPlus, Star, Activity, Plus, RefreshCw, WifiOff } from "lucide-react";
+import { supabase } from "@/integrations/supabase/client";
+import { useAuth } from "@/contexts/AuthContext";
 
 export default function PlatformAdmin() {
   const navigate = useNavigate();
+  const { currentWorkspace } = useAuth();
   const {
     isPlatformAdmin,
     isCheckingAdmin,
@@ -32,6 +35,7 @@ export default function PlatformAdmin() {
 
   const [selectedAccountId, setSelectedAccountId] = useState<string | null>(null);
   const [showBootstrap, setShowBootstrap] = useState(false);
+  const [isConnecting, setIsConnecting] = useState(false);
 
   useEffect(() => {
     if (!isCheckingAdmin && isPlatformAdmin === false) {
@@ -67,6 +71,36 @@ export default function PlatformAdmin() {
       } else {
         toast.error(error.message || "Erro ao executar bootstrap");
       }
+    }
+  };
+
+  const handleConnectGlobalAccount = async () => {
+    if (!currentWorkspace?.id) {
+      toast.error("Workspace não encontrado");
+      return;
+    }
+
+    setIsConnecting(true);
+    try {
+      const { data, error } = await supabase.functions.invoke("create-connect-link", {
+        body: {
+          workspaceId: currentWorkspace.id,
+          channel: "linkedin",
+        },
+      });
+
+      if (error) throw error;
+      if (data?.error) throw new Error(data.error);
+
+      if (data?.url) {
+        window.open(data.url, "_blank");
+        toast.info("Complete a conexão na janela aberta. Após conectar, selecione a conta aqui.");
+      }
+    } catch (error: any) {
+      console.error("Error creating connect link:", error);
+      toast.error(error.message || "Erro ao criar link de conexão");
+    } finally {
+      setIsConnecting(false);
     }
   };
 
@@ -124,10 +158,17 @@ export default function PlatformAdmin() {
 
   if (!isPlatformAdmin) return null;
 
+  // Get current global account status
   const currentAccount = linkedInAccounts?.find(
     (acc) => acc.id === platformSettings?.linkedin_search_account_id
   );
+  
+  // Check if the account is connected or disconnected by querying via the hook
+  const isAccountConnected = currentAccount !== undefined;
   const hasChanges = selectedAccountId !== (platformSettings?.linkedin_search_account_id ?? null);
+
+  // Filter only connected LinkedIn accounts for selection
+  const connectedAccounts = linkedInAccounts?.filter(acc => acc.id) || [];
 
   return (
     <AppLayout>
@@ -156,44 +197,103 @@ export default function PlatformAdmin() {
           <TabsContent value="settings">
             <Card>
               <CardHeader>
-                <div className="flex items-center gap-2">
-                  <Linkedin className="h-5 w-5 text-[#0A66C2]" />
-                  <CardTitle>Conta Global LinkedIn</CardTitle>
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <Linkedin className="h-5 w-5 text-[#0A66C2]" />
+                    <CardTitle>Conta Global LinkedIn</CardTitle>
+                  </div>
+                  <Button 
+                    variant="outline" 
+                    size="sm" 
+                    onClick={handleConnectGlobalAccount}
+                    disabled={isConnecting}
+                  >
+                    {isConnecting ? (
+                      <RefreshCw className="h-4 w-4 mr-2 animate-spin" />
+                    ) : (
+                      <Plus className="h-4 w-4 mr-2" />
+                    )}
+                    Conectar Nova Conta
+                  </Button>
                 </div>
                 <CardDescription>
                   Conta usada para buscas e enriquecimento em toda a plataforma.
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-6">
-                {currentAccount && (
-                  <div className="p-4 bg-muted/50 rounded-lg">
-                    <div className="text-sm text-muted-foreground mb-1">Conta atual:</div>
-                    <div className="flex items-center gap-2">
-                      <span className="font-medium">{currentAccount.name || currentAccount.account_id}</span>
-                      {currentAccount.linkedin_feature && (
-                        <Badge variant="secondary">{currentAccount.linkedin_feature}</Badge>
+                {/* Current account status */}
+                {platformSettings?.linkedin_search_account_id && (
+                  <div className={`p-4 rounded-lg border ${isAccountConnected ? 'bg-green-50 border-green-200 dark:bg-green-950/30 dark:border-green-900' : 'bg-red-50 border-red-200 dark:bg-red-950/30 dark:border-red-900'}`}>
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <div className="text-sm text-muted-foreground mb-1">Conta global atual:</div>
+                        <div className="flex items-center gap-2">
+                          <span className="font-medium">
+                            {currentAccount?.name || "Conta não encontrada"}
+                          </span>
+                          {currentAccount?.linkedin_feature && (
+                            <Badge variant="secondary">{currentAccount.linkedin_feature}</Badge>
+                          )}
+                        </div>
+                      </div>
+                      {isAccountConnected ? (
+                        <Badge variant="default" className="bg-green-600">
+                          <Check className="h-3 w-3 mr-1" /> Conectada
+                        </Badge>
+                      ) : (
+                        <Badge variant="destructive" className="flex items-center gap-1">
+                          <WifiOff className="h-3 w-3" /> Desconectada
+                        </Badge>
                       )}
                     </div>
+                    {!isAccountConnected && (
+                      <Alert variant="destructive" className="mt-4">
+                        <AlertTriangle className="h-4 w-4" />
+                        <AlertTitle>Conta desconectada</AlertTitle>
+                        <AlertDescription>
+                          A conta global está desconectada. Conecte uma nova conta ou reconecte a existente em Configurações → Contas.
+                        </AlertDescription>
+                      </Alert>
+                    )}
                   </div>
                 )}
 
+                {!platformSettings?.linkedin_search_account_id && (
+                  <Alert>
+                    <AlertTriangle className="h-4 w-4" />
+                    <AlertTitle>Nenhuma conta configurada</AlertTitle>
+                    <AlertDescription>
+                      Configure uma conta global para habilitar buscas e enriquecimento na plataforma.
+                    </AlertDescription>
+                  </Alert>
+                )}
+
                 <div className="space-y-2">
-                  <label className="text-sm font-medium">Selecionar Conta</label>
+                  <label className="text-sm font-medium">Selecionar Conta Global</label>
                   {isLoadingAccounts ? (
                     <Skeleton className="h-10 w-full" />
+                  ) : connectedAccounts.length === 0 ? (
+                    <div className="text-sm text-muted-foreground p-4 border rounded-lg text-center">
+                      Nenhuma conta LinkedIn conectada encontrada.<br />
+                      Clique em "Conectar Nova Conta" para adicionar.
+                    </div>
                   ) : (
                     <Select
                       value={selectedAccountId || "none"}
                       onValueChange={(value) => setSelectedAccountId(value === "none" ? null : value)}
                     >
                       <SelectTrigger>
-                        <SelectValue placeholder="Selecione..." />
+                        <SelectValue placeholder="Selecione uma conta..." />
                       </SelectTrigger>
                       <SelectContent>
                         <SelectItem value="none">Nenhuma</SelectItem>
-                        {linkedInAccounts?.map((account) => (
+                        {connectedAccounts.map((account) => (
                           <SelectItem key={account.id} value={account.id}>
-                            {account.name || account.account_id} ({account.workspace_name})
+                            <div className="flex items-center gap-2">
+                              <Linkedin className="h-4 w-4 text-[#0A66C2]" />
+                              {account.name || account.account_id}
+                              <span className="text-muted-foreground">({account.workspace_name})</span>
+                            </div>
                           </SelectItem>
                         ))}
                       </SelectContent>
@@ -203,7 +303,7 @@ export default function PlatformAdmin() {
 
                 <div className="flex justify-end">
                   <Button onClick={handleSave} disabled={isUpdating || !hasChanges}>
-                    {isUpdating ? "Salvando..." : hasChanges ? "Salvar" : <><Check className="h-4 w-4 mr-1" />Salvo</>}
+                    {isUpdating ? "Salvando..." : hasChanges ? "Salvar Alterações" : <><Check className="h-4 w-4 mr-1" />Salvo</>}
                   </Button>
                 </div>
               </CardContent>

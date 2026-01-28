@@ -137,10 +137,13 @@ serve(async (req) => {
     searchUrl.searchParams.set("account_id", unipileAccountId);
     searchUrl.searchParams.set("type", unipileType);
     
-    // Always pass query to Unipile (searchParams.set handles encoding)
+    // Pass keywords (not query) to Unipile per their API docs
     if (query && query.trim().length > 0) {
-      searchUrl.searchParams.set("query", query.trim());
+      searchUrl.searchParams.set("keywords", query.trim());
     }
+    
+    // Limit results server-side
+    searchUrl.searchParams.set("limit", "20");
 
     console.log("[linkedin-search-parameters] Unipile URL:", searchUrl.toString());
 

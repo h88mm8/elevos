@@ -2,14 +2,17 @@ import { useAuth } from '@/contexts/AuthContext';
 import { useCredits } from '@/hooks/useCredits';
 import { useLeads } from '@/hooks/useLeads';
 import { useCampaigns } from '@/hooks/useCampaigns';
+import { useCampaignPerformance } from '@/hooks/useCampaignPerformance';
 import AppLayout from '@/components/layout/AppLayout';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { Users, Phone, Send, MessageSquare, TrendingUp } from 'lucide-react';
+import { Users, Phone, Send, TrendingUp, BarChart3 } from 'lucide-react';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
+import { ChannelPerformanceCard } from '@/components/dashboard/ChannelPerformanceCard';
+import { CampaignDistributionChart, ChannelComparisonChart, ConversionRatesChart } from '@/components/dashboard/CampaignCharts';
 
 function StatCard({ 
   title, 
@@ -66,6 +69,7 @@ export default function Dashboard() {
   const { credits, isLoading: creditsLoading } = useCredits();
   const { leads, isLoading: leadsLoading } = useLeads();
   const { campaigns, isLoading: campaignsLoading } = useCampaigns();
+  const performance = useCampaignPerformance();
 
   const activeCampaigns = campaigns.filter(c => c.status === 'sending' || c.status === 'running' || c.status === 'scheduled' || c.status === 'queued');
   const recentCampaigns = campaigns.slice(0, 5);
@@ -110,6 +114,40 @@ export default function Dashboard() {
           />
         </div>
 
+        {/* Campaign Performance Section */}
+        <div className="space-y-4">
+          <div className="flex items-center gap-2">
+            <BarChart3 className="h-5 w-5 text-primary" />
+            <h2 className="text-xl font-semibold">Performance de Campanhas</h2>
+          </div>
+
+          {/* Channel Performance Cards */}
+          <div className="grid gap-4 md:grid-cols-3">
+            <ChannelPerformanceCard 
+              channel="email" 
+              metrics={performance.email} 
+              loading={performance.isLoading} 
+            />
+            <ChannelPerformanceCard 
+              channel="linkedin" 
+              metrics={performance.linkedin} 
+              loading={performance.isLoading} 
+            />
+            <ChannelPerformanceCard 
+              channel="whatsapp" 
+              metrics={performance.whatsapp} 
+              loading={performance.isLoading} 
+            />
+          </div>
+
+          {/* Charts Grid */}
+          <div className="grid gap-4 md:grid-cols-3">
+            <CampaignDistributionChart performance={performance} />
+            <ChannelComparisonChart performance={performance} />
+            <ConversionRatesChart performance={performance} />
+          </div>
+        </div>
+
         {/* Recent Campaigns */}
         <Card>
           <CardHeader>
@@ -137,12 +175,13 @@ export default function Dashboard() {
                     <TableHead>Nome</TableHead>
                     <TableHead>Tipo</TableHead>
                     <TableHead>Status</TableHead>
-                    <TableHead className="text-right">Leads</TableHead>
+                    <TableHead className="text-right">Enviados</TableHead>
+                    <TableHead className="text-right">Respondidos</TableHead>
                     <TableHead className="text-right">Data</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {recentCampaigns.map((campaign) => (
+                {recentCampaigns.map((campaign) => (
                     <TableRow key={campaign.id}>
                       <TableCell className="font-medium">{campaign.name}</TableCell>
                       <TableCell>{typeLabels[campaign.type]}</TableCell>
@@ -151,7 +190,8 @@ export default function Dashboard() {
                           {statusLabels[campaign.status]?.label || campaign.status}
                         </Badge>
                       </TableCell>
-                      <TableCell className="text-right">{campaign.leads_count}</TableCell>
+                      <TableCell className="text-right">{campaign.sent_count || 0}</TableCell>
+                      <TableCell className="text-right">{(campaign as any).replied_count || 0}</TableCell>
                       <TableCell className="text-right">
                         {format(new Date(campaign.created_at), 'dd/MM/yyyy', { locale: ptBR })}
                       </TableCell>

@@ -59,6 +59,7 @@ export function LeadDetailsDrawer({
   const { getLeadTags } = useTags();
   
   const [isEnriching, setIsEnriching] = useState(false);
+  const [isDeepEnriching, setIsDeepEnriching] = useState(false);
 
   if (!lead) return null;
 
@@ -118,6 +119,62 @@ export function LeadDetailsDrawer({
       }
     } finally {
       setIsEnriching(false);
+    }
+  };
+
+  const handleDeepEnrich = async () => {
+    if (!workspaceId || !lead.id || !lead.linkedin_url) return;
+
+    setIsDeepEnriching(true);
+    try {
+      const { data: userData } = await supabase.auth.getUser();
+      if (!userData.user) throw new Error('Usuário não autenticado');
+
+      const { data, error } = await supabase.functions.invoke('linkedin-enrich-profile-apify', {
+        body: {
+          workspaceId,
+          userId: userData.user.id,
+          leadIds: [lead.id],
+        },
+      });
+
+      if (error) throw error;
+      
+      // Check for quota exceeded
+      if (data.error?.includes('limite') || data.error?.includes('limit')) {
+        toast({
+          title: 'Limite atingido',
+          description: 'Você atingiu o limite diário de enriquecimento profundo.',
+          variant: 'destructive',
+        });
+        return;
+      }
+      
+      if (data.error) throw new Error(data.error);
+
+      toast({
+        title: 'Enriquecimento iniciado',
+        description: 'O perfil será enriquecido em segundo plano. Aguarde alguns minutos.',
+      });
+
+      onLeadUpdated?.();
+    } catch (error: any) {
+      const errorMsg = error.message || '';
+      if (errorMsg.includes('global') || errorMsg.includes('configurada') || errorMsg.includes('not configured')) {
+        toast({
+          title: 'Enriquecimento indisponível',
+          description: 'Peça ao administrador para configurar a conta global do LinkedIn.',
+          variant: 'destructive',
+        });
+      } else {
+        toast({
+          title: 'Erro ao iniciar enriquecimento',
+          description: errorMsg || 'Não foi possível iniciar o enriquecimento profundo',
+          variant: 'destructive',
+        });
+      }
+    } finally {
+      setIsDeepEnriching(false);
     }
   };
 
@@ -214,15 +271,18 @@ export function LeadDetailsDrawer({
         {/* LinkedIn Enrich Section */}
         {canEnrich && (
           <div className="mt-4 p-3 rounded-lg border bg-muted/30 space-y-3">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2 text-sm font-medium">
-                <Sparkles className="h-4 w-4 text-primary" />
-                Enriquecer via LinkedIn
-              </div>
+            <div className="flex items-center gap-2 text-sm font-medium">
+              <Sparkles className="h-4 w-4 text-primary" />
+              Enriquecer via LinkedIn
+            </div>
+            
+            <div className="flex flex-wrap gap-2">
+              {/* Basic Enrich (Unipile) */}
               <Button
                 size="sm"
+                variant="outline"
                 onClick={handleEnrich}
-                disabled={isEnriching}
+                disabled={isEnriching || isDeepEnriching}
               >
                 {isEnriching ? (
                   <>
@@ -232,11 +292,35 @@ export function LeadDetailsDrawer({
                 ) : (
                   <>
                     <Linkedin className="h-4 w-4 mr-1.5" />
-                    Enriquecer
+                    Básico
+                  </>
+                )}
+              </Button>
+              
+              {/* Deep Enrich (Apify) */}
+              <Button
+                size="sm"
+                onClick={handleDeepEnrich}
+                disabled={isEnriching || isDeepEnriching}
+              >
+                {isDeepEnriching ? (
+                  <>
+                    <Loader2 className="h-4 w-4 mr-1.5 animate-spin" />
+                    Iniciando...
+                  </>
+                ) : (
+                  <>
+                    <Sparkles className="h-4 w-4 mr-1.5" />
+                    Deep Enrich
                   </>
                 )}
               </Button>
             </div>
+            
+            <p className="text-xs text-muted-foreground">
+              <strong>Básico:</strong> Nome, cargo, empresa • <strong>Deep:</strong> Skills, experiência, email
+            </p>
+            
             {lead.last_enriched_at && (
               <p className="text-xs text-muted-foreground">
                 Último enriquecimento: {new Date(lead.last_enriched_at).toLocaleDateString('pt-BR')}

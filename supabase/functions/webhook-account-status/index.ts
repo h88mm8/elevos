@@ -230,14 +230,39 @@ serve(async (req) => {
       };
       console.log('Connection failed:', errorMessage);
     }
-    // Account Disconnected / Credentials Invalid
+    // Account Needs Action (credentials or permissions issue)
     else if (
       normalizedMessage === 'CREDENTIALS' ||
+      normalizedMessage === 'PERMISSIONS' ||
+      normalizedEvent === 'credentials' ||
+      normalizedEvent === 'permissions' ||
+      normalizedAccountStatus === 'CREDENTIALS' ||
+      normalizedAccountStatus === 'PERMISSIONS'
+    ) {
+      // Update the accounts table to mark as needs_action
+      if (accountId) {
+        const { error: accountUpdateError } = await serviceClient
+          .from('accounts')
+          .update({ status: 'needs_action', updated_at: new Date().toISOString() })
+          .eq('account_id', accountId);
+
+        if (accountUpdateError) {
+          console.error('Error updating account status:', accountUpdateError);
+        } else {
+          console.log(`Account ${accountId} marked as needs_action (${normalizedMessage || normalizedEvent})`);
+        }
+      }
+
+      newStatus = 'needs_action';
+      updateData = { status: newStatus, error: errorMessage || 'Ação necessária: verifique credenciais ou permissões' };
+    }
+    // Account Disconnected
+    else if (
       normalizedMessage === 'DISCONNECTED' ||
       normalizedEvent === 'disconnected' ||
-      normalizedEvent === 'credentials' ||
+      normalizedEvent === 'stopped' ||
       normalizedAccountStatus === 'DISCONNECTED' ||
-      normalizedAccountStatus === 'CREDENTIALS'
+      normalizedAccountStatus === 'STOPPED'
     ) {
       // Update the accounts table to mark as disconnected
       if (accountId) {
@@ -253,7 +278,6 @@ serve(async (req) => {
         }
       }
 
-      // Also update QR session if exists
       newStatus = 'disconnected';
       updateData = { status: newStatus, error: errorMessage || 'Conta desconectada' };
     }

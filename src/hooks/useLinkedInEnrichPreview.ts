@@ -18,6 +18,7 @@ interface EnrichedData {
   job_title?: string;
   company?: string;
   company_linkedin?: string;
+  company_identifier?: string; // For on-demand company enrichment
   industry?: string;
   seniority_level?: string;
   city?: string;
@@ -103,6 +104,7 @@ export function useLinkedInEnrichPreview({
               job_title: data.job_title,
               company: data.company,
               company_linkedin: data.company_linkedin,
+              company_identifier: data.company_identifier,
               industry: data.industry,
               seniority_level: data.seniority_level,
               city: data.city,
@@ -175,7 +177,7 @@ export function useLinkedInEnrichPreview({
   }, [processQueue]);
 
   // Get merged lead with enriched data
-  const getMergedLead = useCallback((lead: LinkedInSearchResult): LinkedInSearchResult => {
+  const getMergedLead = useCallback((lead: LinkedInSearchResult): LinkedInSearchResult & { company_identifier?: string } => {
     const enriched = enrichedMap.get(lead.public_identifier);
     if (!enriched) return lead;
 
@@ -186,6 +188,7 @@ export function useLinkedInEnrichPreview({
       job_title: enriched.job_title || lead.job_title,
       company: enriched.company || lead.company,
       company_linkedin: enriched.company_linkedin || lead.company_linkedin,
+      company_identifier: enriched.company_identifier,
       industry: enriched.industry || lead.industry,
       seniority_level: enriched.seniority_level || lead.seniority_level,
       city: enriched.city || lead.city,

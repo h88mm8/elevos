@@ -89,7 +89,8 @@ export function usePlatformAdmin() {
       
       return data.accounts as LinkedInAccountWithWorkspace[];
     },
-    enabled: isPlatformAdmin === true,
+    enabled: !!user?.id && isPlatformAdmin === true,
+    retry: 1, // Limit retries to avoid spam on auth issues
   });
 
   // Bootstrap mutation - become first admin

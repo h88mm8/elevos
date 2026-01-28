@@ -100,10 +100,8 @@ export function LinkedInAutocomplete({
   // Only show dropdown with results when we have query >= 2
   const showDropdown = isOpen && inputValue.length >= 2 && options.length > 0;
   
-  // Limit displayed options to 20
-  const displayedOptions = [...options]
-    .sort((a, b) => a.name.localeCompare(b.name, 'pt-BR'))
-    .slice(0, 20);
+  // Display options in API order, limited to 20
+  const displayedOptions = options.slice(0, 20);
 
   return (
     <div ref={containerRef} className={cn('relative', className)}>

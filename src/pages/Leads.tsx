@@ -38,7 +38,6 @@ import {
   Send,
   Download,
   RefreshCw,
-  Eye,
   MapPin,
   Building2,
   Trash2,
@@ -646,8 +645,12 @@ export default function Leads() {
                   </TableHeader>
                   <TableBody>
                     {filteredLeads.map((lead) => (
-                      <TableRow key={lead.id} className="group">
-                        <TableCell>
+                      <TableRow 
+                        key={lead.id} 
+                        className="group cursor-pointer hover:bg-muted/50"
+                        onClick={() => openLeadDetails(lead)}
+                      >
+                        <TableCell onClick={(e) => e.stopPropagation()}>
                           <Checkbox
                             checked={selectedLeads.has(lead.id)}
                             onCheckedChange={() => toggleSelectLead(lead.id)}
@@ -673,7 +676,7 @@ export default function Leads() {
                             )}
                           </div>
                         </TableCell>
-                        <TableCell>
+                        <TableCell onClick={(e) => e.stopPropagation()}>
                           <div className="flex items-center gap-1">
                             <LeadTagsBadges leadId={lead.id} />
                             <LeadTagsPopover leadId={lead.id}>
@@ -742,7 +745,7 @@ export default function Leads() {
                             <span className="text-muted-foreground">-</span>
                           )}
                         </TableCell>
-                        <TableCell>
+                        <TableCell onClick={(e) => e.stopPropagation()}>
                           {lead.linkedin_url ? (
                             <a
                               href={lead.linkedin_url}
@@ -757,34 +760,24 @@ export default function Leads() {
                             <span className="text-muted-foreground">-</span>
                           )}
                         </TableCell>
-                        <TableCell>
-                          <div className="flex items-center gap-1">
+                        <TableCell onClick={(e) => e.stopPropagation()}>
+                          {!lead.phone && !lead.mobile_number && lead.email && (
                             <Button
-                              variant="ghost"
+                              variant="outline"
                               size="sm"
-                              onClick={() => openLeadDetails(lead)}
-                              className="opacity-0 group-hover:opacity-100 transition-opacity"
+                              onClick={() => handleEnrichLead(lead)}
+                              disabled={enrichingLeads.has(lead.id)}
                             >
-                              <Eye className="h-4 w-4" />
+                              {enrichingLeads.has(lead.id) ? (
+                                <Loader2 className="h-4 w-4 animate-spin" />
+                              ) : (
+                                <>
+                                  <Phone className="mr-1 h-3 w-3" />
+                                  Enriquecer
+                                </>
+                              )}
                             </Button>
-                            {!lead.phone && !lead.mobile_number && lead.email && (
-                              <Button
-                                variant="outline"
-                                size="sm"
-                                onClick={() => handleEnrichLead(lead)}
-                                disabled={enrichingLeads.has(lead.id)}
-                              >
-                                {enrichingLeads.has(lead.id) ? (
-                                  <Loader2 className="h-4 w-4 animate-spin" />
-                                ) : (
-                                  <>
-                                    <Phone className="mr-1 h-3 w-3" />
-                                    Enriquecer
-                                  </>
-                                )}
-                              </Button>
-                            )}
-                          </div>
+                          )}
                         </TableCell>
                       </TableRow>
                     ))}

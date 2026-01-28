@@ -8,6 +8,7 @@ import {
   LinkedInSearchFilters,
   emptyFilters 
 } from '@/hooks/useLinkedInSearch';
+import { useLinkedInEnrichPreview } from '@/hooks/useLinkedInEnrichPreview';
 import { useSavedSearches, SavedSearch } from '@/hooks/useSavedSearches';
 import { AutocompleteOption } from '@/hooks/useLinkedInAutocomplete';
 import AppLayout from '@/components/layout/AppLayout';
@@ -60,6 +61,7 @@ import {
   Mail,
   Phone,
   Tag,
+  Sparkles,
 } from 'lucide-react';
 
 // Custom LinkedIn icon
@@ -135,6 +137,19 @@ export default function LinkedInSearch() {
     search, 
     clearResults 
   } = useLinkedInSearch({ workspaceId: currentWorkspace?.id });
+
+  // Progressive enrichment hook
+  const {
+    enrichLeads,
+    getMergedLead,
+    isEnriched,
+    getStatus,
+    reset: resetEnrichment,
+    progress: enrichProgress,
+  } = useLinkedInEnrichPreview({ 
+    workspaceId: currentWorkspace?.id,
+    concurrency: 3,
+  });
 
   // Saved searches hook
   const {
@@ -224,6 +239,16 @@ export default function LinkedInSearch() {
     setSearchParams(params, { replace: true });
   }, [filters, setSearchParams]);
 
+  // Trigger progressive enrichment when results change
+  useEffect(() => {
+    if (results.length > 0) {
+      // Reset enrichment state for new search
+      resetEnrichment();
+      // Enrich visible leads (first 10)
+      const visibleLeads = results.slice(0, 10);
+      enrichLeads(visibleLeads);
+    }
+  }, [results, enrichLeads, resetEnrichment]);
   // Handle search
   const handleSearch = useCallback(async () => {
     if (!canSearch) {
@@ -238,8 +263,9 @@ export default function LinkedInSearch() {
     setCursorHistory([]);
     setCurrentPage(1);
     setHasSearched(true);
+    resetEnrichment();
     await search(filters);
-  }, [filters, search, toast, canSearch]);
+  }, [filters, search, toast, canSearch, resetEnrichment]);
 
   // Handle clear filters
   const handleClear = useCallback(() => {
@@ -249,7 +275,8 @@ export default function LinkedInSearch() {
     setCurrentPage(1);
     setHasSearched(false);
     setSelectedLeadsMap(new Map());
-  }, [clearResults]);
+    resetEnrichment();
+  }, [clearResults, resetEnrichment]);
 
   // Handle next page
   const handleNextPage = useCallback(async () => {
@@ -474,6 +501,14 @@ export default function LinkedInSearch() {
           </div>
           
           <div className="flex items-center gap-3">
+            {/* Enrichment progress */}
+            {enrichProgress.total > 0 && enrichProgress.completed < enrichProgress.total && (
+              <Badge variant="outline" className="text-xs animate-pulse">
+                <Sparkles className="h-3 w-3 mr-1" />
+                {enrichProgress.completed}/{enrichProgress.total} enriquecidos
+              </Badge>
+            )}
+            
             {/* Usage indicator */}
             {usage && (
               <Badge variant="outline" className="text-xs">
@@ -893,10 +928,41 @@ export default function LinkedInSearch() {
               {/* Results list */}
               {!isSearching && results.length > 0 && (
                 <div className="space-y-2">
-                  {results.map(result => {
-                    const id = getResultId(result);
+                  {results.map(rawResult => {
+                    const id = getResultId(rawResult);
+                    const result = getMergedLead(rawResult); // Use enriched data
                     const isSelected = selectedLeadsMap.has(id);
+                    const status = getStatus(rawResult.public_identifier);
                     const hasEnrichedData = !!(result.email || result.keywords || result.about);
+                    
+                    // Determine badge
+                    let enrichBadge = null;
+                    if (status?.status === 'loading') {
+                      enrichBadge = (
+                        <Badge variant="outline" className="text-xs flex-shrink-0 animate-pulse">
+                          <Sparkles className="h-3 w-3 mr-1" />
+                          Enriquecendo...
+                        </Badge>
+                      );
+                    } else if (hasEnrichedData) {
+                      enrichBadge = (
+                        <Badge variant="outline" className="text-xs flex-shrink-0 text-primary border-primary">
+                          Completo
+                        </Badge>
+                      );
+                    } else if (status?.status === 'error') {
+                      enrichBadge = (
+                        <Badge variant="outline" className="text-xs flex-shrink-0 text-muted-foreground">
+                          Parcial
+                        </Badge>
+                      );
+                    } else if (!status || status.status === 'pending') {
+                      enrichBadge = (
+                        <Badge variant="outline" className="text-xs flex-shrink-0 text-muted-foreground">
+                          Parcial
+                        </Badge>
+                      );
+                    }
                     
                     return (
                       <Card
@@ -940,11 +1006,7 @@ export default function LinkedInSearch() {
                                   {result.connection_degree}º
                                 </Badge>
                               )}
-                              {hasEnrichedData && (
-                                <Badge variant="outline" className="text-xs flex-shrink-0 text-green-600 border-green-600">
-                                  Enriquecido
-                                </Badge>
-                              )}
+                              {enrichBadge}
                             </div>
                             {result.headline && (
                               <p className="text-sm text-muted-foreground truncate">

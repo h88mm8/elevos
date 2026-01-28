@@ -130,14 +130,19 @@ serve(async (req) => {
 
     const unipileType = unipileTypeMap[parameterType];
     
+    // Log the search parameters clearly
+    console.log(`[linkedin-search-parameters] type=${parameterType}, query="${query}", unipileType=${unipileType}`);
+    
     const searchUrl = new URL(`https://${unipileDsn}/api/v1/linkedin/search/parameters`);
     searchUrl.searchParams.set("account_id", unipileAccountId);
     searchUrl.searchParams.set("type", unipileType);
-    if (query) {
-      searchUrl.searchParams.set("query", query);
+    
+    // Always pass query to Unipile (searchParams.set handles encoding)
+    if (query && query.trim().length > 0) {
+      searchUrl.searchParams.set("query", query.trim());
     }
 
-    console.log("[linkedin-search-parameters] Calling Unipile:", searchUrl.toString());
+    console.log("[linkedin-search-parameters] Unipile URL:", searchUrl.toString());
 
     const response = await fetch(searchUrl.toString(), {
       method: "GET",
@@ -148,7 +153,7 @@ serve(async (req) => {
 
     if (!response.ok) {
       const errorText = await response.text();
-      console.error("[linkedin-search-parameters] Unipile error:", errorText);
+      console.error(`[linkedin-search-parameters] Unipile error: status=${response.status}, body=${errorText}`);
       return new Response(
         JSON.stringify({ error: "Failed to get search parameters", details: errorText }),
         { status: response.status, headers: { ...corsHeaders, "Content-Type": "application/json" } }
@@ -156,13 +161,16 @@ serve(async (req) => {
     }
 
     const data = await response.json();
-    console.log("[linkedin-search-parameters] Results count:", data.items?.length ?? 0);
-
-    // Transform to simpler format
-    const items = (data.items || []).map((item: Record<string, unknown>) => ({
-      id: item.id,
-      name: item.name || item.title || item.label,
-    }));
+    
+    // Transform to simpler format and limit to 20 results
+    const items = (data.items || [])
+      .slice(0, 20)
+      .map((item: Record<string, unknown>) => ({
+        id: item.id,
+        name: item.name || item.title || item.label,
+      }));
+    
+    console.log(`[linkedin-search-parameters] type=${parameterType}, query="${query}", returned=${items.length} items`);
 
     return new Response(
       JSON.stringify({

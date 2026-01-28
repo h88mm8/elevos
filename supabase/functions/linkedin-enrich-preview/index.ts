@@ -53,6 +53,18 @@ function extractCompanyLinkedIn(data: Record<string, unknown> | null): string | 
   return null;
 }
 
+function extractCompanyIdentifier(data: Record<string, unknown> | null): string | null {
+  if (!data) return null;
+  const experiences = data.experiences as Array<Record<string, unknown>> | undefined;
+  if (experiences?.length) {
+    const company = experiences[0].company as Record<string, unknown>;
+    if (company && company.public_identifier) {
+      return company.public_identifier as string;
+    }
+  }
+  return null;
+}
+
 function extractCity(data: Record<string, unknown> | null): string | null {
   if (!data) return null;
   const location = data.location as Record<string, unknown> | string;
@@ -124,6 +136,7 @@ interface EnrichedPreview {
   job_title: string | null;
   company: string | null;
   company_linkedin: string | null;
+  company_identifier: string | null; // For on-demand company enrichment
   industry: string | null;
   seniority_level: string | null;
   city: string | null;
@@ -147,6 +160,7 @@ function normalizeEnrichedData(data: Record<string, unknown>): EnrichedPreview {
     job_title: extractJobTitle(data),
     company: extractCompany(data),
     company_linkedin: extractCompanyLinkedIn(data),
+    company_identifier: extractCompanyIdentifier(data),
     industry: (data.industry as string) || null,
     seniority_level: (data.seniority as string) || null,
     city: extractCity(data),

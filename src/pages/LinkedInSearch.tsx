@@ -9,6 +9,7 @@ import {
   emptyFilters 
 } from '@/hooks/useLinkedInSearch';
 import { useLinkedInEnrichPreview } from '@/hooks/useLinkedInEnrichPreview';
+import { useLinkedInCompanyEnrich } from '@/hooks/useLinkedInCompanyEnrich';
 import { useSavedSearches, SavedSearch } from '@/hooks/useSavedSearches';
 import { AutocompleteOption } from '@/hooks/useLinkedInAutocomplete';
 import AppLayout from '@/components/layout/AppLayout';
@@ -151,6 +152,17 @@ export default function LinkedInSearch() {
     concurrency: 3,
   });
 
+  // Company enrichment hook (on-demand)
+  const {
+    enrichCompany,
+    getCompanyData,
+    getCompanyStatus,
+    reset: resetCompanyEnrich,
+  } = useLinkedInCompanyEnrich({
+    workspaceId: currentWorkspace?.id,
+    maxConcurrency: 2,
+  });
+
   // Saved searches hook
   const {
     searches: savedSearches,
@@ -276,7 +288,8 @@ export default function LinkedInSearch() {
     setHasSearched(false);
     setSelectedLeadsMap(new Map());
     resetEnrichment();
-  }, [clearResults, resetEnrichment]);
+    resetCompanyEnrich();
+  }, [clearResults, resetEnrichment, resetCompanyEnrich]);
 
   // Handle next page
   const handleNextPage = useCallback(async () => {
@@ -300,8 +313,8 @@ export default function LinkedInSearch() {
     await search(filters, prevCursor);
   }, [cursorHistory, filters, search]);
 
-  // Toggle single selection - stores complete lead data
-  const toggleSelect = useCallback((result: LinkedInSearchResult) => {
+  // Toggle single selection - stores complete lead data + triggers company enrich
+  const toggleSelect = useCallback((result: LinkedInSearchResult & { company_identifier?: string }) => {
     const id = getResultId(result);
     setSelectedLeadsMap(prev => {
       const next = new Map(prev);
@@ -309,10 +322,14 @@ export default function LinkedInSearch() {
         next.delete(id);
       } else {
         next.set(id, result);
+        // Trigger company enrichment on selection (if we have company_identifier)
+        if (result.company_identifier) {
+          enrichCompany(result.company_identifier);
+        }
       }
       return next;
     });
-  }, [getResultId]);
+  }, [getResultId, enrichCompany]);
 
   // Toggle all on current page
   const toggleAllPage = useCallback(() => {
@@ -949,6 +966,14 @@ export default function LinkedInSearch() {
                     const isSelected = selectedLeadsMap.has(id);
                     const status = getStatus(rawResult.public_identifier);
                     
+                    // Get company data if enriched (on-demand for selected leads)
+                    const companyData = result.company_identifier 
+                      ? getCompanyData(result.company_identifier) 
+                      : undefined;
+                    const companyStatus = result.company_identifier
+                      ? getCompanyStatus(result.company_identifier)
+                      : undefined;
+                    
                     // Determine if we have structured data (from enrich, not headline parse)
                     const hasJobTitle = !!result.job_title;
                     const hasCompany = !!result.company;
@@ -1061,7 +1086,7 @@ export default function LinkedInSearch() {
                               </p>
                             )}
                             
-                            {/* Secondary row: Location + Industry + Seniority */}
+                            {/* Secondary row: Location + Industry + Seniority + Company Size */}
                             <div className="flex items-center gap-3 mt-1 flex-wrap">
                               {(result.city || result.location) && (
                                 <div className="flex items-center gap-1 text-xs text-muted-foreground">
@@ -1071,16 +1096,30 @@ export default function LinkedInSearch() {
                                   </span>
                                 </div>
                               )}
-                              {result.industry && (
+                              {(companyData?.industry || result.industry) && (
                                 <Badge variant="outline" className="text-xs">
                                   <Factory className="h-3 w-3 mr-1" />
-                                  {result.industry}
+                                  {companyData?.industry || result.industry}
                                 </Badge>
                               )}
                               {result.seniority_level && (
                                 <Badge variant="outline" className="text-xs">
                                   <Briefcase className="h-3 w-3 mr-1" />
                                   {result.seniority_level}
+                                </Badge>
+                              )}
+                              {/* Company size from on-demand enrichment */}
+                              {companyData?.company_size && (
+                                <Badge variant="outline" className="text-xs">
+                                  <Building2 className="h-3 w-3 mr-1" />
+                                  {companyData.company_size}
+                                </Badge>
+                              )}
+                              {/* Show loading indicator when company is being enriched */}
+                              {isSelected && companyStatus?.status === 'loading' && (
+                                <Badge variant="outline" className="text-xs animate-pulse">
+                                  <Building2 className="h-3 w-3 mr-1" />
+                                  Carregando empresa...
                                 </Badge>
                               )}
                             </div>
